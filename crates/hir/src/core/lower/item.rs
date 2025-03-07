@@ -37,6 +37,9 @@ impl<'db> ItemKind<'db> {
             ast::ItemKind::Enum(enum_) => {
                 Enum::lower_ast(ctxt, enum_);
             }
+            ast::ItemKind::Msg(_) => {
+                todo!() // xxx
+            }
             ast::ItemKind::TypeAlias(alias) => {
                 TypeAlias::lower_ast(ctxt, alias);
             }
@@ -221,9 +224,7 @@ impl<'db> Contract<'db> {
         let recvs = {
             let mut data = Vec::new();
             for r in ast.recvs() {
-                let msg_path = r
-                    .path()
-                    .map(|p| PathId::lower_ast(ctxt, p));
+                let msg_path = r.path().map(|p| PathId::lower_ast(ctxt, p));
                 data.push(ContractRecv { msg_path });
             }
             ContractRecvListId::new(ctxt.db(), data)
@@ -263,13 +264,21 @@ fn lower_uses_clause_opt<'db>(
                 let name = p.name().map(|n| IdentId::lower_token(ctxt, n.syntax()));
                 let is_mut = p.mut_token().is_some();
                 let key_path = p.path().map(|path| PathId::lower_ast(ctxt, path)).into();
-                data.push(EffectParam { name, key_path, is_mut });
+                data.push(EffectParam {
+                    name,
+                    key_path,
+                    is_mut,
+                });
             }
         } else if let Some(p) = uses.param() {
             let name = p.name().map(|n| IdentId::lower_token(ctxt, n.syntax()));
             let is_mut = p.mut_token().is_some();
             let key_path = p.path().map(|path| PathId::lower_ast(ctxt, path)).into();
-            data.push(EffectParam { name, key_path, is_mut });
+            data.push(EffectParam {
+                name,
+                key_path,
+                is_mut,
+            });
         }
     }
 

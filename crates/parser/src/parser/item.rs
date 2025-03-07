@@ -16,17 +16,14 @@ use super::{
     parse_list,
     pat::parse_pat,
     path::PathScope,
-    struct_::RecordFieldDefListScope,
+    struct_::{RecordFieldDefListScope, RecordFieldDefScope},
     token_stream::{LexicalToken, TokenStream},
     type_::{TupleTypeScope, parse_type},
     use_tree::UseTreeScope,
 };
 use crate::{
     ExpectedKind, SyntaxKind,
-    parser::{
-        func::{FuncScope, UsesClauseScope},
-        struct_::RecordFieldDefScope,
-    },
+    parser::func::{FuncScope, UsesClauseScope},
 };
 
 define_scope! {
@@ -136,7 +133,7 @@ impl super::Parse for ItemScope {
 
         parser.expect(
             &[
-                ModKw, FnKw, StructKw, ContractKw, EnumKw, TraitKw, ImplKw, UseKw, ConstKw,
+                ModKw, FnKw, StructKw, ContractKw, MsgKw, EnumKw, TraitKw, ImplKw, UseKw, ConstKw,
                 ExternKw, TypeKw,
             ],
             Some(ExpectedKind::Syntax(SyntaxKind::Item)),
@@ -147,6 +144,7 @@ impl super::Parse for ItemScope {
             Some(FnKw) => parser.parse_cp(FuncScope::default(), checkpoint),
             Some(StructKw) => parser.parse_cp(super::struct_::StructScope::default(), checkpoint),
             Some(ContractKw) => parser.parse_cp(ContractScope::default(), checkpoint),
+            Some(MsgKw) => parser.parse_cp(MsgScope::default(), checkpoint),
             Some(EnumKw) => parser.parse_cp(EnumScope::default(), checkpoint),
             Some(TraitKw) => parser.parse_cp(TraitScope::default(), checkpoint),
             Some(ImplKw) => parser.parse_cp(ImplScope::default(), checkpoint),
@@ -435,6 +433,81 @@ impl super::Parse for RecvArmScope {
         }
 
         Ok(())
+    }
+}
+define_scope! { MsgScope, Msg }
+impl super::Parse for MsgScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parser.bump_expected(SyntaxKind::MsgKw);
+
+        parser.set_scope_recovery_stack(&[SyntaxKind::Ident, SyntaxKind::LBrace]);
+
+        if parser.find_and_pop(SyntaxKind::Ident, ExpectedKind::Name(SyntaxKind::Msg))? {
+            parser.bump();
+        }
+        if parser.find_and_pop(SyntaxKind::LBrace, ExpectedKind::Body(SyntaxKind::Msg))? {
+            parser.parse(MsgVariantListScope::default())?;
+        }
+        Ok(())
+    }
+}
+
+define_scope! { MsgVariantListScope, MsgVariantList, (Comma, RBrace) }
+impl super::Parse for MsgVariantListScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parse_list(
+            parser,
+            true,
+            SyntaxKind::MsgVariantList,
+            (SyntaxKind::LBrace, SyntaxKind::RBrace),
+            |parser| parser.parse(MsgVariantScope::default()),
+        )
+    }
+}
+
+define_scope! { MsgVariantScope, MsgVariant }
+impl super::Parse for MsgVariantScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parser.set_newline_as_trivia(false);
+
+        // Parse attribute list
+        parse_attr_list(parser)?;
+
+        // Parse variant name
+        parser.bump_or_recover(SyntaxKind::Ident, "expected identifier for message variant")?;
+
+        // Parse optional parameters
+        if parser.current_kind() == Some(SyntaxKind::LBrace) {
+            parser.parse(MsgVariantParamsScope::default())?;
+        }
+
+        // Parse optional return type
+        if parser.bump_if(SyntaxKind::Arrow) {
+            parse_type(parser, None)?;
+        }
+
+        Ok(())
+    }
+}
+
+define_scope! { MsgVariantParamsScope, MsgVariantParams, (Comma, RBrace) }
+impl super::Parse for MsgVariantParamsScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parse_list(
+            parser,
+            true,
+            SyntaxKind::MsgVariantParams,
+            (SyntaxKind::LBrace, SyntaxKind::RBrace),
+            |parser| parser.parse(RecordFieldDefScope::default()),
+        )
     }
 }
 
