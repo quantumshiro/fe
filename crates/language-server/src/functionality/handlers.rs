@@ -11,7 +11,6 @@ use async_lsp::{
 use common::InputDb;
 use driver::init_ingot;
 use rustc_hash::FxHashSet;
-use salsa::Setter;
 use url::Url;
 
 use super::{capabilities::server_capabilities, hover::hover_helper};
@@ -255,7 +254,7 @@ pub async fn handle_file_change(
                 backend
                     .db
                     .workspace()
-                    .touch(&mut backend.db, url.clone(), Some(contents));
+                    .update(&mut backend.db, url.clone(), contents);
             }
         }
         ChangeKind::Create => {
@@ -271,7 +270,7 @@ pub async fn handle_file_change(
                 backend
                     .db
                     .workspace()
-                    .touch(&mut backend.db, url.clone(), Some(contents));
+                    .update(&mut backend.db, url.clone(), contents);
 
                 // If a fe.toml was created, discover and load all files in the new ingot
                 if is_fe_toml {
@@ -295,11 +294,10 @@ pub async fn handle_file_change(
                 }
             };
             if let Ok(url) = url::Url::from_file_path(&path) {
-                let file = backend
+                backend
                     .db
                     .workspace()
-                    .touch(&mut backend.db, url.clone(), None);
-                file.set_text(&mut backend.db).to(contents);
+                    .update(&mut backend.db, url.clone(), contents);
 
                 // If fe.toml was modified, re-scan the ingot for any new files
                 if is_fe_toml {

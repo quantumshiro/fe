@@ -98,6 +98,12 @@ impl Workspace {
             .expect("Failed to create file")
     }
 
+    pub fn update(&self, db: &mut dyn InputDb, url: Url, content: String) -> File {
+        let file = self.touch(db, url, None);
+        file.set_text(db).to(content);
+        file
+    }
+
     pub fn all_files(&self, db: &dyn InputDb) -> StringTrie<Url, File> {
         self.files(db)
     }
