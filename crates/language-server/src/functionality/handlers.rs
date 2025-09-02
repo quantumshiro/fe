@@ -254,7 +254,7 @@ pub async fn handle_file_change(
                 backend
                     .db
                     .workspace()
-                    .touch(&mut backend.db, url.clone(), Some(contents));
+                    .update(&mut backend.db, url.clone(), contents);
             }
         }
         ChangeKind::Create => {
@@ -270,7 +270,7 @@ pub async fn handle_file_change(
                 backend
                     .db
                     .workspace()
-                    .touch(&mut backend.db, url.clone(), Some(contents));
+                    .update(&mut backend.db, url.clone(), contents);
 
                 // If a fe.toml was created, discover and load all files in the new ingot
                 if is_fe_toml {
@@ -297,7 +297,7 @@ pub async fn handle_file_change(
                 backend
                     .db
                     .workspace()
-                    .touch(&mut backend.db, url.clone(), Some(contents));
+                    .update(&mut backend.db, url.clone(), contents);
 
                 // If fe.toml was modified, re-scan the ingot for any new files
                 if is_fe_toml {
