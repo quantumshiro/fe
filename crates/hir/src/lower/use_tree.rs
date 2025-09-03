@@ -148,9 +148,17 @@ fn decompose_subtree<'db>(
 )> {
     let (mut succ_path, mut succ_desugared) = succ;
     if let Some(path) = subtree.path() {
-        for seg in path {
+        let segs: Vec<ast::UsePathSegment> = path.into_iter().collect();
+
+        let is_self_only = segs.len() == 1 && segs[0]
+            .kind()
+            .is_some_and(|k| matches!(k, ast::UsePathSegmentKind::Self_(_)));
+
+        for seg in segs {
             succ_desugared.push_seg(&seg);
-            succ_path.push(seg.clone());
+            if !is_self_only {
+                succ_path.push(seg.clone());
+            }
         }
     }
 
