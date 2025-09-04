@@ -42,7 +42,7 @@ pub fn init_ingot(db: &mut DriverDataBase, ingot_url: &Url) -> Vec<IngotInitDiag
         // Root ingot resolution should never fail since directory existence is validated earlier.
         // If it fails, it indicates a bug in the resolver or an unexpected system condition.
         if let Err(err) = ingot_graph_resolver.graph_resolve(&mut handler, ingot_url) {
-            panic!("Unexpected failure resolving root ingot at {}: {:?}. This indicates a bug in the resolver since directory existence is validated before calling init_ingot.", ingot_url, err);
+            panic!("Unexpected failure resolving root ingot at {ingot_url}: {err:?}. This indicates a bug in the resolver since directory existence is validated before calling init_ingot.");
         }
 
         // Collect diagnostics from all sources
@@ -92,7 +92,7 @@ pub fn init_ingot(db: &mut DriverDataBase, ingot_url: &Url) -> Vec<IngotInitDiag
             .node_indices()
             .any(|idx| cyclic_subgraph[idx] == *ingot_url)
         {
-            panic!("Root ingot {} not found in cyclic subgraph. This indicates a bug in cycle detection logic.", ingot_url);
+            panic!("Root ingot {ingot_url} not found in cyclic subgraph. This indicates a bug in cycle detection logic.");
         }
         let tree_root = ingot_url.clone();
 
@@ -157,8 +157,7 @@ impl std::fmt::Display for IngotInitDiagnostics {
             IngotInitDiagnostics::IngotDependencyCycle { tree_display } => {
                 write!(
                     f,
-                    "Detected cycle(s) in ingot dependencies:\n\n{}",
-                    tree_display
+                    "Detected cycle(s) in ingot dependencies:\n\n{tree_display}"
                 )
             }
             IngotInitDiagnostics::FileError { diagnostic } => {

@@ -321,8 +321,7 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                             let self_ty = trait_inst.self_ty(db).pretty_print(db);
                             let ty_str = ty.pretty_print(db);
                             format!(
-                                "candidate: <{} as {}>::{} = {}",
-                                self_ty, trait_name, name, ty_str
+                                "candidate: <{self_ty} as {trait_name}>::{name} = {ty_str}"
                             )
                         }
                     };

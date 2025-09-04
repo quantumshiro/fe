@@ -89,9 +89,9 @@ fn print_node_with_alias(
         // Show "ingot_name as alias" if alias differs from ingot name
         match alias {
             Some(alias_str) if alias_str != ingot_name => {
-                format!("➖ {} as {} v{}", ingot_name, alias_str, version)
+                format!("➖ {ingot_name} as {alias_str} v{version}")
             }
-            _ => format!("➖ {} v{}", ingot_name, version),
+            _ => format!("➖ {ingot_name} v{version}"),
         }
     } else {
         "➖ [invalid fe.toml]".to_string()
