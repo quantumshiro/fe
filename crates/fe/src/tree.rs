@@ -16,7 +16,7 @@ pub fn print_tree(path: &Utf8PathBuf) {
     let canonical_path = match path.canonicalize_utf8() {
         Ok(path) => path,
         Err(_) => {
-            eprintln!("Error: Invalid or non-existent directory path: {}", path);
+            eprintln!("Error: Invalid or non-existent directory path: {path}");
             return;
         }
     };
@@ -24,7 +24,7 @@ pub fn print_tree(path: &Utf8PathBuf) {
     let ingot_url = match Url::from_directory_path(canonical_path.as_str()) {
         Ok(url) => url,
         Err(_) => {
-            eprintln!("Error: Invalid directory path: {}", path);
+            eprintln!("Error: Invalid directory path: {path}");
             return;
         }
     };
@@ -41,11 +41,11 @@ pub fn print_tree(path: &Utf8PathBuf) {
 
             // Print files resolver diagnostics
             for diagnostic in resolver.node_resolver.take_diagnostics() {
-                eprintln!("❌ File resolution error: {}", diagnostic);
+                eprintln!("❌ File resolution error: {diagnostic}");
             }
 
             // Print the tree
-            print!("{}", tree_output);
+            print!("{tree_output}");
         }
         Err(err) => {
             // Print diagnostics even on failure
@@ -57,7 +57,7 @@ pub fn print_tree(path: &Utf8PathBuf) {
             }
 
             for diagnostic in resolver.node_resolver.take_diagnostics() {
-                eprintln!("❌ File resolution error: {}", diagnostic);
+                eprintln!("❌ File resolution error: {diagnostic}");
             }
 
             println!("❌ Failed to resolve dependency tree: {err}");
@@ -96,10 +96,7 @@ impl ResolutionHandler<FilesResolver> for TreeHandler {
 
                     // Report config validation diagnostics
                     for diagnostic in &config.diagnostics {
-                        eprintln!(
-                            "❌ Config validation error at {}: {}",
-                            ingot_url, diagnostic
-                        );
+                        eprintln!("❌ Config validation error at {ingot_url}: {diagnostic}");
                     }
 
                     self.configs.insert(ingot_url.clone(), config.clone());
@@ -111,7 +108,7 @@ impl ResolutionHandler<FilesResolver> for TreeHandler {
                 }
                 Err(err) => {
                     tracing::warn!(target: "resolver", "Failed to parse config for ingot {}: {}", ingot_url, err);
-                    eprintln!("❌ Invalid fe.toml file at {}: {}", ingot_url, err);
+                    eprintln!("❌ Invalid fe.toml file at {ingot_url}: {err}");
                     vec![]
                 }
             }

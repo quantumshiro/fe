@@ -65,10 +65,7 @@ fn check_ingot(db: &mut DriverDataBase, dir_path: &Utf8PathBuf) -> bool {
     let canonical_path = match dir_path.canonicalize_utf8() {
         Ok(path) => path,
         Err(_) => {
-            eprintln!(
-                "Error: Invalid or non-existent directory path: {}",
-                dir_path
-            );
+            eprintln!("Error: Invalid or non-existent directory path: {dir_path}");
             eprintln!("       Make sure the directory exists and is accessible");
             return true;
         }
@@ -77,7 +74,7 @@ fn check_ingot(db: &mut DriverDataBase, dir_path: &Utf8PathBuf) -> bool {
     let ingot_url = match Url::from_directory_path(canonical_path.as_str()) {
         Ok(url) => url,
         Err(_) => {
-            eprintln!("❌ Error: Invalid directory path: {}", dir_path);
+            eprintln!("❌ Error: Invalid directory path: {dir_path}");
             return true;
         }
     };
@@ -107,7 +104,7 @@ fn check_ingot(db: &mut DriverDataBase, dir_path: &Utf8PathBuf) -> bool {
 
         if db.workspace().get(db, &config_url).is_none() {
             eprintln!("❌ Error: No fe.toml file found in the root directory");
-            eprintln!("       Expected fe.toml at: {}", config_url);
+            eprintln!("       Expected fe.toml at: {config_url}");
             eprintln!(
                 "       Make sure you're in an fe project directory or create a fe.toml file"
             );
