@@ -91,13 +91,12 @@ impl fmt::Display for FilesResolutionDiagnostic {
                 write!(f, "IO error reading file {path}: {err}")
             }
             FilesResolutionDiagnostic::RequiredFileMissing(url, path) => {
-                write!(f, "Missing required file '{}' in ingot at {}", path, url)
+                write!(f, "Missing required file '{path}' in ingot at {url}")
             }
             FilesResolutionDiagnostic::RequiredDirectoryMissing(url, path) => {
                 write!(
                     f,
-                    "Missing required directory '{}' in ingot at {}",
-                    path, url
+                    "Missing required directory '{path}' in ingot at {url}"
                 )
             }
         }
