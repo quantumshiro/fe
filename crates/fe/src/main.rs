@@ -16,7 +16,7 @@ pub struct Options {
 pub enum Command {
     Build,
     Check {
-        // #[clap(default_value_t = find_project_root().unwrap_or(Utf8PathBuf::from(".")))]
+        #[arg(default_value_t = default_project_path())]
         path: Utf8PathBuf,
         #[arg(short, long)]
         core: Option<Utf8PathBuf>,
@@ -25,6 +25,10 @@ pub enum Command {
         path: Utf8PathBuf,
     },
     New,
+}
+
+fn default_project_path() -> Utf8PathBuf {
+    driver::files::find_project_root().unwrap_or(Utf8PathBuf::from("."))
 }
 
 fn main() {
