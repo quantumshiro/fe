@@ -1,9 +1,10 @@
 //! This module contains the definition of the [`SyntaxKind`].
 
 use logos::Logos;
+use num_enum::TryFromPrimitive;
 
 /// The definition of the `SyntaxKind'.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Logos)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Logos, TryFromPrimitive)]
 #[repr(u16)]
 pub enum SyntaxKind {
     // Atom kinds. These are leaf nodes.
