@@ -383,7 +383,7 @@ impl<'db> SimplifiedArmMatrix<'db> {
                 .inner
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| (*i != col))
+                .filter(|(i, _)| *i != col)
                 .map(|(_, pat)| pat.clone())
                 .collect();
             rows.push(PatternRowVec::new(reduced_pat_vec));
