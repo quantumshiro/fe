@@ -377,27 +377,24 @@ impl<'db> TyChecker<'db> {
             return ExprProp::invalid(self.db);
         };
 
-        let span = expr.span(self.body()).into_path_expr();
+        let path_expr_span = expr.span(self.body()).into_path_expr();
+        let path_span = path_expr_span.clone().path();
 
         let res = if path.is_bare_ident(self.db) {
             resolve_ident_expr(self.db, &self.env, *path)
         } else {
-            match self.resolve_path(*path, true, span.clone().path()) {
+            match self.resolve_path(*path, true, path_span.clone()) {
                 Ok(r) => ResolvedPathInBody::Reso(r),
                 Err(err) => {
-                    let span = expr
-                        .span(self.body())
-                        .into_path_expr()
-                        .path()
-                        .segment(err.failed_at.segment_index(self.db));
-
                     let expected_kind = if matches!(self.parent_expr(), Some(Expr::Call(..))) {
                         ExpectedPathKind::Function
                     } else {
                         ExpectedPathKind::Value
                     };
 
-                    if let Some(diag) = err.into_diag(self.db, *path, span.into(), expected_kind) {
+                    if let Some(diag) =
+                        err.into_diag(self.db, *path, path_span.clone(), expected_kind)
+                    {
                         self.push_diag(diag)
                     }
                     ResolvedPathInBody::Invalid
@@ -412,7 +409,7 @@ impl<'db> TyChecker<'db> {
                 ExprProp::new_binding_ref(ty, is_mut, binding)
             }
             ResolvedPathInBody::NewBinding(ident) => {
-                let diag = BodyDiag::UndefinedVariable(span.into(), ident);
+                let diag = BodyDiag::UndefinedVariable(path_expr_span.into(), ident);
                 self.push_diag(diag);
 
                 ExprProp::invalid(self.db)
@@ -430,10 +427,14 @@ impl<'db> TyChecker<'db> {
                     } else {
                         let diag = if ty.is_struct(self.db) {
                             let record_like = RecordLike::from_ty(ty);
-                            BodyDiag::unit_variant_expected(self.db, span.into(), record_like)
+                            BodyDiag::unit_variant_expected(
+                                self.db,
+                                path_expr_span.clone().into(),
+                                record_like,
+                            )
                         } else {
                             BodyDiag::NotValue {
-                                primary: span.into(),
+                                primary: path_expr_span.clone().into(),
                                 given: Either::Right(ty),
                             }
                         };
@@ -445,7 +446,7 @@ impl<'db> TyChecker<'db> {
                 PathRes::Func(ty) => ExprProp::new(self.table.instantiate_to_term(ty), true),
                 PathRes::Trait(trait_) => {
                     let diag = BodyDiag::NotValue {
-                        primary: span.into(),
+                        primary: path_expr_span.clone().into(),
                         given: Either::Left(trait_.def(self.db).trait_(self.db).into()),
                     };
                     self.push_diag(diag);
@@ -497,7 +498,8 @@ impl<'db> TyChecker<'db> {
                         | MethodCandidate::NeedsConfirmation(cand) => {
                             let inst = canonical_r_ty.extract_solution(&mut self.table, cand.inst);
                             if matches!(candidate, MethodCandidate::NeedsConfirmation(_)) {
-                                self.env.register_confirmation(inst, span.clone().into());
+                                self.env
+                                    .register_confirmation(inst, path_expr_span.clone().into());
                             }
                             cand.method
                                 .instantiate_with_inst(&mut self.table, receiver_ty, inst)

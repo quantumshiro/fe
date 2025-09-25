@@ -206,6 +206,13 @@ impl<T> Partial<T> {
         }
     }
 
+    pub fn take(self) -> T {
+        match self {
+            Self::Present(value) => value,
+            Self::Absent => panic!("unwrap called on absent value"),
+        }
+    }
+
     pub fn to_opt(self) -> Option<T> {
         match self {
             Self::Present(value) => Some(value),

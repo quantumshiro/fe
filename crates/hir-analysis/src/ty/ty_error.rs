@@ -113,19 +113,8 @@ impl<'db> Visitor<'db> for HirTyErrVisitor<'db> {
             Ok(res) => res,
 
             Err(err) => {
-                let segment_idx = err.failed_at.segment_index(self.db);
-                // Use the HIR path to check if the corresponding segment is a QualifiedType.
-                let seg_hir = path.segment(self.db, segment_idx).unwrap_or(path);
-                let segment = path_span.segment(segment_idx);
-                let segment_span = match seg_hir.kind(self.db) {
-                    hir::hir_def::PathKind::QualifiedType { .. } => {
-                        segment.qualified_type().trait_qualifier().name()
-                    }
-                    _ => segment.ident(),
-                };
-
                 if let Some(diag) =
-                    err.into_diag(self.db, path, segment_span.into(), ExpectedPathKind::Type)
+                    err.into_diag(self.db, path, path_span.clone(), ExpectedPathKind::Type)
                 {
                     self.diags.push(diag.into());
                 }
@@ -243,6 +232,8 @@ fn diag_from_invalid_cause<'db>(
         InvalidCause::InvalidConstTyExpr { body } => {
             TyLowerDiag::InvalidConstTyExpr(body.span().into()).into()
         }
+
+        InvalidCause::NotAType(_) => return None,
 
         // These errors should be caught and reported elsewhere
         InvalidCause::PathResolutionFailed { .. }

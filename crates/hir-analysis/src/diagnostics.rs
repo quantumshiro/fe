@@ -21,7 +21,11 @@ use common::diagnostics::{
     SubDiagnostic,
 };
 use either::Either;
-use hir::{ParserError, SpannedHirDb, hir_def::FieldIndex, span::LazySpan};
+use hir::{
+    ParserError, SpannedHirDb,
+    hir_def::{FieldIndex, PathKind},
+    span::LazySpan,
+};
 use itertools::Itertools;
 
 /// All diagnostics accumulated in salsa-db should implement
@@ -342,25 +346,40 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                 }
             }
 
-            Self::InvalidPathSegment(prim_span, name, res_span) => {
-                let name = name.data(db);
+            Self::InvalidPathSegment {
+                span: prim_span,
+                segment,
+                defined_at,
+            } => {
+                let segment = *segment;
+                let label = match segment.kind(db) {
+                    PathKind::Ident { ident, .. } => ident
+                        .to_opt()
+                        .map(|id| id.data(db).to_owned())
+                        .unwrap_or_else(|| segment.pretty_print(db)),
+                    PathKind::QualifiedType { type_, trait_ } => {
+                        let ty = type_.pretty_print(db);
+                        let trait_name = trait_.pretty_print(db);
+                        format!("<{ty} as {trait_name}>")
+                    }
+                };
                 let mut labels = vec![SubDiagnostic {
                     style: LabelStyle::Primary,
-                    message: format!("`{name}` can't be used as a middle segment of a path"),
+                    message: format!("`{label}` can't be used as a middle segment of a path"),
                     span: prim_span.resolve(db),
                 }];
 
-                if let Some(span) = res_span {
+                if let Some(span) = defined_at {
                     labels.push(SubDiagnostic {
                         style: LabelStyle::Secondary,
-                        message: format!("`{name}` is defined here"),
+                        message: format!("`{label}` is defined here"),
                         span: span.resolve(db),
                     });
                 }
 
                 CompleteDiagnostic {
                     severity,
-                    message: format!("`{name}` can't be used as a middle segment of a path"),
+                    message: format!("`{label}` can't be used as a middle segment of a path"),
                     sub_diagnostics: labels,
                     notes: vec![],
                     error_code,
