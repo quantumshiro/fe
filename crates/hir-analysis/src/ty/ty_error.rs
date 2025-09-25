@@ -123,7 +123,7 @@ impl<'db> Visitor<'db> for HirTyErrVisitor<'db> {
         };
 
         if !matches!(res, PathRes::Ty(_) | PathRes::TyAlias(..)) {
-            let ident = path.ident(self.db).to_opt().unwrap();
+            let ident = path.ident(self.db).unwrap();
             let span = path_span.clone().segment(path.segment_index(self.db));
             self.diags
                 .push(PathResDiag::ExpectedType(span.into(), ident, res.kind_name()).into());
@@ -131,7 +131,7 @@ impl<'db> Visitor<'db> for HirTyErrVisitor<'db> {
         if let Some((path, deriv_span)) = invisible {
             let span = path_span.segment(path.segment_index(self.db)).ident();
             let ident = path.ident(self.db);
-            let diag = PathResDiag::Invisible(span.into(), *ident.unwrap(), deriv_span);
+            let diag = PathResDiag::Invisible(span.into(), ident.unwrap(), deriv_span);
             self.diags.push(diag.into());
         }
 

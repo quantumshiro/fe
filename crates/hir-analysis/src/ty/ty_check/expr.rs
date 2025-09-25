@@ -1221,7 +1221,7 @@ fn resolve_ident_expr<'db>(
     env: &TyCheckEnv<'db>,
     path: PathId<'db>,
 ) -> ResolvedPathInBody<'db> {
-    let ident = *path.ident(db).unwrap();
+    let ident = path.ident(db).unwrap();
 
     let resolve_bucket = |bucket: &NameResBucket<'db>, scope| {
         let Ok(res) = bucket.pick_any(&[NameDomain::VALUE, NameDomain::TYPE]) else {

@@ -199,14 +199,14 @@ where
 }
 
 impl<T> Partial<T> {
-    pub fn unwrap(&self) -> &T {
+    pub fn unwrap(self) -> T {
         match self {
             Self::Present(value) => value,
             Self::Absent => panic!("unwrap called on absent value"),
         }
     }
 
-    pub fn take(self) -> T {
+    pub fn unwrap_ref(&self) -> &T {
         match self {
             Self::Present(value) => value,
             Self::Absent => panic!("unwrap called on absent value"),

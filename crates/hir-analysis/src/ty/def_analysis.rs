@@ -1144,7 +1144,7 @@ fn analyze_trait_ref<'db>(
             return Some(
                 err.into_diag(
                     db,
-                    *trait_ref.path(db).unwrap(),
+                    trait_ref.path(db).unwrap(),
                     trait_path_span,
                     ExpectedPathKind::Trait,
                 )?
@@ -1156,7 +1156,7 @@ fn analyze_trait_ref<'db>(
             return Some(
                 PathResDiag::ExpectedTrait(
                     span.path().into(),
-                    *trait_ref.path(db).unwrap().ident(db).unwrap(),
+                    trait_ref.path(db).unwrap().ident(db).unwrap(),
                     res.kind_name(),
                 )
                 .into(),
@@ -1270,7 +1270,7 @@ fn analyze_impl_trait_specific_error<'db>(
             let trait_path_span = impl_trait.span().trait_ref().path();
             if let Some(diag) = err.into_diag(
                 db,
-                *trait_ref.path(db).unwrap(),
+                trait_ref.path(db).unwrap(),
                 trait_path_span,
                 ExpectedPathKind::Trait,
             ) {
@@ -1282,7 +1282,7 @@ fn analyze_impl_trait_specific_error<'db>(
             diags.push(
                 PathResDiag::ExpectedTrait(
                     impl_trait.span().trait_ref().path().into(),
-                    *trait_ref.path(db).unwrap().ident(db).unwrap(),
+                    trait_ref.path(db).unwrap().ident(db).unwrap(),
                     res.kind_name(),
                 )
                 .into(),

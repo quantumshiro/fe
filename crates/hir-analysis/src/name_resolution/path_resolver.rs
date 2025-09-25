@@ -280,7 +280,7 @@ impl<'db> PathResError<'db> {
                     if let PathKind::QualifiedType { type_, .. } = seg_path.kind(db)
                         && let TypeKind::Path(type_path) = type_.data(db)
                     {
-                        let type_ident = type_path.take().ident(db).take();
+                        let type_ident = type_path.unwrap().ident(db).unwrap();
                         let ty_span = seg_span.qualified_type().ty().into_path_type().path();
                         PathResDiag::ExpectedType(ty_span.into(), type_ident, res.kind_name())
                     } else {
@@ -296,7 +296,7 @@ impl<'db> PathResError<'db> {
             PathResErrorKind::QualifiedTypeTrait(result) => match *result {
                 Ok(res) => {
                     if let PathKind::QualifiedType { trait_, .. } = seg_path.kind(db) {
-                        let trait_ident = trait_.path(db).take().ident(db).take();
+                        let trait_ident = trait_.path(db).unwrap().ident(db).unwrap();
                         let trait_span = seg_span.qualified_type().trait_qualifier().name().into();
                         PathResDiag::ExpectedTrait(trait_span, trait_ident, res.kind_name())
                     } else {
@@ -386,7 +386,7 @@ fn make_query<'db>(
         directive = directive.disallow_lex();
     }
 
-    let name = *path.ident(db).unwrap();
+    let name = path.ident(db).unwrap();
     EarlyNameQueryId::new(db, name, scope, directive)
 }
 
@@ -554,7 +554,7 @@ impl<'db> ResolvedVariant<'db> {
         Some(FuncDef::new(
             db,
             HirFuncDefKind::VariantCtor(self.variant),
-            *self.variant.def(db).name.unwrap(),
+            self.variant.def(db).name.unwrap(),
             *adt.param_set(db),
             arg_tys,
             Binder::bind(ret_ty),
@@ -1101,7 +1101,7 @@ pub fn resolve_name_res<'db>(
                 let trait_inst = TraitInstId::new(db, trait_def, &trait_args, IndexMap::new());
 
                 // Create an associated type reference
-                let assoc_ty_name = trait_type.name.to_opt().unwrap();
+                let assoc_ty_name = trait_type.name.unwrap();
                 let assoc_ty = TyId::assoc_ty(db, trait_inst, assoc_ty_name);
 
                 PathRes::Ty(assoc_ty)
