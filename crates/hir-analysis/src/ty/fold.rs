@@ -65,7 +65,18 @@ impl<'db> TyFoldable<'db> for TyId<'db> {
                         let ty = folder.fold_ty(db, *ty);
                         Evaluated(val.clone(), ty)
                     }
-                    UnEvaluated(body) => UnEvaluated(*body),
+                    UnEvaluated {
+                        body,
+                        ty,
+                        const_def,
+                    } => {
+                        let ty = ty.map(|t| folder.fold_ty(db, t));
+                        UnEvaluated {
+                            body: *body,
+                            ty,
+                            const_def: *const_def,
+                        }
+                    }
                 };
 
                 let const_ty = ConstTyId::new(db, cty_data);

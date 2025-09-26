@@ -352,7 +352,7 @@ impl<'db> TyId<'db> {
                 ConstTyData::TyVar(..) => None,
                 ConstTyData::TyParam(ty_param, _) => Some(ty_param.scope(db)),
                 ConstTyData::Evaluated(..) => None,
-                ConstTyData::UnEvaluated(body) => Some(body.scope()),
+                ConstTyData::UnEvaluated { body, .. } => Some(body.scope()),
             },
 
             TyData::Never | TyData::Invalid(_) | TyData::TyVar(_) => None,
