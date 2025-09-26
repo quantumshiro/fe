@@ -631,7 +631,7 @@ impl<'db> TyId<'db> {
 
             TyBase::Prim(PrimTy::Array) => {
                 if args.len() == 1 {
-                    Some(TyId::new(db, TyData::TyBase(TyBase::Prim(PrimTy::U256))))
+                    Some(TyId::new(db, TyData::TyBase(TyBase::Prim(PrimTy::Usize))))
                 } else {
                     None
                 }
@@ -639,7 +639,7 @@ impl<'db> TyId<'db> {
 
             TyBase::Prim(PrimTy::String) => {
                 if args.is_empty() {
-                    Some(TyId::new(db, TyData::TyBase(TyBase::Prim(PrimTy::U256))))
+                    Some(TyId::new(db, TyData::TyBase(TyBase::Prim(PrimTy::Usize))))
                 } else {
                     None
                 }

@@ -74,7 +74,7 @@ note:
    ┌─ associated_types_cycle.fe:35:27
    │
 35 │         e.write_byte(self[0])
-   │                           ^ u256
+   │                           ^ usize
 
 note: 
    ┌─ associated_types_cycle.fe:36:9
@@ -104,7 +104,7 @@ note:
    ┌─ associated_types_cycle.fe:36:27
    │
 36 │         e.write_byte(self[1])
-   │                           ^ u256
+   │                           ^ usize
 
 note: 
    ┌─ associated_types_cycle.fe:37:9
@@ -134,7 +134,7 @@ note:
    ┌─ associated_types_cycle.fe:37:27
    │
 37 │         e.write_byte(self[2])
-   │                           ^ u256
+   │                           ^ usize
 
 note: 
    ┌─ associated_types_cycle.fe:38:9
@@ -164,7 +164,7 @@ note:
    ┌─ associated_types_cycle.fe:38:27
    │
 38 │         e.write_byte(self[3])
-   │                           ^ u256
+   │                           ^ usize
 
 note: 
    ┌─ associated_types_cycle.fe:42:8

@@ -7,7 +7,7 @@ error[8-0000]: type mismatch
    ┌─ index.fe:17:7
    │
 17 │     x[false]
-   │       ^^^^^ expected `u256`, but `bool` is given
+   │       ^^^^^ expected `usize`, but `bool` is given
 
 error[8-0016]: `core::ops::Index` trait is not implemented
    ┌─ index.fe:19:5
