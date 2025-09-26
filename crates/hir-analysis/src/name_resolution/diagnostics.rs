@@ -1,6 +1,6 @@
 use either::Either;
 use hir::{
-    hir_def::{IdentId, TopLevelMod, Trait},
+    hir_def::{IdentId, PathId, TopLevelMod, Trait},
     span::DynLazySpan,
 };
 use salsa::Update;
@@ -41,7 +41,11 @@ pub enum PathResDiag<'db> {
     },
 
     /// The name is found, but it can't be used as a middle segment of a path.
-    InvalidPathSegment(DynLazySpan<'db>, IdentId<'db>, Option<DynLazySpan<'db>>),
+    InvalidPathSegment {
+        span: DynLazySpan<'db>,
+        segment: PathId<'db>,
+        defined_at: Option<DynLazySpan<'db>>,
+    },
 
     /// The name is found but belongs to a different name domain other than the
     /// Type.
@@ -106,7 +110,7 @@ impl<'db> PathResDiag<'db> {
             Self::Invisible(span, _, _) => span.top_mod(db).unwrap(),
             Self::Ambiguous(span, _, _) => span.top_mod(db).unwrap(),
             Self::AmbiguousAssociatedType { span, .. } => span.top_mod(db).unwrap(),
-            Self::InvalidPathSegment(span, _, _) => span.top_mod(db).unwrap(),
+            Self::InvalidPathSegment { span, .. } => span.top_mod(db).unwrap(),
             Self::ExpectedType(span, _, _) => span.top_mod(db).unwrap(),
             Self::ExpectedTrait(span, _, _) => span.top_mod(db).unwrap(),
             Self::ExpectedValue(span, _, _) => span.top_mod(db).unwrap(),
@@ -139,7 +143,7 @@ impl<'db> PathResDiag<'db> {
             Self::NotFound(..) => 2,
             Self::Invisible(..) => 3,
             Self::Ambiguous(..) => 4,
-            Self::InvalidPathSegment(..) => 5,
+            Self::InvalidPathSegment { .. } => 5,
             Self::ExpectedType(..) => 6,
             Self::ExpectedTrait(..) => 7,
             Self::ExpectedValue(..) => 8,

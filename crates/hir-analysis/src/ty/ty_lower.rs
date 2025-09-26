@@ -83,7 +83,7 @@ fn lower_path<'db>(
 
     match resolve_path(db, path, scope, assumptions, false) {
         Ok(PathRes::Ty(ty) | PathRes::TyAlias(_, ty) | PathRes::Func(ty)) => ty,
-        Ok(_) => TyId::invalid(db, InvalidCause::Other),
+        Ok(res) => TyId::invalid(db, InvalidCause::NotAType(res)),
         Err(_) => TyId::invalid(db, InvalidCause::PathResolutionFailed { path }),
     }
 }

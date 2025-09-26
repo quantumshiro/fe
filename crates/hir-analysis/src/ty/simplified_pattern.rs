@@ -271,7 +271,7 @@ fn simplify_tuple_pattern_elements<'db>(
         } else {
             simplified.push(SimplifiedPattern::from_hir_pat(
                 db,
-                pat.data(db, body).unwrap(),
+                pat.data(db, body).unwrap_ref(),
                 body,
                 scope,
                 arm_idx,

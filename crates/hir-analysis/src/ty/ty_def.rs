@@ -33,6 +33,7 @@ use super::{
 };
 use crate::{
     HirAnalysisDb,
+    name_resolution::PathRes,
     ty::{adt_def::AdtRef, trait_resolution::check_ty_wf, ty_error::emit_invalid_ty_error},
 };
 
@@ -789,6 +790,8 @@ pub enum InvalidCause<'db> {
         path: PathId<'db>,
     },
 
+    NotAType(PathRes<'db>),
+
     /// `Other` indicates the cause is already reported in other analysis
     /// passes, e.g., parser or name resolution.
     Other,
@@ -826,6 +829,11 @@ impl InvalidCause<'_> {
             InvalidCause::PathResolutionFailed { path } => {
                 format!("PathResolutionFailed({})", path.pretty_print(db))
             }
+            InvalidCause::NotAType(res) => format!(
+                "NotAType({})",
+                res.pretty_path(db)
+                    .unwrap_or_else(|| res.kind_name().into())
+            ),
             InvalidCause::NotFullyApplied
             | InvalidCause::TooManyGenericArgs { .. }
             | InvalidCause::InvalidConstParamTy

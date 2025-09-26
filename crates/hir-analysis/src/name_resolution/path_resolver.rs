@@ -3,9 +3,9 @@ use either::Either;
 use hir::{
     hir_def::{
         Enum, EnumVariant, GenericParamOwner, IdentId, ImplTrait, ItemKind, Partial, PathId,
-        PathKind, Trait, TypeBound, TypeId, VariantKind, scope_graph::ScopeId,
+        PathKind, Trait, TypeBound, TypeId, TypeKind, VariantKind, scope_graph::ScopeId,
     },
-    span::DynLazySpan,
+    span::{DynLazySpan, path::LazyPathSpan},
 };
 use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
@@ -74,6 +74,12 @@ pub enum PathResErrorKind<'db> {
     /// The name is found, but it can't be used in the middle of a use path.
     InvalidPathSegment(PathRes<'db>),
 
+    /// Type component of a qualified path failed to resolve.
+    QualifiedTypeType(Box<PathResolutionResult<'db, PathRes<'db>>>),
+
+    /// Trait component of a qualified path failed to resolve.
+    QualifiedTypeTrait(Box<PathResolutionResult<'db, PathRes<'db>>>),
+
     /// The definition conflicts with other definitions.
     Conflict(ThinVec<DynLazySpan<'db>>),
 
@@ -132,6 +138,20 @@ impl<'db> PathResError<'db> {
                 format!("Ambiguous associated type; {} options.", candidates.len())
             }
             PathResErrorKind::InvalidPathSegment(_) => "Invalid path segment".to_string(),
+            PathResErrorKind::QualifiedTypeType(res) => match res.as_ref() {
+                Ok(res) => format!(
+                    "Expected type in qualified path, but found {}",
+                    res.kind_name()
+                ),
+                Err(err) => err.print(),
+            },
+            PathResErrorKind::QualifiedTypeTrait(res) => match res.as_ref() {
+                Ok(res) => format!(
+                    "Expected trait qualifier in qualified path, but found {}",
+                    res.kind_name()
+                ),
+                Err(err) => err.print(),
+            },
             PathResErrorKind::Conflict(..) => "Conflicting definitions".to_string(),
             PathResErrorKind::ArgNumMismatch { expected, given } => {
                 format!("Incorrect number of generic args; expected {expected}, given {given}.")
@@ -167,18 +187,33 @@ impl<'db> PathResError<'db> {
         self,
         db: &'db dyn HirAnalysisDb,
         path: PathId<'db>,
-        span: DynLazySpan<'db>,
+        path_span: LazyPathSpan<'db>,
         expected: ExpectedPathKind,
     ) -> Option<PathResDiag<'db>> {
-        let failed_at = self.failed_at;
-        let ident = failed_at.ident(db).to_opt()?; // TODO: handle PathKind::QualifiedType
+        let kind = self.kind;
+        let failed_idx = self.failed_at.segment_index(db);
+        let seg_span = path_span.clone().segment(failed_idx);
+        let seg_path = path.segment(db, failed_idx).unwrap_or(self.failed_at);
 
-        let diag = match self.kind {
+        let (span, ident) = if matches!(seg_path.kind(db), PathKind::QualifiedType { .. }) {
+            (seg_span.clone().into_atom().into(), IdentId::new(db, "")) // ident is unused in this case
+        } else {
+            (
+                seg_span.clone().ident().into(),
+                seg_path.ident(db).to_opt()?,
+            )
+        };
+
+        let diag = match kind {
             PathResErrorKind::ParseError => return None,
             PathResErrorKind::NotFound { parent, bucket } => {
                 if let Some(nr) = bucket.iter_ok().next() {
                     if path != self.failed_at {
-                        PathResDiag::InvalidPathSegment(span, ident, nr.kind.name_span(db))
+                        PathResDiag::InvalidPathSegment {
+                            span,
+                            segment: self.failed_at,
+                            defined_at: nr.kind.name_span(db),
+                        }
                     } else {
                         match expected {
                             ExpectedPathKind::Record | ExpectedPathKind::Type => {
@@ -224,9 +259,11 @@ impl<'db> PathResError<'db> {
                 given,
             },
 
-            PathResErrorKind::InvalidPathSegment(res) => {
-                PathResDiag::InvalidPathSegment(span, ident, res.name_span(db))
-            }
+            PathResErrorKind::InvalidPathSegment(res) => PathResDiag::InvalidPathSegment {
+                span,
+                segment: seg_path,
+                defined_at: res.name_span(db),
+            },
 
             PathResErrorKind::Conflict(spans) => PathResDiag::Conflict(ident, spans),
 
@@ -237,6 +274,41 @@ impl<'db> PathResError<'db> {
                     candidates,
                 }
             }
+
+            PathResErrorKind::QualifiedTypeType(result) => match *result {
+                Ok(res) => {
+                    if let PathKind::QualifiedType { type_, .. } = seg_path.kind(db)
+                        && let TypeKind::Path(type_path) = type_.data(db)
+                    {
+                        let type_ident = type_path.unwrap().ident(db).unwrap();
+                        let ty_span = seg_span.qualified_type().ty().into_path_type().path();
+                        PathResDiag::ExpectedType(ty_span.into(), type_ident, res.kind_name())
+                    } else {
+                        unreachable!()
+                    }
+                }
+                Err(inner) => {
+                    let failed = inner.failed_at;
+                    let ty_span = seg_span.qualified_type().ty().into_path_type().path();
+                    inner.into_diag(db, failed, ty_span, ExpectedPathKind::Type)?
+                }
+            },
+            PathResErrorKind::QualifiedTypeTrait(result) => match *result {
+                Ok(res) => {
+                    if let PathKind::QualifiedType { trait_, .. } = seg_path.kind(db) {
+                        let trait_ident = trait_.path(db).unwrap().ident(db).unwrap();
+                        let trait_span = seg_span.qualified_type().trait_qualifier().name().into();
+                        PathResDiag::ExpectedTrait(trait_span, trait_ident, res.kind_name())
+                    } else {
+                        unreachable!()
+                    }
+                }
+                Err(inner) => {
+                    let failed = inner.failed_at;
+                    let trait_span = seg_span.qualified_type().trait_qualifier().path();
+                    inner.into_diag(db, failed, trait_span, ExpectedPathKind::Trait)?
+                }
+            },
 
             PathResErrorKind::MethodSelection(err) => match err {
                 MethodSelectionError::ReceiverTypeMustBeKnown => PathResDiag::TypeMustBeKnown(span),
@@ -314,7 +386,7 @@ fn make_query<'db>(
         directive = directive.disallow_lex();
     }
 
-    let name = *path.ident(db).unwrap();
+    let name = path.ident(db).unwrap();
     EarlyNameQueryId::new(db, name, scope, directive)
 }
 
@@ -482,7 +554,7 @@ impl<'db> ResolvedVariant<'db> {
         Some(FuncDef::new(
             db,
             HirFuncDefKind::VariantCtor(self.variant),
-            *self.variant.def(db).name.unwrap(),
+            self.variant.def(db).name.unwrap(),
             *adt.param_set(db),
             arg_tys,
             Binder::bind(ret_ty),
@@ -568,17 +640,39 @@ where
             ));
         }
         let ty = lower_hir_ty(db, type_, scope, assumptions);
+        if let Some(cause) = ty.invalid_cause(db) {
+            match cause {
+                InvalidCause::NotAType(res) => {
+                    return Err(PathResError::new(
+                        PathResErrorKind::QualifiedTypeType(Box::new(Ok(res))),
+                        path,
+                    ));
+                }
+                InvalidCause::PathResolutionFailed { path: ty_path } => {
+                    if let Err(inner) = resolve_path(db, ty_path, scope, assumptions, false) {
+                        return Err(PathResError {
+                            kind: PathResErrorKind::QualifiedTypeType(Box::new(Err(inner))),
+                            failed_at: path,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
         let trait_inst = match lower_trait_ref(db, ty, trait_, scope, assumptions) {
             Ok(inst) => inst,
             Err(err) => {
-                let path = trait_.path(db).to_opt().unwrap_or(path);
+                let trait_path = trait_.path(db).to_opt().unwrap_or(path);
                 let err = match err {
-                    TraitRefLowerError::PathResError(e) => e,
-                    TraitRefLowerError::InvalidDomain(res) => {
-                        // TODO: better error ("expected trait ref")
-                        PathResError::new(PathResErrorKind::InvalidPathSegment(res), path)
-                    }
-                    TraitRefLowerError::Ignored => PathResError::parse_err(path),
+                    TraitRefLowerError::PathResError(e) => PathResError {
+                        kind: PathResErrorKind::QualifiedTypeTrait(Box::new(Err(e))),
+                        failed_at: path,
+                    },
+                    TraitRefLowerError::InvalidDomain(res) => PathResError::new(
+                        PathResErrorKind::QualifiedTypeTrait(Box::new(Ok(res))),
+                        trait_path,
+                    ),
+                    TraitRefLowerError::Ignored => PathResError::parse_err(trait_path),
                 };
                 return Err(err);
             }
@@ -1007,7 +1101,7 @@ pub fn resolve_name_res<'db>(
                 let trait_inst = TraitInstId::new(db, trait_def, &trait_args, IndexMap::new());
 
                 // Create an associated type reference
-                let assoc_ty_name = trait_type.name.to_opt().unwrap();
+                let assoc_ty_name = trait_type.name.unwrap();
                 let assoc_ty = TyId::assoc_ty(db, trait_inst, assoc_ty_name);
 
                 PathRes::Ty(assoc_ty)

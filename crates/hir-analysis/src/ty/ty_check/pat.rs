@@ -147,7 +147,7 @@ impl<'db> TyChecker<'db> {
                     }
                 }
                 _ => {
-                    let name = *path.ident(self.db).unwrap();
+                    let name = path.ident(self.db).unwrap();
                     let binding = LocalBinding::local(pat, *is_mut);
                     if let Some(LocalBinding::Local {
                         pat: conflict_with, ..

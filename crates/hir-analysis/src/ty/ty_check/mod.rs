@@ -280,7 +280,7 @@ impl<'db> TyChecker<'db> {
         if let Some((path, deriv_span)) = invisible {
             let span = span.clone().segment(path.segment_index(self.db)).ident();
             let ident = path.ident(self.db);
-            let diag = PathResDiag::Invisible(span.into(), *ident.unwrap(), deriv_span);
+            let diag = PathResDiag::Invisible(span.into(), ident.unwrap(), deriv_span);
             self.diags.push(diag.into());
         }
 

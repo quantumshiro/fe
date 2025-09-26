@@ -238,8 +238,8 @@ mod tests {
 
         let file = db.standalone_file(text);
         let body: Body = db.expect_item::<Body>(file);
-        let bin_expr = match body.exprs(&db).values().nth(2).unwrap().unwrap() {
-            Expr::AugAssign(lhs, rhs, bin_op) => (*lhs, *rhs, *bin_op),
+        let bin_expr = match body.exprs(&db).values().nth(2).cloned().unwrap().unwrap() {
+            Expr::AugAssign(lhs, rhs, bin_op) => (lhs, rhs, bin_op),
             _ => unreachable!(),
         };
         let top_mod = body.top_mod(&db);

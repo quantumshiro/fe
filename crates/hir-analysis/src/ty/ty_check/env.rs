@@ -582,7 +582,7 @@ impl<'db> LocalBinding<'db> {
                 else {
                     unreachable!();
                 };
-                path.ident(hir_db).to_opt().unwrap()
+                path.ident(hir_db).unwrap()
             }
 
             Self::Param { idx, .. } => {

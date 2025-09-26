@@ -1140,11 +1140,12 @@ fn analyze_trait_ref<'db>(
         Ok(trait_ref) => trait_ref,
 
         Err(TraitRefLowerError::PathResError(err)) => {
+            let trait_path_span = span.path();
             return Some(
                 err.into_diag(
                     db,
-                    *trait_ref.path(db).unwrap(),
-                    span.into(),
+                    trait_ref.path(db).unwrap(),
+                    trait_path_span,
                     ExpectedPathKind::Trait,
                 )?
                 .into(),
@@ -1154,8 +1155,8 @@ fn analyze_trait_ref<'db>(
         Err(TraitRefLowerError::InvalidDomain(res)) => {
             return Some(
                 PathResDiag::ExpectedTrait(
-                    span.into(),
-                    *trait_ref.path(db).unwrap().ident(db).unwrap(),
+                    span.path().into(),
+                    trait_ref.path(db).unwrap().ident(db).unwrap(),
                     res.kind_name(),
                 )
                 .into(),
@@ -1266,10 +1267,11 @@ fn analyze_impl_trait_specific_error<'db>(
     let trait_inst = match lower_trait_ref(db, ty, trait_ref, impl_trait.scope(), assumptions) {
         Ok(trait_inst) => trait_inst,
         Err(TraitRefLowerError::PathResError(err)) => {
+            let trait_path_span = impl_trait.span().trait_ref().path();
             if let Some(diag) = err.into_diag(
                 db,
-                *trait_ref.path(db).unwrap(),
-                impl_trait.span().trait_ref().into(),
+                trait_ref.path(db).unwrap(),
+                trait_path_span,
                 ExpectedPathKind::Trait,
             ) {
                 diags.push(diag.into());
@@ -1279,8 +1281,8 @@ fn analyze_impl_trait_specific_error<'db>(
         Err(TraitRefLowerError::InvalidDomain(res)) => {
             diags.push(
                 PathResDiag::ExpectedTrait(
-                    impl_trait.span().trait_ref().into(),
-                    *trait_ref.path(db).unwrap().ident(db).unwrap(),
+                    impl_trait.span().trait_ref().path().into(),
+                    trait_ref.path(db).unwrap().ident(db).unwrap(),
                     res.kind_name(),
                 )
                 .into(),

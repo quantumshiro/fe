@@ -1,5 +1,6 @@
 ---
 source: crates/uitest/tests/ty.rs
+assertion_line: 27
 expression: diags
 input_file: fixtures/ty/def/trait_arg_mismatch.fe
 ---
@@ -13,10 +14,10 @@ error[2-0012]: invalid type argument kind for `Foo`
   ┌─ trait_arg_mismatch.fe:8:6
   │
 8 │ impl Foo<i32> for i32 {}
-  │      ^^^^^^^^ expected `(* -> *)` kind, but `i32` has `*` kind
+  │      ^^^ expected `(* -> *)` kind, but `i32` has `*` kind
 
 error[2-0012]: invalid type argument kind for `Foo`
   ┌─ trait_arg_mismatch.fe:9:6
   │
 9 │ impl Foo<Option<i32>> for i32 {}
-  │      ^^^^^^^^^^^^^^^^ expected `(* -> *)` kind, but `Option<i32>` has `*` kind
+  │      ^^^ expected `(* -> *)` kind, but `Option<i32>` has `*` kind
