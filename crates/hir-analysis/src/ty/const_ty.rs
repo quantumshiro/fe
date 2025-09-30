@@ -1,4 +1,4 @@
-use hir::hir_def::{Body, Expr, IntegerId, LitKind, Partial};
+use hir::hir_def::{Body, Const, Expr, IntegerId, LitKind, Partial};
 
 use super::{
     ty_def::{InvalidCause, TyId, TyParam, TyVar},
@@ -6,6 +6,8 @@ use super::{
 };
 use crate::{
     HirAnalysisDb,
+    name_resolution::{PathRes, resolve_path},
+    ty::trait_resolution::PredicateListId,
     ty::ty_def::{Kind, TyBase, TyData, TyVarSort},
 };
 
@@ -22,18 +24,32 @@ pub(crate) fn evaluate_const_ty<'db>(
     const_ty: ConstTyId<'db>,
     expected_ty: Option<TyId<'db>>,
 ) -> ConstTyId<'db> {
-    let ConstTyData::UnEvaluated(body) = const_ty.data(db) else {
-        let const_ty_ty = const_ty.ty(db);
-        return match check_const_ty(db, const_ty_ty, expected_ty, &mut UnificationTable::new(db)) {
-            Ok(_) => const_ty,
-            Err(cause) => {
-                let ty = TyId::invalid(db, cause);
-                return const_ty.swap_ty(db, ty);
-            }
-        };
+    let (body, const_ty_ty, _const_def) = match const_ty.data(db) {
+        ConstTyData::UnEvaluated {
+            body,
+            ty,
+            const_def,
+        } => (*body, *ty, *const_def),
+        _ => {
+            let const_ty_ty = const_ty.ty(db);
+            return match check_const_ty(
+                db,
+                const_ty_ty,
+                expected_ty,
+                &mut UnificationTable::new(db),
+            ) {
+                Ok(_) => const_ty,
+                Err(cause) => {
+                    let ty = TyId::invalid(db, cause);
+                    return const_ty.swap_ty(db, ty);
+                }
+            };
+        }
     };
 
-    let Partial::Present(expr) = body.expr(db).data(db, *body) else {
+    let expected_ty = expected_ty.or(const_ty_ty);
+
+    let Partial::Present(expr) = body.expr(db).data(db, body) else {
         let data = ConstTyData::Evaluated(
             EvaluatedConstTy::Invalid,
             TyId::invalid(db, InvalidCause::ParseError),
@@ -41,15 +57,56 @@ pub(crate) fn evaluate_const_ty<'db>(
         return ConstTyId::new(db, data);
     };
 
+    let expr = expr.clone();
+
+    if let Expr::Path(path) = &expr {
+        let Some(path) = path.to_opt() else {
+            return ConstTyId::new(
+                db,
+                ConstTyData::Evaluated(
+                    EvaluatedConstTy::Invalid,
+                    TyId::invalid(db, InvalidCause::ParseError),
+                ),
+            );
+        };
+
+        let assumptions = PredicateListId::empty_list(db);
+        if let Ok(resolved_path) = resolve_path(db, path, body.scope(), assumptions, true) {
+            match resolved_path {
+                PathRes::Ty(ty) | PathRes::TyAlias(_, ty) => {
+                    if let TyData::ConstTy(const_ty) = ty.data(db) {
+                        return const_ty.evaluate(db, expected_ty);
+                    }
+                }
+                PathRes::Const(const_def, ty) => {
+                    if let Some(body) = const_def.body(db).to_opt() {
+                        let const_ty = ConstTyId::from_body(db, body, Some(ty), Some(const_def));
+                        let expected = expected_ty.or(Some(ty));
+                        return const_ty.evaluate(db, expected);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        return ConstTyId::new(
+            db,
+            ConstTyData::Evaluated(
+                EvaluatedConstTy::Invalid,
+                TyId::invalid(db, InvalidCause::InvalidConstTyExpr { body }),
+            ),
+        );
+    }
+
     let mut table = UnificationTable::new(db);
     let (resolved, ty) = match expr {
         Expr::Lit(LitKind::Bool(b)) => (
-            EvaluatedConstTy::LitBool(*b),
+            EvaluatedConstTy::LitBool(b),
             TyId::new(db, TyData::TyBase(TyBase::bool())),
         ),
 
         Expr::Lit(LitKind::Int(i)) => (
-            EvaluatedConstTy::LitInt(*i),
+            EvaluatedConstTy::LitInt(i),
             table.new_var(TyVarSort::Integral, &Kind::Star),
         ),
 
@@ -58,7 +115,7 @@ pub(crate) fn evaluate_const_ty<'db>(
                 db,
                 ConstTyData::Evaluated(
                     EvaluatedConstTy::Invalid,
-                    TyId::invalid(db, InvalidCause::InvalidConstTyExpr { body: *body }),
+                    TyId::invalid(db, InvalidCause::InvalidConstTyExpr { body }),
                 ),
             );
         }
@@ -105,7 +162,9 @@ impl<'db> ConstTyId<'db> {
             ConstTyData::TyVar(_, ty) => *ty,
             ConstTyData::TyParam(_, ty) => *ty,
             ConstTyData::Evaluated(_, ty) => *ty,
-            ConstTyData::UnEvaluated(_) => TyId::invalid(db, InvalidCause::Other),
+            ConstTyData::UnEvaluated { ty, .. } => {
+                ty.unwrap_or_else(|| TyId::invalid(db, InvalidCause::Other))
+            }
         }
     }
 
@@ -116,7 +175,30 @@ impl<'db> ConstTyId<'db> {
                 format!("const {}: {}", param.pretty_print(db), ty.pretty_print(db))
             }
             ConstTyData::Evaluated(resolved, _) => resolved.pretty_print(db),
-            ConstTyData::UnEvaluated(_) => "<unevaluated>".to_string(),
+            ConstTyData::UnEvaluated {
+                body, const_def, ..
+            } => {
+                if let Some(const_def) = const_def
+                    && let Some(name) = const_def.name(db).to_opt()
+                {
+                    return format!("const {}", name.data(db));
+                }
+
+                let expr = body.expr(db);
+                let Partial::Present(expr) = expr.data(db, *body) else {
+                    return "const value".into();
+                };
+
+                match expr {
+                    Expr::Lit(LitKind::Bool(value)) => format!("const {}", value),
+                    Expr::Lit(LitKind::Int(int)) => format!("const {}", int.data(db)),
+                    Expr::Lit(LitKind::String(string)) => format!("const \"{}\"", string.data(db)),
+                    Expr::Path(path) if path.is_present() => {
+                        format!("const {}", path.unwrap().pretty_print(db))
+                    }
+                    _ => "const value".into(),
+                }
+            }
         }
     }
 
@@ -128,14 +210,23 @@ impl<'db> ConstTyId<'db> {
         evaluate_const_ty(db, self, expected_ty)
     }
 
-    pub(super) fn from_body(db: &'db dyn HirAnalysisDb, body: Body<'db>) -> Self {
-        let data = ConstTyData::UnEvaluated(body);
+    pub(super) fn from_body(
+        db: &'db dyn HirAnalysisDb,
+        body: Body<'db>,
+        ty: Option<TyId<'db>>,
+        const_def: Option<Const<'db>>,
+    ) -> Self {
+        let data = ConstTyData::UnEvaluated {
+            body,
+            ty,
+            const_def,
+        };
         Self::new(db, data)
     }
 
     pub fn from_opt_body(db: &'db dyn HirAnalysisDb, body: Partial<Body<'db>>) -> Self {
         match body {
-            Partial::Present(body) => Self::from_body(db, body),
+            Partial::Present(body) => Self::from_body(db, body, None, None),
             Partial::Absent => Self::invalid(db, InvalidCause::ParseError),
         }
     }
@@ -152,9 +243,13 @@ impl<'db> ConstTyId<'db> {
             ConstTyData::TyVar(var, _) => ConstTyData::TyVar(var.clone(), ty),
             ConstTyData::TyParam(param, _) => ConstTyData::TyParam(param.clone(), ty),
             ConstTyData::Evaluated(evaluated, _) => ConstTyData::Evaluated(evaluated.clone(), ty),
-            ConstTyData::UnEvaluated(_) => {
-                return self;
-            }
+            ConstTyData::UnEvaluated {
+                body, const_def, ..
+            } => ConstTyData::UnEvaluated {
+                body: *body,
+                ty: Some(ty),
+                const_def: *const_def,
+            },
         };
 
         Self::new(db, data)
@@ -166,7 +261,11 @@ pub enum ConstTyData<'db> {
     TyVar(TyVar<'db>, TyId<'db>),
     TyParam(TyParam<'db>, TyId<'db>),
     Evaluated(EvaluatedConstTy<'db>, TyId<'db>),
-    UnEvaluated(Body<'db>),
+    UnEvaluated {
+        body: Body<'db>,
+        ty: Option<TyId<'db>>,
+        const_def: Option<Const<'db>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

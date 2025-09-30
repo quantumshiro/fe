@@ -1,7 +1,7 @@
 ---
 source: crates/hir-analysis/tests/ty_check.rs
 expression: res
-input_file: crates/hir-analysis/test_files/ty_check/aug_assign.fe
+input_file: test_files/ty_check/aug_assign.fe
 ---
 note: 
    ┌─ aug_assign.fe:5:46
@@ -200,7 +200,7 @@ note:
    ┌─ aug_assign.fe:17:9
    │
 17 │     arr[0] -= arr[1] + 1
-   │         ^ u256
+   │         ^ usize
 
 note: 
    ┌─ aug_assign.fe:17:15
@@ -224,7 +224,7 @@ note:
    ┌─ aug_assign.fe:17:19
    │
 17 │     arr[0] -= arr[1] + 1
-   │                   ^ u256
+   │                   ^ usize
 
 note: 
    ┌─ aug_assign.fe:17:24
@@ -248,4 +248,4 @@ note:
    ┌─ aug_assign.fe:18:9
    │
 18 │     arr[0]
-   │         ^ u256
+   │         ^ usize

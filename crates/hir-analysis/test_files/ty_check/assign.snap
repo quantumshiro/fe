@@ -1,7 +1,7 @@
 ---
 source: crates/hir-analysis/tests/ty_check.rs
 expression: res
-input_file: crates/hir-analysis/test_files/ty_check/assign.fe
+input_file: test_files/ty_check/assign.fe
 ---
 note: 
    ┌─ assign.fe:20:44
@@ -149,7 +149,7 @@ note:
    ┌─ assign.fe:32:9
    │
 32 │     arr[1] = true
-   │         ^ u256
+   │         ^ usize
 
 note: 
    ┌─ assign.fe:32:14

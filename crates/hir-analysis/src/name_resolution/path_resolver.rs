@@ -2,7 +2,7 @@ use common::indexmap::IndexMap;
 use either::Either;
 use hir::{
     hir_def::{
-        Enum, EnumVariant, GenericParamOwner, IdentId, ImplTrait, ItemKind, Partial, PathId,
+        Const, Enum, EnumVariant, GenericParamOwner, IdentId, ImplTrait, ItemKind, Partial, PathId,
         PathKind, Trait, TypeBound, TypeId, TypeKind, VariantKind, scope_graph::ScopeId,
     },
     span::{DynLazySpan, path::LazyPathSpan},
@@ -398,7 +398,7 @@ pub enum PathRes<'db> {
     FuncParam(ItemKind<'db>, u16),
     Trait(TraitInstId<'db>),
     EnumVariant(ResolvedVariant<'db>),
-    Const(TyId<'db>),
+    Const(Const<'db>, TyId<'db>),
     Mod(ScopeId<'db>),
     Method(TyId<'db>, MethodCandidate<'db>),
 }
@@ -412,7 +412,7 @@ impl<'db> PathRes<'db> {
             PathRes::Ty(ty) => PathRes::Ty(f(ty)),
             PathRes::TyAlias(alias, ty) => PathRes::TyAlias(alias, f(ty)),
             PathRes::Func(ty) => PathRes::Func(f(ty)),
-            PathRes::Const(ty) => PathRes::Const(f(ty)),
+            PathRes::Const(const_, ty) => PathRes::Const(const_, f(ty)),
             PathRes::EnumVariant(v) => PathRes::EnumVariant(ResolvedVariant { ty: f(v.ty), ..v }),
             // TODO: map over candidate ty?
             PathRes::Method(ty, candidate) => PathRes::Method(f(ty), candidate),
@@ -422,7 +422,8 @@ impl<'db> PathRes<'db> {
 
     pub fn as_scope(&self, db: &'db dyn HirAnalysisDb) -> Option<ScopeId<'db>> {
         match self {
-            PathRes::Ty(ty) | PathRes::Func(ty) | PathRes::Const(ty) => ty.as_scope(db),
+            PathRes::Ty(ty) | PathRes::Func(ty) => ty.as_scope(db),
+            PathRes::Const(const_, _) => Some(const_.scope()),
             PathRes::TyAlias(alias, _) => Some(alias.alias.scope()),
             PathRes::Trait(trait_) => Some(trait_.def(db).trait_(db).scope()),
             PathRes::EnumVariant(variant) => Some(variant.enum_(db).scope()),
@@ -434,9 +435,8 @@ impl<'db> PathRes<'db> {
 
     pub fn is_visible_from(&self, db: &'db dyn HirAnalysisDb, from_scope: ScopeId<'db>) -> bool {
         match self {
-            PathRes::Ty(ty) | PathRes::Func(ty) | PathRes::Const(ty) => {
-                is_ty_visible_from(db, *ty, from_scope)
-            }
+            PathRes::Ty(ty) | PathRes::Func(ty) => is_ty_visible_from(db, *ty, from_scope),
+            PathRes::Const(const_, _) => is_scope_visible_from(db, const_.scope(), from_scope),
             PathRes::Method(_, cand) => {
                 // Method visibility depends on the method's defining scope
                 // (function or trait method), not the receiver type.
@@ -466,13 +466,14 @@ impl<'db> PathRes<'db> {
         };
 
         match self {
-            PathRes::Ty(ty) | PathRes::Func(ty) | PathRes::Const(ty) => ty_path(*ty),
+            PathRes::Ty(ty) | PathRes::Func(ty) => ty_path(*ty),
             PathRes::TyAlias(alias, _) => alias.alias.scope().pretty_path(db),
             PathRes::EnumVariant(v) => Some(format!(
                 "{}::{}",
                 ty_path(v.ty).unwrap_or_else(|| "<missing>".into()),
                 v.variant.def(db).name.to_opt()?.data(db)
             )),
+            PathRes::Const(const_, _) => const_.scope().pretty_path(db),
             r @ (PathRes::Trait(..) | PathRes::Mod(..) | PathRes::FuncParam(..)) => {
                 r.as_scope(db).unwrap().pretty_path(db)
             }
@@ -493,7 +494,7 @@ impl<'db> PathRes<'db> {
             PathRes::FuncParam(..) => "function parameter",
             PathRes::Trait(_) => "trait",
             PathRes::EnumVariant(_) => "enum variant",
-            PathRes::Const(_) => "constant",
+            PathRes::Const(..) => "constant",
             PathRes::Mod(_) => "module",
             PathRes::Method(..) => "method",
         }
@@ -797,7 +798,7 @@ where
             ));
         }
         Some(PathRes::FuncParam(..) | PathRes::Method(..)) => unreachable!(),
-        Some(PathRes::Const(_) | PathRes::Mod(_) | PathRes::Trait(_)) | None => {}
+        Some(PathRes::Const(..) | PathRes::Mod(_) | PathRes::Trait(_)) | None => {}
     };
 
     let query = make_query(db, path, parent_scope);
@@ -992,7 +993,7 @@ pub fn resolve_name_res<'db>(
                     } else {
                         TyId::invalid(db, InvalidCause::ParseError)
                     };
-                    PathRes::Const(ty)
+                    PathRes::Const(const_, ty)
                 }
 
                 ItemKind::TypeAlias(type_alias) => {

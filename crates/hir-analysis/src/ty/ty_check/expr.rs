@@ -474,7 +474,7 @@ impl<'db> TyChecker<'db> {
 
                     ExprProp::new(self.table.instantiate_to_term(ty), true)
                 }
-                PathRes::Const(ty) => ExprProp::new(ty, true),
+                PathRes::Const(_, ty) => ExprProp::new(ty, true),
                 PathRes::Method(receiver_ty, candidate) => {
                     let canonical_r_ty = Canonicalized::new(self.db, receiver_ty);
                     let method_ty = match candidate {
@@ -540,7 +540,7 @@ impl<'db> TyChecker<'db> {
                 }
             }
 
-            PathRes::Func(ty) | PathRes::Const(ty) => {
+            PathRes::Func(ty) | PathRes::Const(_, ty) => {
                 let record_like = RecordLike::from_ty(ty);
                 let diag =
                     BodyDiag::record_expected(self.db, span.path().into(), Some(record_like));
@@ -778,7 +778,11 @@ impl<'db> TyChecker<'db> {
 
         let array = TyId::array(self.db, expected_elem_ty);
         let ty = if let Some(len_body) = len.to_opt() {
-            let len_ty = ConstTyId::from_body(self.db, len_body);
+            let expected_len_ty = array
+                .applicable_ty(self.db)
+                .and_then(|applicable| applicable.const_ty);
+
+            let len_ty = ConstTyId::from_body(self.db, len_body, expected_len_ty, None);
             let len_ty = TyId::const_ty(self.db, len_ty);
             let array_ty = TyId::app(self.db, array, len_ty);
 

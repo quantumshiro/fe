@@ -13,7 +13,7 @@ use super::{
     ty_def::{InvalidCause, Kind, TyData, TyId, TyParam},
 };
 use crate::name_resolution::{
-    NameDomain, NameResKind, PathRes, resolve_ident_to_bucket, resolve_path,
+    NameDomain, NameResKind, PathRes, PathResErrorKind, resolve_ident_to_bucket, resolve_path,
 };
 use crate::{HirAnalysisDb, ty::binder::Binder};
 
@@ -84,7 +84,27 @@ fn lower_path<'db>(
     match resolve_path(db, path, scope, assumptions, false) {
         Ok(PathRes::Ty(ty) | PathRes::TyAlias(_, ty) | PathRes::Func(ty)) => ty,
         Ok(res) => TyId::invalid(db, InvalidCause::NotAType(res)),
-        Err(_) => TyId::invalid(db, InvalidCause::PathResolutionFailed { path }),
+        Err(err) => {
+            // Try to resolve as a value, to find a matching `const` definition
+            if matches!(err.kind, PathResErrorKind::NotFound { .. })
+                && let Ok(resolved) = resolve_path(db, path, scope, assumptions, true)
+            {
+                return match resolved {
+                    PathRes::Const(const_def, ty) => {
+                        if let Some(body) = const_def.body(db).to_opt() {
+                            let const_ty =
+                                ConstTyId::from_body(db, body, Some(ty), Some(const_def));
+                            TyId::const_ty(db, const_ty)
+                        } else {
+                            TyId::invalid(db, InvalidCause::ParseError)
+                        }
+                    }
+                    other => TyId::invalid(db, InvalidCause::NotAType(other)),
+                };
+            }
+
+            TyId::invalid(db, InvalidCause::PathResolutionFailed { path })
+        }
     }
 }
 

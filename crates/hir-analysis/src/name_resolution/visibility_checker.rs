@@ -64,7 +64,9 @@ pub(crate) fn is_ty_visible_from(db: &dyn HirAnalysisDb, ty: TyId, from_scope: S
                 is_scope_visible_from(db, param.scope(db), from_scope)
             }
             ConstTyData::Evaluated(_, _) => true,
-            ConstTyData::UnEvaluated(body) => is_scope_visible_from(db, body.scope(), from_scope),
+            ConstTyData::UnEvaluated { body, .. } => {
+                is_scope_visible_from(db, body.scope(), from_scope)
+            }
         },
         TyData::TyVar(_) | TyData::Never | TyData::Invalid(_) => true,
         TyData::QualifiedTy(trait_inst) => {
