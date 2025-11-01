@@ -297,6 +297,9 @@ impl<'db> Trait<'db> {
                         Func::lower_ast(ctxt, func, false);
                     }
                     ast::TraitItemKind::Type(t) => types.push(AssocTyDecl::lower_ast(ctxt, t)),
+                    ast::TraitItemKind::Const(_c) => {
+                        // TODO: Lower associated const declarations
+                    }
                 };
             }
         }
@@ -362,6 +365,9 @@ impl<'db> ImplTrait<'db> {
                         Func::lower_ast(ctxt, func, false);
                     }
                     ast::TraitItemKind::Type(t) => types.push(AssocTyDef::lower_ast(ctxt, t)),
+                    ast::TraitItemKind::Const(_c) => {
+                        // TODO: Lower associated const definitions
+                    }
                 };
             }
         }
