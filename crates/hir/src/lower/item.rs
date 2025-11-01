@@ -289,6 +289,7 @@ impl<'db> Trait<'db> {
         let origin = HirOrigin::raw(&ast);
 
         let mut types = vec![];
+        let mut consts = vec![];
 
         if let Some(item_list) = ast.item_list() {
             for impl_item in item_list {
@@ -297,8 +298,8 @@ impl<'db> Trait<'db> {
                         Func::lower_ast(ctxt, func, false);
                     }
                     ast::TraitItemKind::Type(t) => types.push(AssocTyDecl::lower_ast(ctxt, t)),
-                    ast::TraitItemKind::Const(_c) => {
-                        // TODO: Lower associated const declarations
+                    ast::TraitItemKind::Const(c) => {
+                        consts.push(AssocConstDecl::lower_ast(ctxt, c));
                     }
                 };
             }
@@ -314,6 +315,7 @@ impl<'db> Trait<'db> {
             super_traits,
             where_clause,
             types,
+            consts,
             ctxt.top_mod(),
             origin,
         );
@@ -358,6 +360,7 @@ impl<'db> ImplTrait<'db> {
         let origin = HirOrigin::raw(&ast);
 
         let mut types = vec![];
+        let mut consts = vec![];
         if let Some(item_list) = ast.item_list() {
             for impl_item in item_list {
                 match impl_item.kind() {
@@ -365,8 +368,8 @@ impl<'db> ImplTrait<'db> {
                         Func::lower_ast(ctxt, func, false);
                     }
                     ast::TraitItemKind::Type(t) => types.push(AssocTyDef::lower_ast(ctxt, t)),
-                    ast::TraitItemKind::Const(_c) => {
-                        // TODO: Lower associated const definitions
+                    ast::TraitItemKind::Const(c) => {
+                        consts.push(AssocConstDef::lower_ast(ctxt, c));
                     }
                 };
             }
@@ -381,6 +384,7 @@ impl<'db> ImplTrait<'db> {
             generic_params,
             where_clause,
             types,
+            consts,
             ctxt.top_mod(),
             origin,
         );
@@ -393,6 +397,30 @@ impl<'db> AssocTyDef<'db> {
         AssocTyDef {
             name: IdentId::lower_token_partial(ctxt, ast.name()),
             ty: TypeId::lower_ast_partial(ctxt, ast.ty()),
+        }
+    }
+}
+
+impl<'db> AssocConstDecl<'db> {
+    fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::TraitConstItem) -> Self {
+        let name = IdentId::lower_token_partial(ctxt, ast.name());
+        let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
+        let default = ast
+            .value()
+            .map(|expr| crate::hir_def::Partial::Present(Body::lower_ast(ctxt, expr)));
+        AssocConstDecl { name, ty, default }
+    }
+}
+
+impl<'db> AssocConstDef<'db> {
+    fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::TraitConstItem) -> Self {
+        AssocConstDef {
+            name: IdentId::lower_token_partial(ctxt, ast.name()),
+            ty: TypeId::lower_ast_partial(ctxt, ast.ty()),
+            value: crate::hir_def::Partial::Present(Body::lower_ast(
+                ctxt,
+                ast.value().unwrap(),
+            )),
         }
     }
 }
