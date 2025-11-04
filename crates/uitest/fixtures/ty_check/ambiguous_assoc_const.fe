@@ -17,6 +17,6 @@ impl C2 for Foo {
 }
 
 fn f() -> usize {
-    <Foo as C2>::X
     Foo::X
+    <Foo as C2>::X
 }

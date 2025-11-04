@@ -74,6 +74,13 @@ impl<S: TokenStream> Parser<S> {
         self.current_token().map(|tok| tok.syntax_kind())
     }
 
+    pub fn current_kind_same_line(&mut self) -> Option<SyntaxKind> {
+        let nt = self.set_newline_as_trivia(false);
+        let kind = self.current_kind();
+        self.set_newline_as_trivia(nt);
+        kind
+    }
+
     /// Sets the newline kind as trivia if `is_trivia` is `true`. Otherwise, the
     /// newline kind is not regarded as a trivia.
     ///
