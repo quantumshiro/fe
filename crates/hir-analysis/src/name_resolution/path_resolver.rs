@@ -761,13 +761,28 @@ where
                     AssocConstSelection::NotFound => {}
                 }
             }
-            // Fast path: `<A as Trait>::Assoc` — return the projection directly.
-            if let TyData::QualifiedTy(trait_inst) = ty.data(db)
-                && let Some(assoc_ty) = trait_inst.assoc_ty(db, ident)
-            {
-                let r = PathRes::Ty(assoc_ty);
-                observer(path, &r);
-                return Ok(r);
+            // Fast paths for qualified types `<A as Trait>::...`
+            if let TyData::QualifiedTy(trait_inst) = ty.data(db) {
+                // Associated type projection
+                if let Some(assoc_ty) = trait_inst.assoc_ty(db, ident) {
+                    let r = PathRes::Ty(assoc_ty);
+                    observer(path, &r);
+                    return Ok(r);
+                }
+
+                // Associated const on a specific trait instance
+                if resolve_tail_as_value
+                    && trait_inst
+                        .def(db)
+                        .trait_(db)
+                        .consts(db)
+                        .iter()
+                        .any(|c| c.name.to_opt() == Some(ident))
+                {
+                    let r = PathRes::TraitConst(trait_inst.self_ty(db), *trait_inst, ident);
+                    observer(path, &r);
+                    return Ok(r);
+                }
             }
 
             // Try to resolve as an enum variant
