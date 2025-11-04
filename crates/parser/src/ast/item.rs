@@ -270,9 +270,9 @@ impl TraitItem {
             SK::TraitTypeItem => {
                 TraitItemKind::Type(TraitTypeItem::cast(self.syntax().clone()).unwrap())
             }
-            SK::TraitConstItem => TraitItemKind::Const(
-                TraitConstItem::cast(self.syntax().clone()).unwrap(),
-            ),
+            SK::TraitConstItem => {
+                TraitItemKind::Const(TraitConstItem::cast(self.syntax().clone()).unwrap())
+            }
             _ => unreachable!(),
         }
     }

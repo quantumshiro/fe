@@ -414,13 +414,12 @@ impl<'db> AssocConstDecl<'db> {
 
 impl<'db> AssocConstDef<'db> {
     fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::TraitConstItem) -> Self {
+        let value = ast.value().map(|expr| Body::lower_ast(ctxt, expr)).into();
+
         AssocConstDef {
             name: IdentId::lower_token_partial(ctxt, ast.name()),
             ty: TypeId::lower_ast_partial(ctxt, ast.ty()),
-            value: crate::hir_def::Partial::Present(Body::lower_ast(
-                ctxt,
-                ast.value().unwrap(),
-            )),
+            value,
         }
     }
 }

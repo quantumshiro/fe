@@ -933,6 +933,16 @@ impl<'db> Trait<'db> {
             .iter()
             .find(|trait_type| trait_type.name.to_opt() == Some(name))
     }
+
+    pub fn const_(
+        self,
+        db: &'db dyn HirDb,
+        name: IdentId<'db>,
+    ) -> Option<&'db AssocConstDecl<'db>> {
+        self.consts(db)
+            .iter()
+            .find(|c| c.name == Partial::Present(name))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -1003,6 +1013,12 @@ impl<'db> ImplTrait<'db> {
             ItemKind::Func(func) => Some(func),
             _ => None,
         })
+    }
+
+    pub fn const_(self, db: &'db dyn HirDb, name: IdentId<'db>) -> Option<&'db AssocConstDef<'db>> {
+        self.consts(db)
+            .iter()
+            .find(|c| c.name == Partial::Present(name))
     }
 }
 

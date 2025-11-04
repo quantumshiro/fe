@@ -1421,37 +1421,90 @@ fn analyze_impl_trait_specific_error<'db>(
 
         // Check that the implemented associated type satisfies its bounds
         for bound in &assoc_type.bounds {
-            if let TypeBound::Trait(trait_ref) = bound {
-                match lower_trait_ref(db, impl_ty, *trait_ref, impl_trait.scope(), assumptions) {
-                    Ok(bound_inst) => {
-                        let canonical_bound = Canonical::new(db, bound_inst);
-                        if let GoalSatisfiability::UnSat(subgoal) = is_goal_satisfiable(
-                            db,
-                            impl_trait.top_mod(db).ingot(db),
-                            canonical_bound,
-                            assumptions,
-                        ) {
-                            // Find the span for this specific associated type implementation
-                            let assoc_ty_span = impl_trait
-                                .associated_type_span(db, name)
-                                .map(|s| s.ty().into())
-                                .unwrap_or_else(|| impl_trait.span().ty().into());
+            let TypeBound::Trait(trait_ref) = bound else {
+                continue;
+            };
+            let Ok(bound_inst) =
+                lower_trait_ref(db, impl_ty, *trait_ref, impl_trait.scope(), assumptions)
+            else {
+                // Error reported elsewhere
+                continue;
+            };
 
-                            diags.push(
-                                TraitConstraintDiag::TraitBoundNotSat {
-                                    span: assoc_ty_span,
-                                    primary_goal: bound_inst,
-                                    unsat_subgoal: subgoal.map(|s| s.value),
-                                }
-                                .into(),
-                            );
-                        }
+            let canonical_bound = Canonical::new(db, bound_inst);
+            if let GoalSatisfiability::UnSat(subgoal) = is_goal_satisfiable(
+                db,
+                impl_trait.top_mod(db).ingot(db),
+                canonical_bound,
+                assumptions,
+            ) {
+                // Find the span for this specific associated type implementation
+                let assoc_ty_span = impl_trait
+                    .associated_type_span(db, name)
+                    .map(|s| s.ty().into())
+                    .unwrap_or_else(|| impl_trait.span().ty().into());
+
+                diags.push(
+                    TraitConstraintDiag::TraitBoundNotSat {
+                        span: assoc_ty_span,
+                        primary_goal: bound_inst,
+                        unsat_subgoal: subgoal.map(|s| s.value),
                     }
-                    Err(_) => {
-                        // Error lowering the trait bound - this will be reported elsewhere
-                    }
-                }
+                    .into(),
+                );
             }
+        }
+    }
+
+    // 9. Check that required associated consts declared in the trait are present in the impl
+    {
+        for trait_const in trait_hir.consts(db) {
+            if trait_const.default.is_some() {
+                continue;
+            }
+            let Some(name) = trait_const.name.to_opt() else {
+                continue;
+            };
+
+            if impl_trait.const_(db, name).is_none() {
+                diags.push(
+                    ImplDiag::MissingAssociatedConst {
+                        primary: impl_trait.span().ty().into(),
+                        const_name: name,
+                        trait_: trait_hir,
+                    }
+                    .into(),
+                );
+            }
+        }
+    }
+
+    // 10. Check that associated consts in the impl trait have values
+    for (idx, impl_const) in impl_trait.consts(db).iter().enumerate() {
+        let Some(name) = impl_const.name.to_opt() else {
+            continue;
+        };
+
+        if trait_hir.const_(db, name).is_some() {
+            if impl_const.value.to_opt().is_none() {
+                diags.push(
+                    ImplDiag::MissingAssociatedConstValue {
+                        primary: impl_trait.span().associated_const(idx).ty().into(),
+                        const_name: name,
+                        trait_: trait_hir,
+                    }
+                    .into(),
+                );
+            }
+        } else {
+            diags.push(
+                ImplDiag::ConstNotDefinedInTrait {
+                    primary: impl_trait.span().associated_const(idx).name().into(),
+                    trait_: trait_hir,
+                    const_name: name,
+                }
+                .into(),
+            );
         }
     }
 

@@ -334,14 +334,18 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                     });
                 }
 
+                let (inst, _) = candidates.first().unwrap();
+                let trait_name = inst.def(db).trait_(db).name(db).unwrap().data(db);
+                let self_ty = inst.self_ty(db).pretty_print(db);
+                let hint = format!(
+                    "hint: specify the trait explicitly: `<{self_ty} as {trait_name}>::{name}`"
+                );
+
                 CompleteDiagnostic {
                     severity,
                     message: format!("ambiguous associated type `{name}`"),
                     sub_diagnostics,
-                    notes: vec![format!(
-                        "specify the trait explicitly: `<Type as Trait>::{}`",
-                        name
-                    )],
+                    notes: vec![hint],
                     error_code,
                 }
             }
@@ -614,6 +618,49 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                     message: "trait is not in the scope".to_string(),
                     sub_diagnostics,
                     notes: vec![],
+                    error_code,
+                }
+            }
+
+            Self::AmbiguousAssociatedConst {
+                primary,
+                name,
+                trait_insts,
+            } => {
+                let const_name = name.data(db);
+                let mut sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!("`{const_name}` is ambiguous"),
+                    span: primary.resolve(db),
+                }];
+
+                // Candidate labels at the trait declarations
+                for inst in trait_insts {
+                    let trait_def = inst.def(db).trait_(db);
+                    let trait_name = trait_def.name(db).unwrap().data(db);
+                    let trait_name_span = trait_def.span().name().resolve(db);
+                    let self_ty = inst.self_ty(db).pretty_print(db);
+                    let msg = format!("candidate: `<{self_ty} as {trait_name}>::{const_name}`");
+                    sub_diagnostics.push(SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: msg,
+                        span: trait_name_span,
+                    });
+                }
+
+                // Build a hint using the first candidate
+                let inst = trait_insts.first().unwrap();
+                let trait_name = inst.def(db).trait_(db).name(db).unwrap().data(db);
+                let self_ty = inst.self_ty(db).pretty_print(db);
+                let hint = format!(
+                    "hint: specify the trait explicitly: `<{self_ty} as {trait_name}>::{const_name}`"
+                );
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: "multiple trait candidates found".to_string(),
+                    sub_diagnostics,
+                    notes: vec![hint],
                     error_code,
                 }
             }
@@ -2618,6 +2665,66 @@ impl DiagnosticVoucher for ImplDiag<'_> {
                     message: format!(
                         "missing associated type `{}` from trait `{}`",
                         type_name.data(db),
+                        trait_.name(db).unwrap().data(db)
+                    ),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
+
+            Self::MissingAssociatedConstValue {
+                primary,
+                const_name,
+                trait_,
+            } => CompleteDiagnostic {
+                severity,
+                message: "missing associated const value in trait implementation".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "missing value for associated const `{}` from trait `{}`",
+                        const_name.data(db),
+                        trait_.name(db).unwrap().data(db)
+                    ),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
+
+            Self::ConstNotDefinedInTrait {
+                primary,
+                trait_,
+                const_name,
+            } => CompleteDiagnostic {
+                severity,
+                message: "associated const not defined in trait".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "associated const `{}` is not defined in trait `{}`",
+                        const_name.data(db),
+                        trait_.name(db).unwrap().data(db)
+                    ),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
+
+            Self::MissingAssociatedConst {
+                primary,
+                const_name,
+                trait_,
+            } => CompleteDiagnostic {
+                severity,
+                message: "missing associated const in trait implementation".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "missing associated const `{}` from trait `{}`",
+                        const_name.data(db),
                         trait_.name(db).unwrap().data(db)
                     ),
                     span: primary.resolve(db),
