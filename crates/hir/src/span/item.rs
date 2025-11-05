@@ -202,12 +202,25 @@ define_lazy_span_node!(
     ast::TraitItemList,
     @idx {
         (assoc_type, LazyTraitTypeSpan),
+        (assoc_const, LazyTraitConstSpan),
     }
 );
 
 define_lazy_span_node!(
     LazyTraitTypeSpan,
     ast::TraitTypeItem,
+    @token {
+        (name, name),
+    }
+    @node {
+        (ty, ty, LazyTySpan),
+        (attributes, attr_list, LazyAttrListSpan),
+    }
+);
+
+define_lazy_span_node!(
+    LazyTraitConstSpan,
+    ast::TraitConstItem,
     @token {
         (name, name),
     }
@@ -236,6 +249,10 @@ impl<'db> LazyImplTraitSpan<'db> {
 
     pub fn associated_type(self, idx: usize) -> LazyTraitTypeSpan<'db> {
         self.item_list().assoc_type(idx)
+    }
+
+    pub fn associated_const(self, idx: usize) -> LazyTraitConstSpan<'db> {
+        self.item_list().assoc_const(idx)
     }
 }
 

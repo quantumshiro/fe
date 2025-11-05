@@ -893,6 +893,8 @@ pub struct Trait<'db> {
     pub where_clause: WhereClauseId<'db>,
     #[return_ref]
     pub types: Vec<AssocTyDecl<'db>>,
+    #[return_ref]
+    pub consts: Vec<AssocConstDecl<'db>>,
 
     pub top_mod: TopLevelMod<'db>,
 
@@ -931,6 +933,16 @@ impl<'db> Trait<'db> {
             .iter()
             .find(|trait_type| trait_type.name.to_opt() == Some(name))
     }
+
+    pub fn const_(
+        self,
+        db: &'db dyn HirDb,
+        name: IdentId<'db>,
+    ) -> Option<&'db AssocConstDecl<'db>> {
+        self.consts(db)
+            .iter()
+            .find(|c| c.name == Partial::Present(name))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -938,6 +950,13 @@ pub struct AssocTyDecl<'db> {
     pub name: Partial<IdentId<'db>>,
     pub bounds: Vec<TypeBound<'db>>,
     pub default: Option<TypeId<'db>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct AssocConstDecl<'db> {
+    pub name: Partial<IdentId<'db>>,
+    pub ty: Partial<TypeId<'db>>,
+    pub default: Option<Partial<Body<'db>>>,
 }
 
 #[salsa::tracked]
@@ -953,6 +972,8 @@ pub struct ImplTrait<'db> {
     pub where_clause: WhereClauseId<'db>,
     #[return_ref]
     pub types: Vec<AssocTyDef<'db>>,
+    #[return_ref]
+    pub consts: Vec<AssocConstDef<'db>>,
     pub top_mod: TopLevelMod<'db>,
 
     #[return_ref]
@@ -993,12 +1014,25 @@ impl<'db> ImplTrait<'db> {
             _ => None,
         })
     }
+
+    pub fn const_(self, db: &'db dyn HirDb, name: IdentId<'db>) -> Option<&'db AssocConstDef<'db>> {
+        self.consts(db)
+            .iter()
+            .find(|c| c.name == Partial::Present(name))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AssocTyDef<'db> {
     pub name: Partial<IdentId<'db>>,
     pub ty: Partial<TypeId<'db>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct AssocConstDef<'db> {
+    pub name: Partial<IdentId<'db>>,
+    pub ty: Partial<TypeId<'db>>,
+    pub value: Partial<Body<'db>>,
 }
 
 #[salsa::tracked]

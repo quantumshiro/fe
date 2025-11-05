@@ -236,8 +236,32 @@ impl TraitTypeItem {
 }
 
 ast_node! {
+    /// `const FOO: Ty` in trait definition
+    /// or `const FOO: Ty = expr` in trait implementation
+    pub struct TraitConstItem,
+    SK::TraitConstItem,
+}
+impl super::AttrListOwner for TraitConstItem {}
+impl TraitConstItem {
+    /// Returns the name of the associated const
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::Ident)
+    }
+
+    /// Returns the type of the associated const
+    pub fn ty(&self) -> Option<super::Type> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the optional default value of the associated const
+    pub fn value(&self) -> Option<super::Expr> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
     pub struct TraitItem,
-    SK::Func | SK::TraitTypeItem
+    SK::Func | SK::TraitTypeItem | SK::TraitConstItem
 }
 impl TraitItem {
     pub fn kind(&self) -> TraitItemKind {
@@ -245,6 +269,9 @@ impl TraitItem {
             SK::Func => TraitItemKind::Func(AstNode::cast(self.syntax().clone()).unwrap()),
             SK::TraitTypeItem => {
                 TraitItemKind::Type(TraitTypeItem::cast(self.syntax().clone()).unwrap())
+            }
+            SK::TraitConstItem => {
+                TraitItemKind::Const(TraitConstItem::cast(self.syntax().clone()).unwrap())
             }
             _ => unreachable!(),
         }
@@ -254,6 +281,7 @@ impl TraitItem {
 pub enum TraitItemKind {
     Func(Func),
     Type(TraitTypeItem),
+    Const(TraitConstItem),
 }
 
 ast_node! {

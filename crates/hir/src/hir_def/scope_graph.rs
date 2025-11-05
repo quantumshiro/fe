@@ -85,6 +85,8 @@ pub enum ScopeId<'db> {
 
     /// Trait associated type scope.
     TraitType(Trait<'db>, u16),
+    /// Trait associated const scope.
+    TraitConst(Trait<'db>, u16),
 
     /// A function parameter scope.
     FuncParam(ItemKind<'db>, u16),
@@ -105,6 +107,7 @@ impl<'db> ScopeId<'db> {
             ScopeId::Item(item) => item.top_mod(db),
             ScopeId::GenericParam(item, _) => item.top_mod(db),
             ScopeId::TraitType(t, _) => t.top_mod(db),
+            ScopeId::TraitConst(t, _) => t.top_mod(db),
             ScopeId::FuncParam(item, _) => item.top_mod(db),
             ScopeId::Field(p, _) => p.top_mod(db),
             ScopeId::Variant(v) => v.enum_.top_mod(db),
@@ -133,6 +136,7 @@ impl<'db> ScopeId<'db> {
             ScopeId::GenericParam(item, _) => item,
             ScopeId::FuncParam(item, _) => item,
             ScopeId::TraitType(t, _) => t.into(),
+            ScopeId::TraitConst(t, _) => t.into(),
             ScopeId::Field(FieldParent::Struct(s), _) => s.into(),
             ScopeId::Field(FieldParent::Contract(c), _) => c.into(),
             ScopeId::Field(FieldParent::Variant(v), _) | ScopeId::Variant(v) => v.enum_.into(),
@@ -309,6 +313,7 @@ impl<'db> ScopeId<'db> {
             }
 
             ScopeId::TraitType(t, idx) => t.types(db)[idx as usize].name.to_opt(),
+            ScopeId::TraitConst(t, idx) => t.consts(db)[idx as usize].name.to_opt(),
 
             ScopeId::Block(..) => None,
         }
@@ -342,6 +347,9 @@ impl<'db> ScopeId<'db> {
             ScopeId::TraitType(t, idx) => {
                 Some(t.span().item_list().assoc_type(idx as usize).into())
             }
+            ScopeId::TraitConst(t, idx) => {
+                Some(t.span().item_list().assoc_const(idx as usize).into())
+            }
 
             ScopeId::Block(..) => None,
         }
@@ -352,6 +360,7 @@ impl<'db> ScopeId<'db> {
             ScopeId::Item(item) => item.kind_name(),
             ScopeId::GenericParam(_, _) => "type",
             ScopeId::TraitType(..) => "associated type",
+            ScopeId::TraitConst(..) => "associated const",
             ScopeId::FuncParam(_, _) => "value",
             ScopeId::Field(_, _) => "field",
             ScopeId::Variant(..) => "value",

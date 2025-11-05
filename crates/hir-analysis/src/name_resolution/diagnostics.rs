@@ -40,6 +40,12 @@ pub enum PathResDiag<'db> {
         candidates: ThinVec<(TraitInstId<'db>, TyId<'db>)>,
     },
 
+    AmbiguousAssociatedConst {
+        primary: DynLazySpan<'db>,
+        name: IdentId<'db>,
+        trait_insts: ThinVec<TraitInstId<'db>>,
+    },
+
     /// The name is found, but it can't be used as a middle segment of a path.
     InvalidPathSegment {
         span: DynLazySpan<'db>,
@@ -120,6 +126,7 @@ impl<'db> PathResDiag<'db> {
             Self::TypeMustBeKnown(span) => span.top_mod(db).unwrap(),
             Self::AmbiguousInherentMethod { primary, .. } => primary.top_mod(db).unwrap(),
             Self::AmbiguousTrait { primary, .. } => primary.top_mod(db).unwrap(),
+            Self::AmbiguousAssociatedConst { primary, .. } => primary.top_mod(db).unwrap(),
             Self::InvisibleAmbiguousTrait { primary, .. } => primary.top_mod(db).unwrap(),
         }
     }
@@ -148,6 +155,7 @@ impl<'db> PathResDiag<'db> {
             Self::ExpectedTrait(..) => 7,
             Self::ExpectedValue(..) => 8,
             Self::AmbiguousAssociatedType { .. } => 9,
+            Self::AmbiguousAssociatedConst { .. } => 18,
             Self::MethodNotFound { .. } => 10,
             Self::ArgNumMismatch { .. } => 11,
             Self::ArgKindMismatch { .. } => 12,

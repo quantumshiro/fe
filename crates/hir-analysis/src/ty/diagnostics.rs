@@ -610,6 +610,24 @@ pub enum ImplDiag<'db> {
         type_name: IdentId<'db>,
         trait_: Trait<'db>,
     },
+
+    MissingAssociatedConstValue {
+        primary: DynLazySpan<'db>,
+        const_name: IdentId<'db>,
+        trait_: Trait<'db>,
+    },
+
+    ConstNotDefinedInTrait {
+        primary: DynLazySpan<'db>,
+        trait_: Trait<'db>,
+        const_name: IdentId<'db>,
+    },
+
+    MissingAssociatedConst {
+        primary: DynLazySpan<'db>,
+        const_name: IdentId<'db>,
+        trait_: Trait<'db>,
+    },
 }
 
 impl ImplDiag<'_> {
@@ -628,6 +646,9 @@ impl ImplDiag<'_> {
             Self::InvalidSelfType { .. } => 10,
             Self::InherentImplIsNotAllowed { .. } => 11,
             Self::MissingAssociatedType { .. } => 12,
+            Self::MissingAssociatedConstValue { .. } => 13,
+            Self::ConstNotDefinedInTrait { .. } => 14,
+            Self::MissingAssociatedConst { .. } => 15,
         }
     }
 }

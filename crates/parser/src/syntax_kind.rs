@@ -364,6 +364,8 @@ pub enum SyntaxKind {
     SuperTraitList,
     /// `type Foo` or `type Foo: SomeTrait = Bar`
     TraitTypeItem,
+    /// `const FOO: Ty` or `const FOO: Ty = expr`
+    TraitConstItem,
     /// `{ fn foo() {..} }`
     TraitItemList,
     /// `impl Trait for Foo { .. }`
@@ -677,6 +679,7 @@ impl SyntaxKind {
             SyntaxKind::SuperTraitList => "supertrait list",
             SyntaxKind::TraitItemList => "`trait` item list",
             SyntaxKind::TraitTypeItem => "`trait` type item",
+            SyntaxKind::TraitConstItem => "`trait` const item",
             SyntaxKind::ImplTrait => "`impl` trait block",
             SyntaxKind::Const => "const definition",
             SyntaxKind::Use => "`use` statement",

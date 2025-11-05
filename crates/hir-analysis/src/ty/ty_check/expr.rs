@@ -13,6 +13,7 @@ use super::{
     path::ResolvedPathInBody,
 };
 use crate::ty::{
+    binder::Binder,
     diagnostics::{BodyDiag, FuncBodyDiag},
     fold::{AssocTySubst, TyFoldable as _},
     trait_def::TraitInstId,
@@ -35,6 +36,7 @@ use crate::{
         normalize::normalize_ty,
         ty_check::{TyChecker, path::RecordInitChecker},
         ty_def::{InvalidCause, TyId},
+        ty_lower::lower_hir_ty,
     },
 };
 
@@ -507,6 +509,36 @@ impl<'db> TyChecker<'db> {
                     };
                     ExprProp::new(self.table.instantiate_to_term(method_ty), true)
                 }
+                PathRes::TraitConst(_recv_ty, inst, name) => {
+                    // Look up the associated const's declared type in the trait and
+                    // instantiate it with the trait instance's args (including Self).
+                    let trait_ = inst.def(self.db).trait_(self.db);
+                    if let Some(decl) = trait_
+                        .consts(self.db)
+                        .iter()
+                        .find(|c| c.name.to_opt() == Some(name))
+                        && let Some(hir_ty) = decl.ty.to_opt()
+                    {
+                        // Lower in the trait's scope so `Self` and trait params are visible
+                        // Build assumptions from the trait's own constraints instantiated with
+                        // the current trait instance args, so references like `A::Selector`
+                        // can be resolved during lowering.
+                        let trait_assumptions =
+                            crate::ty::collect_constraints(self.db, trait_.into())
+                                .instantiate_identity();
+
+                        let lowered =
+                            lower_hir_ty(self.db, hir_ty, trait_.scope(), trait_assumptions);
+                        // Instantiate with the concrete args of the trait instance
+                        let instantiated =
+                            Binder::bind(lowered).instantiate(self.db, inst.args(self.db));
+                        let ty = self.table.instantiate_to_term(instantiated);
+                        ExprProp::new(ty, true)
+                    } else {
+                        // Fallback to invalid type if the declaration isn't found
+                        ExprProp::invalid(self.db)
+                    }
+                }
                 PathRes::Mod(_) | PathRes::FuncParam(..) => todo!(),
             },
         }
@@ -540,7 +572,7 @@ impl<'db> TyChecker<'db> {
                 }
             }
 
-            PathRes::Func(ty) | PathRes::Const(_, ty) => {
+            PathRes::Func(ty) | PathRes::Const(_, ty) | PathRes::TraitConst(ty, ..) => {
                 let record_like = RecordLike::from_ty(ty);
                 let diag =
                     BodyDiag::record_expected(self.db, span.path().into(), Some(record_like));
