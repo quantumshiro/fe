@@ -236,18 +236,11 @@ pub fn analyze_impl<'db>(
     db: &'db dyn HirAnalysisDb,
     impl_: HirImpl<'db>,
 ) -> Vec<TyDiagCollection<'db>> {
-    let Some(hir_ty) = impl_.type_ref___tmp(db).to_opt() else {
+    if impl_.type_ref___tmp(db).to_opt().is_none() {
         return Vec::new();
-    };
+    }
 
-    let assumptions = collect_constraints(db, impl_.into());
-
-    let ty = lower_hir_ty(
-        db,
-        hir_ty,
-        impl_.scope(),
-        assumptions.instantiate_identity(),
-    );
+    let ty = impl_.ty(db);
 
     let analyzer = DefAnalyzer::for_impl(db, impl_, ty);
     analyzer.analyze()
@@ -335,28 +328,8 @@ impl<'db> DefAnalyzer<'db> {
     ) -> Self {
         let self_ty = match func.hir_func_def(db).unwrap().scope().parent(db).unwrap() {
             ScopeId::Item(ItemKind::Trait(trait_)) => lower_trait(db, trait_).self_param(db).into(),
-            ScopeId::Item(ItemKind::ImplTrait(impl_trait)) => {
-                match impl_trait.type_ref___tmp(db).to_opt() {
-                    Some(hir_ty) => lower_hir_ty(
-                        db,
-                        hir_ty,
-                        impl_trait.scope(),
-                        collect_constraints(db, impl_trait.into()).instantiate_identity(),
-                    )
-                    .into(),
-                    _ => TyId::invalid(db, InvalidCause::ParseError).into(),
-                }
-            }
-            ScopeId::Item(ItemKind::Impl(impl_)) => match impl_.type_ref___tmp(db).to_opt() {
-                Some(hir_ty) => lower_hir_ty(
-                    db,
-                    hir_ty,
-                    impl_.scope(),
-                    collect_constraints(db, impl_.into()).instantiate_identity(),
-                )
-                .into(),
-                None => TyId::invalid(db, InvalidCause::ParseError).into(),
-            },
+            ScopeId::Item(ItemKind::ImplTrait(impl_trait)) => impl_trait.ty(db).into(),
+            ScopeId::Item(ItemKind::Impl(impl_)) => impl_.ty(db).into(),
             _ => None,
         };
 
@@ -883,11 +856,7 @@ impl<'db> Visitor<'db> for DefAnalyzer<'db> {
     }
 
     fn visit_impl(&mut self, ctxt: &mut VisitorCtxt<'db, LazyImplSpan<'db>>, impl_: HirImpl<'db>) {
-        let Some(impl_ty) = impl_.type_ref___tmp(self.db).to_opt() else {
-            return;
-        };
-
-        let impl_ty = lower_hir_ty(self.db, impl_ty, impl_.scope(), self.assumptions);
+        let impl_ty = impl_.ty(self.db);
         if !impl_ty.is_inherent_impl_allowed(self.db, self.scope().ingot(self.db)) {
             let base = impl_ty.base_ty(self.db);
             let diag = ImplDiag::InherentImplIsNotAllowed {
@@ -1247,16 +1216,16 @@ fn analyze_impl_trait_specific_error<'db>(
 ) -> Result<Binder<Implementor<'db>>, Vec<TyDiagCollection<'db>>> {
     let mut diags = vec![];
     // We don't need to report error because it should be reported from the parser.
-    let (Some(trait_ref), Some(ty)) = (
-        impl_trait.trait_ref(db).to_opt(),
-        impl_trait.type_ref___tmp(db).to_opt(),
-    ) else {
+    let Some(trait_ref) = impl_trait.trait_ref(db).to_opt() else {
         return Err(diags);
     };
+    if impl_trait.type_ref___tmp(db).to_opt().is_none() {
+        return Err(diags);
+    }
 
     // 1. Checks if implementor type is well-formed except for the satisfiability.
     let assumptions = collect_constraints(db, impl_trait.into()).instantiate_identity();
-    let ty = lower_hir_ty(db, ty, impl_trait.scope(), assumptions);
+    let ty = impl_trait.ty(db);
     if let Some(diag) = ty.emit_diag(db, impl_trait.span().ty().into()) {
         diags.push(diag);
     }
