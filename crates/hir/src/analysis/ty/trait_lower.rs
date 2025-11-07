@@ -68,7 +68,7 @@ pub(crate) fn lower_impl_trait<'db>(
 
     let assumptions = collect_constraints(db, impl_trait.into()).instantiate_identity();
 
-    let hir_ty = impl_trait.type_ref_syntax(db).to_opt()?;
+    let hir_ty = impl_trait.type_ref___tmp(db).to_opt()?;
     let ty = lower_hir_ty(db, hir_ty, scope, assumptions);
     if ty.has_invalid(db) {
         return None;

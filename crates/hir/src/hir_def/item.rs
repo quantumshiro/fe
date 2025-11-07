@@ -621,7 +621,7 @@ pub struct Func<'db> {
     pub where_clause: WhereClauseId<'db>,
     pub params: Partial<FuncParamListId<'db>>,
     #[deprecated(note = "Use Func::return_ty(db) (semantic) instead of ret_type_ref")]
-    pub ret_type_ref: Option<TypeId<'db>>,
+    pub(super) ret_type_ref: Option<TypeId<'db>>,
     pub modifier: ItemModifier,
     pub body: Option<Body<'db>>,
     pub is_extern: bool,
@@ -677,10 +677,6 @@ impl<'db> Func<'db> {
         param.label.or(param.name.to_opt())
     }
 
-    #[deprecated(note = "Visitor-only: read raw syntax; use semantic return_ty(db) otherwise")]
-    pub(crate) fn ret_type_ref_syntax(self, db: &'db dyn HirDb) -> Option<TypeId<'db>> {
-        self.ret_type_ref(db)
-    }
     // Function semantic helpers live in `hir_def::semantic`.
 }
 
@@ -826,7 +822,7 @@ pub struct TypeAlias<'db> {
     pub vis: Visibility,
     pub generic_params: GenericParamListId<'db>,
     #[deprecated(note = "Use TypeAlias::alias_to_ty(db) (semantic) instead of type_ref")]
-    pub type_ref: Partial<TypeId<'db>>,
+    pub(super) type_ref: Partial<TypeId<'db>>,
     pub top_mod: TopLevelMod<'db>,
 
     #[return_ref]
@@ -841,10 +837,7 @@ impl<'db> TypeAlias<'db> {
         ScopeId::from_item(self.into())
     }
 
-    #[deprecated(note = "Visitor-only: use TypeAlias::ty(db) for semantic type")]
-    pub(crate) fn type_ref_syntax(self, db: &'db dyn HirDb) -> super::Partial<TypeId<'db>> {
-        self.type_ref(db)
-    }
+    // raw type_ref access kept; shim exposes public ___tmp method.
 }
 
 #[salsa::tracked]
@@ -854,7 +847,7 @@ pub struct Impl<'db> {
     id: TrackedItemId<'db>,
 
     #[deprecated(note = "Use Impl::ty(db) (semantic) instead of type_ref")]
-    pub type_ref: super::Partial<TypeId<'db>>,
+    pub(super) type_ref: super::Partial<TypeId<'db>>,
     pub attributes: AttrListId<'db>,
     pub generic_params: GenericParamListId<'db>,
     pub where_clause: WhereClauseId<'db>,
@@ -890,10 +883,7 @@ impl<'db> Impl<'db> {
         ScopeId::from_item(self.into())
     }
 
-    #[deprecated(note = "Visitor-only: use Impl::ty(db) for semantic type")]
-    pub(crate) fn type_ref_syntax(self, db: &'db dyn HirDb) -> super::Partial<TypeId<'db>> {
-        self.type_ref(db)
-    }
+    // raw type_ref access kept; shim exposes public ___tmp method.
 
     // Semantic `ty` lives in `hir_def::semantic`.
 }
@@ -969,7 +959,7 @@ pub struct ImplTrait<'db> {
 
     pub trait_ref: Partial<TraitRefId<'db>>,
     #[deprecated(note = "Use ImplTrait::ty(db) (semantic) instead of type_ref")]
-    pub type_ref: Partial<TypeId<'db>>,
+    pub(super) type_ref: Partial<TypeId<'db>>,
     pub attributes: AttrListId<'db>,
     pub generic_params: GenericParamListId<'db>,
     pub where_clause: WhereClauseId<'db>,
@@ -1016,10 +1006,7 @@ impl<'db> ImplTrait<'db> {
         })
     }
 
-    #[deprecated(note = "Visitor-only: use ImplTrait::ty(db) for semantic type")]
-    pub(crate) fn type_ref_syntax(self, db: &'db dyn HirDb) -> Partial<TypeId<'db>> {
-        self.type_ref(db)
-    }
+    // raw type_ref access kept; shim exposes public ___tmp method.
 
     // Semantic `ty` lives in `hir_def::semantic`.
 }
@@ -1061,10 +1048,7 @@ impl<'db> Const<'db> {
 
     // Semantic `ty` lives in `hir_def::semantic`.
 
-    #[deprecated(note = "Visitor-only: use Const::ty(db) for semantic type")]
-    pub(crate) fn type_ref_syntax(self, db: &'db dyn HirDb) -> super::Partial<TypeId<'db>> {
-        self.type_ref(db)
-    }
+    // raw type_ref access kept; shim exposes public ___tmp method.
 }
 
 #[salsa::tracked]
@@ -1276,8 +1260,7 @@ pub struct FieldDef<'db> {
 }
 
 impl<'db> FieldDef<'db> {
-    #[deprecated(note = "Visitor-only: use semantic field type methods instead")]
-    pub(crate) fn type_ref(&self) -> Partial<TypeId<'db>> {
+    pub(super) fn type_ref(&self) -> Partial<TypeId<'db>> {
         self.type_ref
     }
 }

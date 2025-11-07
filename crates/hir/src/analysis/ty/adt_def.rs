@@ -47,7 +47,7 @@ fn collect_field_types<'db>(
     let fields = fields
         .data(db)
         .iter()
-        .map(|field| field.type_ref())
+        .map(|field| field.field_type_ref___tmp())
         .collect();
     AdtField::new(fields, scope)
 }
@@ -66,7 +66,7 @@ fn collect_enum_variant_types<'db>(
                 VariantKind::Record(fields) => fields
                     .data(db)
                     .iter()
-                    .map(|field| field.type_ref())
+                    .map(|field| field.field_type_ref___tmp())
                     .collect(),
                 VariantKind::Unit => vec![],
             };

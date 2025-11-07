@@ -1,0 +1,47 @@
+#![allow(non_snake_case)]
+//! Temporary syntactic HIR shim
+//!
+//! Centralizes public wrappers for raw syntactic access that is being phased
+//! out in favor of `hir_def::semantic` methods. Intended for the visitor and
+//! other in-progress areas only. Please do not add new dependencies on this
+//! module; migrate to semantic methods instead.
+
+use crate::hir_def::item::{Const, FieldDef, Func, Impl, ImplTrait, TypeAlias};
+use crate::hir_def::{Partial, TypeId};
+use crate::HirDb;
+
+impl<'db> Func<'db> {
+    pub fn ret_type_ref___tmp(self, db: &'db dyn HirDb) -> Option<TypeId<'db>> {
+        self.ret_type_ref(db)
+    }
+}
+
+impl<'db> TypeAlias<'db> {
+    pub fn type_ref___tmp(self, db: &'db dyn HirDb) -> Partial<TypeId<'db>> {
+        self.type_ref(db)
+    }
+}
+
+impl<'db> Impl<'db> {
+    pub fn type_ref___tmp(self, db: &'db dyn HirDb) -> Partial<TypeId<'db>> {
+        self.type_ref(db)
+    }
+}
+
+impl<'db> ImplTrait<'db> {
+    pub fn type_ref___tmp(self, db: &'db dyn HirDb) -> Partial<TypeId<'db>> {
+        self.type_ref(db)
+    }
+}
+
+impl<'db> Const<'db> {
+    pub fn type_ref___tmp(self, db: &'db dyn HirDb) -> Partial<TypeId<'db>> {
+        self.type_ref(db)
+    }
+}
+
+impl<'db> FieldDef<'db> {
+    pub fn field_type_ref___tmp(&self) -> Partial<TypeId<'db>> {
+        self.type_ref()
+    }
+}

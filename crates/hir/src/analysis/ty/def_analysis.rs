@@ -236,7 +236,7 @@ pub fn analyze_impl<'db>(
     db: &'db dyn HirAnalysisDb,
     impl_: HirImpl<'db>,
 ) -> Vec<TyDiagCollection<'db>> {
-    let Some(hir_ty) = impl_.type_ref_syntax(db).to_opt() else {
+    let Some(hir_ty) = impl_.type_ref___tmp(db).to_opt() else {
         return Vec::new();
     };
 
@@ -336,7 +336,7 @@ impl<'db> DefAnalyzer<'db> {
         let self_ty = match func.hir_func_def(db).unwrap().scope().parent(db).unwrap() {
             ScopeId::Item(ItemKind::Trait(trait_)) => lower_trait(db, trait_).self_param(db).into(),
             ScopeId::Item(ItemKind::ImplTrait(impl_trait)) => {
-                match impl_trait.type_ref_syntax(db).to_opt() {
+                match impl_trait.type_ref___tmp(db).to_opt() {
                     Some(hir_ty) => lower_hir_ty(
                         db,
                         hir_ty,
@@ -347,7 +347,7 @@ impl<'db> DefAnalyzer<'db> {
                     _ => TyId::invalid(db, InvalidCause::ParseError).into(),
                 }
             }
-            ScopeId::Item(ItemKind::Impl(impl_)) => match impl_.type_ref_syntax(db).to_opt() {
+            ScopeId::Item(ItemKind::Impl(impl_)) => match impl_.type_ref___tmp(db).to_opt() {
                 Some(hir_ty) => lower_hir_ty(
                     db,
                     hir_ty,
@@ -628,7 +628,7 @@ impl<'db> Visitor<'db> for DefAnalyzer<'db> {
         ctxt: &mut VisitorCtxt<'db, LazyFieldDefSpan<'db>>,
         field: &FieldDef<'db>,
     ) {
-        let Some(ty) = field.type_ref().to_opt() else {
+        let Some(ty) = field.field_type_ref___tmp().to_opt() else {
             return;
         };
 
@@ -883,7 +883,7 @@ impl<'db> Visitor<'db> for DefAnalyzer<'db> {
     }
 
     fn visit_impl(&mut self, ctxt: &mut VisitorCtxt<'db, LazyImplSpan<'db>>, impl_: HirImpl<'db>) {
-        let Some(impl_ty) = impl_.type_ref_syntax(self.db).to_opt() else {
+        let Some(impl_ty) = impl_.type_ref___tmp(self.db).to_opt() else {
             return;
         };
 
@@ -1008,7 +1008,7 @@ impl<'db> Visitor<'db> for DefAnalyzer<'db> {
 
         walk_func(self, ctxt, hir_func);
 
-        if let Some(ret_ty) = hir_func.ret_type_ref(self.db) {
+        if let Some(ret_ty) = hir_func.ret_type_ref___tmp(self.db) {
             self.verify_term_type_kind(ret_ty, hir_func.span().ret_ty().into());
         }
 
@@ -1249,7 +1249,7 @@ fn analyze_impl_trait_specific_error<'db>(
     // We don't need to report error because it should be reported from the parser.
     let (Some(trait_ref), Some(ty)) = (
         impl_trait.trait_ref(db).to_opt(),
-        impl_trait.type_ref_syntax(db).to_opt(),
+        impl_trait.type_ref___tmp(db).to_opt(),
     ) else {
         return Err(diags);
     };
