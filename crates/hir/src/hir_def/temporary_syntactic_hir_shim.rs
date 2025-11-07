@@ -6,7 +6,7 @@
 //! other in-progress areas only. Please do not add new dependencies on this
 //! module; migrate to semantic methods instead.
 
-use crate::hir_def::item::{Const, FieldDef, Func, Impl, ImplTrait, TypeAlias};
+use crate::hir_def::item::{AssocTyDef, Const, FieldDef, Func, Impl, ImplTrait, TypeAlias};
 use crate::hir_def::{Partial, TypeId};
 use crate::HirDb;
 
@@ -43,5 +43,11 @@ impl<'db> Const<'db> {
 impl<'db> FieldDef<'db> {
     pub fn field_type_ref___tmp(&self) -> Partial<TypeId<'db>> {
         self.type_ref()
+    }
+}
+
+impl<'db> AssocTyDef<'db> {
+    pub fn type_ref___tmp(&self) -> Partial<TypeId<'db>> {
+        self.type_ref
     }
 }

@@ -96,7 +96,7 @@ pub(crate) fn lower_impl_trait<'db>(
     let mut types: IndexMap<_, _> = impl_trait
         .types(db)
         .iter()
-        .filter_map(|t| match (t.name.to_opt(), t.type_ref.to_opt()) {
+        .filter_map(|t| match (t.name.to_opt(), t.type_ref___tmp().to_opt()) {
             (Some(name), Some(ty)) => Some((name, lower_hir_ty(db, ty, scope, assumptions))),
             _ => None,
         })

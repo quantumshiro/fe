@@ -7,9 +7,7 @@ use super::{
     binder::Binder,
     canonical::Canonical,
     func_def::{FuncDef, lower_func},
-    trait_resolution::constraint::collect_constraints,
-    ty_def::{InvalidCause, TyBase, TyId},
-    ty_lower::lower_hir_ty,
+    ty_def::{TyBase, TyId},
     unify::UnificationTable,
 };
 use crate::analysis::{HirAnalysisDb, ty::ty_def::TyData};

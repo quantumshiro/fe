@@ -13,9 +13,8 @@ use rustc_hash::FxHashMap;
 use super::{
     canonical::Canonical,
     fold::{TyFoldable, TyFolder},
-    trait_resolution::{PredicateListId, constraint::collect_constraints},
+    trait_resolution::PredicateListId,
     ty_def::{AssocTy, TyData, TyId, TyParam},
-    ty_lower::lower_hir_ty,
     unify::UnificationTable,
 };
 use crate::analysis::{HirAnalysisDb, name_resolution::find_associated_type};

@@ -620,7 +620,6 @@ pub struct Func<'db> {
     pub generic_params: GenericParamListId<'db>,
     pub where_clause: WhereClauseId<'db>,
     pub params: Partial<FuncParamListId<'db>>,
-    #[deprecated(note = "Use Func::return_ty(db) (semantic) instead of ret_type_ref")]
     pub(super) ret_type_ref: Option<TypeId<'db>>,
     pub modifier: ItemModifier,
     pub body: Option<Body<'db>>,
@@ -821,7 +820,6 @@ pub struct TypeAlias<'db> {
     pub attributes: AttrListId<'db>,
     pub vis: Visibility,
     pub generic_params: GenericParamListId<'db>,
-    #[deprecated(note = "Use TypeAlias::alias_to_ty(db) (semantic) instead of type_ref")]
     pub(super) type_ref: Partial<TypeId<'db>>,
     pub top_mod: TopLevelMod<'db>,
 
@@ -846,7 +844,6 @@ pub struct Impl<'db> {
     #[id]
     id: TrackedItemId<'db>,
 
-    #[deprecated(note = "Use Impl::ty(db) (semantic) instead of type_ref")]
     pub(super) type_ref: super::Partial<TypeId<'db>>,
     pub attributes: AttrListId<'db>,
     pub generic_params: GenericParamListId<'db>,
@@ -958,7 +955,6 @@ pub struct ImplTrait<'db> {
     id: TrackedItemId<'db>,
 
     pub trait_ref: Partial<TraitRefId<'db>>,
-    #[deprecated(note = "Use ImplTrait::ty(db) (semantic) instead of type_ref")]
     pub(super) type_ref: Partial<TypeId<'db>>,
     pub attributes: AttrListId<'db>,
     pub generic_params: GenericParamListId<'db>,
@@ -1014,9 +1010,6 @@ impl<'db> ImplTrait<'db> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AssocTyDef<'db> {
     pub name: Partial<IdentId<'db>>,
-    #[deprecated(
-        note = "Use semantic helpers (e.g., ImplTrait::assoc_types) instead of raw type_ref"
-    )]
     pub type_ref: Partial<TypeId<'db>>,
 }
 
@@ -1028,7 +1021,6 @@ pub struct Const<'db> {
 
     pub name: Partial<IdentId<'db>>,
     pub attributes: AttrListId<'db>,
-    #[deprecated(note = "Use Const::ty(db) (semantic) instead of type_ref")]
     pub(super) type_ref: Partial<TypeId<'db>>,
     pub body: Partial<Body<'db>>,
     pub vis: Visibility,
@@ -1252,9 +1244,6 @@ impl<'db> FieldParent<'db> {
 pub struct FieldDef<'db> {
     pub attributes: AttrListId<'db>,
     pub name: Partial<IdentId<'db>>,
-    #[deprecated(
-        note = "Use semantic field type methods (e.g., Struct::ty_fields / FieldView::ty)"
-    )]
     pub type_ref: Partial<TypeId<'db>>,
     pub vis: Visibility,
 }

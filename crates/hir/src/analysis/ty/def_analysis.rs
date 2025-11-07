@@ -912,7 +912,7 @@ impl<'db> Visitor<'db> for DefAnalyzer<'db> {
         impl_trait: ImplTrait<'db>,
     ) {
         for assoc_type in impl_trait.types(self.db) {
-            if let Some(ty) = assoc_type.type_ref.to_opt() {
+            if let Some(ty) = assoc_type.type_ref___tmp().to_opt() {
                 let ty_span = assoc_type
                     .name
                     .to_opt()
