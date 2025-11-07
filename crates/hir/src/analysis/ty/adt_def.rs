@@ -44,7 +44,11 @@ fn collect_field_types<'db>(
     scope: ScopeId<'db>,
     fields: FieldDefListId<'db>,
 ) -> AdtField<'db> {
-    let fields = fields.data(db).iter().map(|field| field.ty).collect();
+    let fields = fields
+        .data(db)
+        .iter()
+        .map(|field| field.type_ref())
+        .collect();
     AdtField::new(fields, scope)
 }
 
@@ -59,9 +63,11 @@ fn collect_enum_variant_types<'db>(
         .map(|variant| {
             let tys = match variant.kind {
                 VariantKind::Tuple(tuple_id) => tuple_id.data(db).clone(),
-                VariantKind::Record(fields) => {
-                    fields.data(db).iter().map(|field| field.ty).collect()
-                }
+                VariantKind::Record(fields) => fields
+                    .data(db)
+                    .iter()
+                    .map(|field| field.type_ref())
+                    .collect(),
                 VariantKind::Unit => vec![],
             };
             AdtField::new(tys, scope)

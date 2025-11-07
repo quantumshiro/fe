@@ -63,16 +63,13 @@ pub struct TyChecker<'db> {
 impl<'db> TyChecker<'db> {
     fn new_with_func(db: &'db dyn HirAnalysisDb, func: Func<'db>) -> Result<Self, ()> {
         let env = TyCheckEnv::new_with_func(db, func)?;
-        let expected_ty = match func.ret_ty(db) {
-            Some(hir_ty) => {
-                let ty = lower_hir_ty(db, hir_ty, func.scope(), env.assumptions());
-                if ty.is_star_kind(db) {
-                    ty
-                } else {
-                    TyId::invalid(db, InvalidCause::Other)
-                }
-            }
-            None => TyId::unit(db),
+        let rt = func.return_ty(db);
+        // If the return type is explicitly annotated and of invalid kind,
+        // reflect that as an invalid expected type.
+        let expected_ty = if func.has_explicit_return_ty(db) {
+            if rt.is_star_kind(db) { rt } else { TyId::invalid(db, InvalidCause::Other) }
+        } else {
+            rt
         };
 
         Ok(Self::new(db, env, expected_ty))

@@ -988,11 +988,8 @@ pub fn resolve_name_res<'db>(
                             path,
                         ));
                     }
-                    let ty = if let Some(ty) = const_.ty(db).to_opt() {
-                        lower_hir_ty(db, ty, scope, assumptions)
-                    } else {
-                        TyId::invalid(db, InvalidCause::ParseError)
-                    };
+                    // Use semantic const type.
+                    let ty = const_.ty(db);
                     PathRes::Const(const_, ty)
                 }
 
@@ -1032,22 +1029,14 @@ pub fn resolve_name_res<'db>(
                     }
                 }
 
-                ItemKind::Impl(impl_) => PathRes::Ty(impl_typeid_to_ty(
-                    db,
-                    path,
-                    impl_.ty(db),
-                    scope,
-                    args,
-                    assumptions,
-                )?),
-                ItemKind::ImplTrait(impl_) => PathRes::Ty(impl_typeid_to_ty(
-                    db,
-                    path,
-                    impl_.ty(db),
-                    scope,
-                    args,
-                    assumptions,
-                )?),
+                ItemKind::Impl(impl_) => {
+                    let base = impl_.ty(db);
+                    PathRes::Ty(TyId::foldl(db, base, args))
+                }
+                ItemKind::ImplTrait(impl_) => {
+                    let base = impl_.ty(db);
+                    PathRes::Ty(TyId::foldl(db, base, args))
+                }
 
                 ItemKind::Trait(t) => {
                     if path.is_self_ty(db) {

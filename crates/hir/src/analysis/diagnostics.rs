@@ -1544,7 +1544,7 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                 }];
 
                 if let Some(func) = func {
-                    if func.ret_ty(db).is_some() {
+                    if func.has_explicit_return_ty(db) {
                         sub_diagnostics.push(SubDiagnostic {
                             style: LabelStyle::Secondary,
                             message: format!("this function expects `{expected}` to be returned"),

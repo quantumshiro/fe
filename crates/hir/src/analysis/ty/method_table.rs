@@ -147,12 +147,8 @@ impl<'db> MethodCollector<'db> {
 
     fn collect_impls(&mut self, impls: &[Impl<'db>]) {
         for &impl_ in impls {
-            let assumptions = collect_constraints(self.db, impl_.into()).instantiate_identity();
-
-            let ty = match impl_.ty(self.db).to_opt() {
-                Some(ty) => lower_hir_ty(self.db, ty, impl_.scope(), assumptions),
-                None => TyId::invalid(self.db, InvalidCause::ParseError),
-            };
+            // Use the semantic item method to obtain the implementor type.
+            let ty = impl_.ty(self.db);
 
             if ty.has_invalid(self.db) | !ty.is_inherent_impl_allowed(self.db, self.ingot) {
                 continue;

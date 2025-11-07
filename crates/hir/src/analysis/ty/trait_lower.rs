@@ -68,7 +68,7 @@ pub(crate) fn lower_impl_trait<'db>(
 
     let assumptions = collect_constraints(db, impl_trait.into()).instantiate_identity();
 
-    let hir_ty = impl_trait.ty(db).to_opt()?;
+    let hir_ty = impl_trait.type_ref_syntax(db).to_opt()?;
     let ty = lower_hir_ty(db, hir_ty, scope, assumptions);
     if ty.has_invalid(db) {
         return None;
@@ -96,7 +96,7 @@ pub(crate) fn lower_impl_trait<'db>(
     let mut types: IndexMap<_, _> = impl_trait
         .types(db)
         .iter()
-        .filter_map(|t| match (t.name.to_opt(), t.ty.to_opt()) {
+        .filter_map(|t| match (t.name.to_opt(), t.type_ref.to_opt()) {
             (Some(name), Some(ty)) => Some((name, lower_hir_ty(db, ty, scope, assumptions))),
             _ => None,
         })

@@ -43,10 +43,7 @@ pub fn lower_func<'db>(
 
     // When lowering the return type, we need to use assumptions that include
     // the function's own generic parameter constraints
-    let ret_ty = func
-        .ret_ty(db)
-        .map(|ty| lower_hir_ty(db, ty, func.scope(), assumptions))
-        .unwrap_or_else(|| TyId::unit(db));
+    let ret_ty = func.return_ty(db);
 
     Some(FuncDef::new(
         db,

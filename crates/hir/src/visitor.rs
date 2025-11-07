@@ -510,7 +510,7 @@ pub fn walk_func<'db, V>(
         )
     }
 
-    if let Some(ty) = func.ret_ty(ctxt.db) {
+    if let Some(ty) = func.ret_type_ref_syntax(ctxt.db) {
         ctxt.with_new_ctxt(
             |span| span.ret_ty(),
             |ctxt| {
@@ -687,7 +687,7 @@ pub fn walk_type_alias<'db, V>(
         },
     );
 
-    if let Some(ty) = alias.ty(ctxt.db).to_opt() {
+    if let Some(ty) = alias.type_ref_syntax(ctxt.db).to_opt() {
         ctxt.with_new_ctxt(
             |span| span.ty(),
             |ctxt| {
@@ -704,7 +704,7 @@ pub fn walk_impl<'db, V>(
 ) where
     V: Visitor<'db> + ?Sized,
 {
-    if let Some(ty) = impl_.ty(ctxt.db).to_opt() {
+    if let Some(ty) = impl_.type_ref_syntax(ctxt.db).to_opt() {
         ctxt.with_new_ctxt(
             |span| span.target_ty(),
             |ctxt| {
@@ -808,7 +808,7 @@ pub fn walk_impl_trait<'db, V>(
         )
     }
 
-    if let Some(ty) = impl_trait.ty(ctxt.db).to_opt() {
+    if let Some(ty) = impl_trait.type_ref_syntax(ctxt.db).to_opt() {
         ctxt.with_new_ctxt(
             |span| span.ty(),
             |ctxt| {
@@ -862,7 +862,7 @@ pub fn walk_const<'db, V>(
         )
     }
 
-    if let Some(ty) = const_.ty(ctxt.db).to_opt() {
+    if let Some(ty) = const_.type_ref_syntax(ctxt.db).to_opt() {
         ctxt.with_new_ctxt(
             |span| span.ty(),
             |ctxt| {
@@ -1626,7 +1626,7 @@ pub fn walk_field_def<'db, V>(
         )
     }
 
-    if let Some(ty) = field.ty.to_opt() {
+    if let Some(ty) = field.type_ref.to_opt() {
         ctxt.with_new_ctxt(
             |span| span.ty(),
             |ctxt| {

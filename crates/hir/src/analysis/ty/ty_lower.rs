@@ -151,7 +151,7 @@ pub(crate) fn lower_type_alias<'db>(
 ) -> TyAlias<'db> {
     let param_set = collect_generic_params(db, alias.into());
 
-    let Some(hir_ty) = alias.ty(db).to_opt() else {
+    let Some(hir_ty) = alias.type_ref(db).to_opt() else {
         return TyAlias {
             alias,
             alias_to: Binder::bind(TyId::invalid(db, InvalidCause::ParseError)),

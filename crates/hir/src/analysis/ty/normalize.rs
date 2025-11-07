@@ -55,13 +55,9 @@ impl<'db> TyFolder<'db> for TypeNormalizer<'db> {
     fn fold_ty(&mut self, db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> TyId<'db> {
         match ty.data(self.db) {
             TyData::TyParam(p @ TyParam { owner, .. }) if p.is_trait_self() => {
-                if let Some(impl_) = owner.resolve_to::<ImplTrait>(self.db)
-                    && let Some(hir_ty) = impl_.ty(self.db).to_opt()
-                {
-                    let impl_assumptions =
-                        collect_constraints(self.db, impl_.into()).instantiate_identity();
-                    let lowered = lower_hir_ty(self.db, hir_ty, impl_.scope(), impl_assumptions);
-                    // Continue folding the lowered type so it reaches normal form
+                if let Some(impl_) = owner.resolve_to::<ImplTrait>(self.db) {
+                    // Use the item method to obtain the implementor's self type.
+                    let lowered = impl_.ty(self.db);
                     return self.fold_ty(db, lowered);
                 }
                 ty

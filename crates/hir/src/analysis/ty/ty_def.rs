@@ -233,7 +233,7 @@ impl<'db> TyId<'db> {
         TyId::app(db, array, len)
     }
 
-    pub(super) fn unit(db: &'db dyn HirAnalysisDb) -> Self {
+    pub(crate) fn unit(db: &'db dyn HirAnalysisDb) -> Self {
         Self::tuple(db, 0)
     }
 
