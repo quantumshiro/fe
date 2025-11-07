@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![deprecated(note = "Temporary syntactic shim; migrate callers to hir_def::semantic and remove this module.")]
 //! Temporary syntactic HIR shim
 //!
 //! Centralizes public wrappers for raw syntactic access that is being phased
