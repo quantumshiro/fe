@@ -3,6 +3,7 @@
 //! implement [`DiagnosticVoucher`] which defines the conversion into
 //! [`CompleteDiagnostic`].
 
+use crate::ty::trait_def::TraitInstId;
 use crate::{
     HirAnalysisDb,
     name_resolution::diagnostics::{ImportDiag, PathResDiag},
@@ -27,6 +28,21 @@ use hir::{
     span::LazySpan,
 };
 use itertools::Itertools;
+use std::cmp::Ordering;
+
+fn cmp_trait_inst_by_name<'db>(
+    db: &'db dyn SpannedHirAnalysisDb,
+    a: &TraitInstId<'db>,
+    b: &TraitInstId<'db>,
+) -> Ordering {
+    let a_name = a.def(db).trait_(db).name(db).unwrap().data(db);
+    let b_name = b.def(db).trait_(db).name(db).unwrap().data(db);
+    a_name.cmp(b_name).then_with(|| {
+        let a_self = a.self_ty(db).pretty_print(db).to_string();
+        let b_self = b.self_ty(db).pretty_print(db).to_string();
+        a_self.cmp(&b_self)
+    })
+}
 
 /// All diagnostics accumulated in salsa-db should implement
 /// [`DiagnosticVoucher`] which defines the conversion into
@@ -334,7 +350,10 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                     });
                 }
 
-                let (inst, _) = candidates.first().unwrap();
+                let (inst, _) = candidates
+                    .iter()
+                    .min_by(|(a, _), (b, _)| cmp_trait_inst_by_name(db, a, b))
+                    .unwrap();
                 let trait_name = inst.def(db).trait_(db).name(db).unwrap().data(db);
                 let self_ty = inst.self_ty(db).pretty_print(db);
                 let hint = format!(
@@ -648,8 +667,10 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                     });
                 }
 
-                // Build a hint using the first candidate
-                let inst = trait_insts.first().unwrap();
+                let inst = trait_insts
+                    .iter()
+                    .min_by(|a, b| cmp_trait_inst_by_name(db, a, b))
+                    .unwrap();
                 let trait_name = inst.def(db).trait_(db).name(db).unwrap().data(db);
                 let self_ty = inst.self_ty(db).pretty_print(db);
                 let hint = format!(
