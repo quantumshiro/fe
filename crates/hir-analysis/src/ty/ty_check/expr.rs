@@ -566,6 +566,9 @@ impl<'db> TyChecker<'db> {
             Some((*receiver, receiver_prop)),
         );
 
+        // Check required effects for the method call
+        self.check_callable_effects(expr, &callable);
+
         // Check function constraints after instantiation
         callable.check_constraints(self, call_span.method_name().into());
 
