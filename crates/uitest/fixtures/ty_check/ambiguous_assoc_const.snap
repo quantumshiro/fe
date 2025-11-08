@@ -16,4 +16,4 @@ error[2-0018]: multiple trait candidates found
 20 │     Foo::X
    │          ^ `X` is ambiguous
    │
-   = hint: specify the trait explicitly: `<Foo as C2>::X`
+   = hint: specify the trait explicitly: `<Foo as C1>::X`
