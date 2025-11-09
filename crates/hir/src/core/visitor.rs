@@ -599,11 +599,21 @@ pub fn walk_contract<'db, V>(
         },
     );
 
+    // Contract fields live under a dedicated AST node; walk them explicitly.
     ctxt.with_new_ctxt(
         |span| span.fields(),
         |ctxt| {
             let id = contract.fields(ctxt.db);
-            visitor.visit_field_def_list(ctxt, id);
+            let parent = FieldParent::Contract(contract);
+            for (idx, field) in id.data(ctxt.db).iter().enumerate() {
+                ctxt.with_new_scoped_ctxt(
+                    ScopeId::Field(parent, idx as u16),
+                    |span| span.field(idx),
+                    |ctxt| {
+                        visitor.visit_field_def(ctxt, field);
+                    },
+                );
+            }
         },
     );
 }

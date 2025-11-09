@@ -199,7 +199,7 @@ impl<'db> Contract<'db> {
 
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
-        let fields = FieldDefListId::lower_ast_opt(ctxt, ast.fields());
+        let fields = FieldDefListId::lower_contract_fields_opt(ctxt, ast.fields());
         let origin = HirOrigin::raw(&ast);
 
         let contract = Self::new(
@@ -513,6 +513,22 @@ impl<'db> FieldDefListId<'db> {
     fn lower_ast_opt(ctxt: &mut FileLowerCtxt<'db>, ast: Option<ast::RecordFieldDefList>) -> Self {
         ast.map(|ast| Self::lower_ast(ctxt, ast))
             .unwrap_or(Self::new(ctxt.db(), Vec::new()))
+    }
+
+    fn lower_contract_fields_opt(
+        ctxt: &mut FileLowerCtxt<'db>,
+        ast: Option<ast::ContractFields>,
+    ) -> Self {
+        match ast {
+            Some(cf) => {
+                let fields = cf
+                    .into_iter()
+                    .map(|field| FieldDef::lower_ast(ctxt, field))
+                    .collect::<Vec<_>>();
+                Self::new(ctxt.db(), fields)
+            }
+            None => Self::new(ctxt.db(), Vec::new()),
+        }
     }
 }
 

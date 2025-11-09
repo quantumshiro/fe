@@ -156,8 +156,100 @@ impl Contract {
         support::token(self.syntax(), SK::Ident)
     }
 
-    /// Returns the contract's field def list.
-    pub fn fields(&self) -> Option<RecordFieldDefList> {
+    /// Returns the contract's leading fields section.
+    pub fn fields(&self) -> Option<ContractFields> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the optional `uses` clause of the contract.
+    pub fn uses_clause(&self) -> Option<super::UsesClause> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the optional `init` block of the contract.
+    pub fn init_block(&self) -> Option<ContractInit> {
+        support::child(self.syntax())
+    }
+
+    /// Returns all `recv` blocks declared in the contract.
+    pub fn recvs(&self) -> rowan::ast::AstChildren<ContractRecv> {
+        support::children(self.syntax())
+    }
+}
+
+ast_node! {
+    /// A section containing the leading contract fields.
+    pub struct ContractFields,
+    SK::ContractFields,
+    IntoIterator<Item=RecordFieldDef>
+}
+
+ast_node! {
+    /// The contract initialization block: `init(...) uses (...) { ... }`.
+    pub struct ContractInit,
+    SK::ContractInit,
+}
+impl ContractInit {
+    pub fn params(&self) -> Option<super::FuncParamList> {
+        support::child(self.syntax())
+    }
+
+    pub fn uses_clause(&self) -> Option<super::UsesClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn body(&self) -> Option<super::BlockExpr> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
+    /// A `recv` block inside a contract. Supports both typed and untyped forms.
+    pub struct ContractRecv,
+    SK::ContractRecv,
+}
+impl ContractRecv {
+    /// Optional root message type path (`recv Type { ... }`).
+    pub fn path(&self) -> Option<super::Path> {
+        support::child(self.syntax())
+    }
+
+    /// The list of arms in this recv block.
+    pub fn arms(&self) -> Option<RecvArmList> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
+    /// List of recv arms inside a recv block.
+    pub struct RecvArmList,
+    SK::RecvArmList,
+    IntoIterator<Item=RecvArm>
+}
+
+ast_node! {
+    /// A single recv arm: `Pattern -> RetTy uses (...) { body }`
+    pub struct RecvArm,
+    SK::RecvArm,
+}
+impl RecvArm {
+    /// The pattern being matched (e.g., `Transfer { to, amount }`).
+    pub fn pat(&self) -> Option<super::Pat> {
+        support::child(self.syntax())
+    }
+
+    /// Optional return type.
+    pub fn ret_ty(&self) -> Option<super::Type> {
+        support::child(self.syntax())
+    }
+
+    /// Optional uses clause.
+    pub fn uses_clause(&self) -> Option<super::UsesClause> {
+        support::child(self.syntax())
+    }
+
+    /// The body block.
+    pub fn body(&self) -> Option<super::BlockExpr> {
         support::child(self.syntax())
     }
 }
@@ -438,6 +530,11 @@ impl RecordFieldDef {
     /// Returns the pub keyword if exists.
     pub fn pub_kw(&self) -> Option<SyntaxToken> {
         support::token(self.syntax(), SK::PubKw)
+    }
+
+    /// Returns the mut keyword if exists.
+    pub fn mut_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::MutKw)
     }
 
     /// Returns the name of the field.

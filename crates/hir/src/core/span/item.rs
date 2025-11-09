@@ -138,7 +138,9 @@ define_lazy_span_node!(
     @node {
         (attributes, attr_list, LazyAttrListSpan),
         (modifier, modifier, LazyItemModifierSpan),
-        (fields, fields, LazyFieldDefListSpan),
+        // Contract fields are wrapped in a dedicated AST node `ContractFields`.
+        // Expose them via a specialized span list.
+        (fields, fields, LazyContractFieldsSpan),
     }
 );
 impl<'db> LazyContractSpan<'db> {
@@ -372,6 +374,14 @@ impl<'db> LazyBodySpan<'db> {
         Self(crate::span::transition::SpanTransitionChain::new(b))
     }
 }
+
+define_lazy_span_node!(
+    LazyContractFieldsSpan,
+    ast::ContractFields,
+    @idx {
+        (field, LazyFieldDefSpan),
+    }
+);
 
 define_lazy_span_node!(
     LazyFieldDefListSpan,

@@ -359,6 +359,16 @@ pub enum SyntaxKind {
     Struct,
     /// `contract Foo { .. }`
     Contract,
+    /// leading fields inside a contract body
+    ContractFields,
+    /// `init(...) { ... }` block inside a contract
+    ContractInit,
+    /// `recv ... { ... }` block inside a contract
+    ContractRecv,
+    /// list of arms inside a recv block
+    RecvArmList,
+    /// `Pattern -> RetTy uses (...) { body }`
+    RecvArm,
     /// `enum Foo { .. }`
     Enum,
     /// `type Foo = i32`
@@ -693,6 +703,9 @@ impl SyntaxKind {
             SyntaxKind::Func => "function definition",
             SyntaxKind::Struct => "struct definition",
             SyntaxKind::Contract => "contract definition",
+            SyntaxKind::ContractFields => "contract fields",
+            SyntaxKind::ContractInit => "contract init block",
+            SyntaxKind::ContractRecv => "contract recv block",
             SyntaxKind::Enum => "enum definition",
             SyntaxKind::TypeAlias => "type alias",
             SyntaxKind::Impl => "`impl` block",
@@ -744,6 +757,8 @@ impl SyntaxKind {
             SyntaxKind::UsesClause => "`uses` clause",
             SyntaxKind::UsesParamList => "`uses` parameter list",
             SyntaxKind::UsesParam => "`uses` parameter",
+            SyntaxKind::RecvArmList => "recv arm list",
+            SyntaxKind::RecvArm => "recv arm",
             SyntaxKind::Root => "module",
             SyntaxKind::Error => todo!(),
         }

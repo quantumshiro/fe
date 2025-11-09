@@ -7,15 +7,27 @@ use super::{
     attr::{self, parse_attr_list},
     define_scope,
     expr::parse_expr,
+    expr_atom::BlockExprScope,
     func::FuncDefScope,
-    param::{TraitRefScope, TypeBoundListScope, parse_generic_params_opt, parse_where_clause_opt},
+    param::{
+        FuncParamListScope, TraitRefScope, TypeBoundListScope, parse_generic_params_opt,
+        parse_where_clause_opt,
+    },
     parse_list,
+    pat::parse_pat,
+    path::PathScope,
     struct_::RecordFieldDefListScope,
     token_stream::{LexicalToken, TokenStream},
     type_::{TupleTypeScope, parse_type},
     use_tree::UseTreeScope,
 };
-use crate::{ExpectedKind, SyntaxKind, parser::func::FuncScope};
+use crate::{
+    ExpectedKind, SyntaxKind,
+    parser::{
+        func::{FuncScope, UsesClauseScope},
+        struct_::RecordFieldDefScope,
+    },
+};
 
 define_scope! {
     #[doc(hidden)]
@@ -252,14 +264,176 @@ impl super::Parse for ContractScope {
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
         parser.bump_expected(SyntaxKind::ContractKw);
 
-        parser.set_scope_recovery_stack(&[SyntaxKind::Ident, SyntaxKind::LBrace]);
+        parser.set_scope_recovery_stack(&[
+            SyntaxKind::Ident,
+            SyntaxKind::UsesKw,
+            SyntaxKind::LBrace,
+        ]);
 
         if parser.find_and_pop(SyntaxKind::Ident, ExpectedKind::Name(SyntaxKind::Contract))? {
             parser.bump();
         }
-        if parser.find_and_pop(SyntaxKind::LBrace, ExpectedKind::Body(SyntaxKind::Contract))? {
-            parser.parse(RecordFieldDefListScope::default())?;
+
+        // Optional `uses` clause after the contract name
+        if parser.current_kind() == Some(SyntaxKind::UsesKw) {
+            parser.parse(UsesClauseScope::default())?;
         }
+        parser.pop_recovery_stack(); // remove `UsesKw` from recovery stack
+
+        if parser.find_and_pop(SyntaxKind::LBrace, ExpectedKind::Body(SyntaxKind::Contract))? {
+            parser.bump_expected(SyntaxKind::LBrace);
+
+            parser.parse(ContractFieldsScope::default())?;
+
+            // Optional `init` block
+            if parser.is_ident("init") {
+                parser.parse(ContractInitScope::default())?;
+            }
+
+            // Zero or more `recv` blocks
+            loop {
+                if !parser.is_ident("recv") {
+                    break;
+                }
+                parser.parse(ContractRecvScope::default())?;
+            }
+
+            parser.bump_or_recover(
+                SyntaxKind::RBrace,
+                "expected `}` to close the contract body",
+            )?;
+        }
+        Ok(())
+    }
+}
+
+// Parses the leading contract fields inside the contract body.
+// Comma separators are optional; items can be delimited by commas or newlines.
+define_scope! { ContractFieldsScope, SyntaxKind::ContractFields }
+impl super::Parse for ContractFieldsScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        // Keep consuming field definitions while they parse cleanly.
+        // Stop when we reach `init`, `recv`, or `}`.
+        loop {
+            // Stop conditions
+            match parser.current_kind() {
+                Some(SyntaxKind::RBrace) | None => break,
+                Some(SyntaxKind::Ident)
+                    if matches!(parser.current_token().unwrap().text(), "init" | "recv") =>
+                {
+                    break;
+                }
+                _ => {}
+            }
+
+            parser.parse(RecordFieldDefScope::default())?;
+
+            // Optional comma between fields
+            let _ = parser.bump_if(SyntaxKind::Comma);
+        }
+        Ok(())
+    }
+}
+
+// Parses the `init` block within a contract.
+define_scope! { ContractInitScope, SyntaxKind::ContractInit }
+impl super::Parse for ContractInitScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        debug_assert!(parser.is_ident("init"));
+        // bump `init`
+        parser.bump();
+
+        // Parameter list
+        if parser.current_kind() == Some(SyntaxKind::LParen) {
+            parser.parse(FuncParamListScope::new(false))?;
+        }
+
+        // Optional `uses` clause
+        let nt = parser.set_newline_as_trivia(true);
+        if parser.current_kind() == Some(SyntaxKind::UsesKw) {
+            parser.parse(UsesClauseScope::default())?;
+        }
+        parser.set_newline_as_trivia(nt);
+
+        // Body block
+        if parser.current_kind() == Some(SyntaxKind::LBrace) {
+            parser.parse(BlockExprScope::default())?;
+        }
+        Ok(())
+    }
+}
+
+// Parses a `recv` block within a contract, in either form:
+// - `recv Type { ... }`
+// - `recv { ... }`
+define_scope! { ContractRecvScope, SyntaxKind::ContractRecv }
+impl super::Parse for ContractRecvScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        debug_assert!(parser.is_ident("recv"));
+        parser.bump();
+
+        // Optional message root path before the block
+        if parser.current_kind() != Some(SyntaxKind::LBrace) {
+            parser.or_recover(|p| p.parse(PathScope::default()))?;
+        }
+
+        if parser.current_kind() == Some(SyntaxKind::LBrace) {
+            parser.parse(RecvArmListScope::default())?;
+        }
+        Ok(())
+    }
+}
+
+define_scope! { RecvArmListScope, RecvArmList }
+impl super::Parse for RecvArmListScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parser.bump_expected(SyntaxKind::LBrace);
+        while parser.current_kind() != Some(SyntaxKind::RBrace) && parser.current_kind().is_some() {
+            parser.parse(RecvArmScope::default())?;
+        }
+        parser.bump_or_recover(SyntaxKind::RBrace, "expected `}` to close recv block")?;
+        Ok(())
+    }
+}
+
+// Parses: `Pattern -> RetTy uses (...) { body }`
+define_scope! { RecvArmScope, RecvArm }
+impl super::Parse for RecvArmScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parser.set_newline_as_trivia(false);
+
+        // Pattern (e.g., `Transfer { to, amount }` or just `Transfer`)
+        parse_pat(parser)?;
+
+        let nt = parser.set_newline_as_trivia(true);
+
+        // Optional return type
+        if parser.bump_if(SyntaxKind::Arrow) {
+            parse_type(parser, None)?;
+        }
+
+        // Optional uses clause
+        if parser.current_kind() == Some(SyntaxKind::UsesKw) {
+            parser.parse(UsesClauseScope::default())?;
+        }
+
+        parser.set_newline_as_trivia(nt);
+
+        // Body block
+        if parser.current_kind() == Some(SyntaxKind::LBrace) {
+            parser.parse(BlockExprScope::default())?;
+        }
+
         Ok(())
     }
 }
