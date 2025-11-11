@@ -200,6 +200,34 @@ impl<'db> Contract<'db> {
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
         let fields = FieldDefListId::lower_contract_fields_opt(ctxt, ast.fields());
+        // Contract-level uses clause
+        let effects = lower_uses_clause_opt(ctxt, ast.uses_clause());
+
+        // Optional init block
+        let (init_params, init_effects, init_body) = if let Some(init_ast) = ast.init_block() {
+            let params = init_ast
+                .params()
+                .map(|p| FuncParamListId::lower_ast(ctxt, p));
+            let effects = lower_uses_clause_opt(ctxt, init_ast.uses_clause());
+            let body = init_ast
+                .body()
+                .map(|b| Body::lower_ast(ctxt, ast::Expr::cast(b.syntax().clone()).unwrap()));
+            (params, effects, body)
+        } else {
+            (None, EffectParamListId::new(ctxt.db(), vec![]), None)
+        };
+
+        // Recv blocks (message handlers)
+        let recvs = {
+            let mut data = Vec::new();
+            for r in ast.recvs() {
+                let msg_path = r
+                    .path()
+                    .map(|p| PathId::lower_ast(ctxt, p));
+                data.push(ContractRecv { msg_path });
+            }
+            ContractRecvListId::new(ctxt.db(), data)
+        };
         let origin = HirOrigin::raw(&ast);
 
         let contract = Self::new(
@@ -209,11 +237,43 @@ impl<'db> Contract<'db> {
             attributes,
             vis,
             fields,
+            effects,
+            init_params,
+            init_effects,
+            init_body,
+            recvs,
             ctxt.top_mod(),
             origin,
         );
         ctxt.leave_item_scope(contract)
     }
+}
+
+fn lower_uses_clause_opt<'db>(
+    ctxt: &mut FileLowerCtxt<'db>,
+    uses: Option<ast::UsesClause>,
+) -> EffectParamListId<'db> {
+    use crate::hir_def::{EffectParam, EffectParamListId};
+
+    let mut data: Vec<EffectParam<'db>> = Vec::new();
+
+    if let Some(uses) = uses {
+        if let Some(list) = uses.param_list() {
+            for p in list {
+                let name = p.name().map(|n| IdentId::lower_token(ctxt, n.syntax()));
+                let is_mut = p.mut_token().is_some();
+                let key_path = p.path().map(|path| PathId::lower_ast(ctxt, path)).into();
+                data.push(EffectParam { name, key_path, is_mut });
+            }
+        } else if let Some(p) = uses.param() {
+            let name = p.name().map(|n| IdentId::lower_token(ctxt, n.syntax()));
+            let is_mut = p.mut_token().is_some();
+            let key_path = p.path().map(|path| PathId::lower_ast(ctxt, path)).into();
+            data.push(EffectParam { name, key_path, is_mut });
+        }
+    }
+
+    EffectParamListId::new(ctxt.db(), data)
 }
 
 impl<'db> Enum<'db> {

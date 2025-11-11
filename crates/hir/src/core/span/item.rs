@@ -4,7 +4,10 @@ use super::{
     LazySpanAtom,
     attr::LazyAttrListSpan,
     define_lazy_span_node,
-    params::{LazyFuncParamListSpan, LazyGenericParamListSpan, LazyWhereClauseSpan},
+    params::{
+        LazyFuncParamListSpan, LazyGenericParamListSpan, LazyUsesClauseSpan, LazyWhereClauseSpan,
+    },
+    path::LazyPathSpan,
     transition::SpanTransitionChain,
     types::{LazyTupleTypeSpan, LazyTySpan},
     use_tree::LazyUseAliasSpan,
@@ -47,7 +50,7 @@ define_lazy_span_node!(
         (where_clause, where_clause, LazyWhereClauseSpan),
         (params, params, LazyFuncParamListSpan),
         (ret_ty, ret_ty, LazyTySpan),
-        (uses_clause, uses_clause, LazySpanAtom),
+        (effects, uses_clause, LazyUsesClauseSpan),
     }
 );
 
@@ -88,8 +91,8 @@ impl<'db> LazyFuncSpan<'db> {
         self.sig().name()
     }
 
-    pub fn uses_clause(self) -> LazySpanAtom<'db> {
-        self.sig().uses_clause()
+    pub fn effects(self) -> LazyUsesClauseSpan<'db> {
+        self.sig().effects()
     }
 
     pub fn where_clause(self) -> LazyWhereClauseSpan<'db> {
@@ -138,9 +141,11 @@ define_lazy_span_node!(
     @node {
         (attributes, attr_list, LazyAttrListSpan),
         (modifier, modifier, LazyItemModifierSpan),
+        (effects, uses_clause, LazyUsesClauseSpan),
         // Contract fields are wrapped in a dedicated AST node `ContractFields`.
         // Expose them via a specialized span list.
         (fields, fields, LazyContractFieldsSpan),
+        (init_block, init_block, LazyContractInitSpan),
     }
 );
 impl<'db> LazyContractSpan<'db> {
@@ -380,6 +385,50 @@ define_lazy_span_node!(
     ast::ContractFields,
     @idx {
         (field, LazyFieldDefSpan),
+    }
+);
+
+define_lazy_span_node!(
+    LazyContractInitSpan,
+    ast::ContractInit,
+    @node {
+        (params, params, LazyFuncParamListSpan),
+        (effects, uses_clause, LazyUsesClauseSpan),
+        (body, body, LazyBodySpan),
+    }
+);
+
+impl<'db> LazyContractSpan<'db> {
+    /// Nth recv arm span
+    pub fn recv(mut self, idx: usize) -> LazyContractRecvSpan<'db> {
+        use crate::span::transition::{LazyArg, LazyTransitionFn, ResolvedOrigin};
+        use parser::ast::prelude::*;
+
+        fn f(origin: ResolvedOrigin, arg: LazyArg) -> ResolvedOrigin {
+            let idx = match arg {
+                crate::span::transition::LazyArg::Idx(i) => i,
+                _ => 0,
+            };
+            origin.map(|node| {
+                ast::Contract::cast(node)
+                    .and_then(|c| c.recvs().nth(idx))
+                    .map(|n| n.syntax().clone().into())
+            })
+        }
+
+        self.0.push(LazyTransitionFn {
+            f,
+            arg: LazyArg::Idx(idx),
+        });
+        LazyContractRecvSpan(self.0)
+    }
+}
+
+define_lazy_span_node!(
+    LazyContractRecvSpan,
+    ast::ContractRecv,
+    @node {
+        (path, path, LazyPathSpan),
     }
 );
 

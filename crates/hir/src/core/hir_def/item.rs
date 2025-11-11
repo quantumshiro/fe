@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     HirDb,
-    hir_def::TraitRefId,
+    hir_def::{PathId, TraitRefId},
     lower,
     span::{
         DynLazySpan, HirOrigin,
@@ -732,6 +732,14 @@ pub struct Contract<'db> {
     pub(in crate::core) attributes: AttrListId<'db>,
     pub vis: Visibility,
     pub(in crate::core) fields: FieldDefListId<'db>,
+    /// `uses` clause attached to the contract header
+    pub effects: EffectParamListId<'db>,
+    /// Optional contract initializer block components
+    pub init_params: Option<FuncParamListId<'db>>,
+    pub init_effects: EffectParamListId<'db>,
+    pub init_body: Option<Body<'db>>,
+    /// Receive handlers declared in the contract
+    pub recvs: ContractRecvListId<'db>,
     pub top_mod: TopLevelMod<'db>,
 
     #[return_ref]
@@ -745,6 +753,18 @@ impl<'db> Contract<'db> {
     pub fn scope(self) -> ScopeId<'db> {
         ScopeId::from_item(self.into())
     }
+}
+
+#[salsa::interned]
+#[derive(Debug)]
+pub struct ContractRecvListId<'db> {
+    #[return_ref]
+    pub data: Vec<ContractRecv<'db>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ContractRecv<'db> {
+    pub msg_path: Option<PathId<'db>>,
 }
 
 #[salsa::tracked]
