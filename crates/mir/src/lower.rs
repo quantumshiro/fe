@@ -11,10 +11,13 @@ use hir_analysis::{
     },
 };
 
-use crate::ir::{
-    BasicBlock, BasicBlockId, CallOrigin, LoopInfo, MatchArmLowering, MatchArmPattern,
-    MatchLoweringInfo, MirBody, MirFunction, MirInst, MirModule, SwitchOrigin, SwitchTarget,
-    SwitchValue, Terminator, ValueData, ValueId, ValueOrigin,
+use crate::{
+    ir::{
+        BasicBlock, BasicBlockId, CallOrigin, LoopInfo, MatchArmLowering, MatchArmPattern,
+        MatchLoweringInfo, MirBody, MirFunction, MirInst, MirModule, SwitchOrigin, SwitchTarget,
+        SwitchValue, Terminator, ValueData, ValueId, ValueOrigin,
+    },
+    monomorphize::monomorphize_functions,
 };
 use rustc_hash::FxHashSet;
 
@@ -59,15 +62,16 @@ pub fn lower_module<'db>(
     db: &'db dyn HirAnalysisDb,
     top_mod: TopLevelMod<'db>,
 ) -> MirLowerResult<MirModule<'db>> {
-    let mut module = MirModule::new(top_mod);
+    let mut templates = Vec::new();
 
     for &func in top_mod.all_funcs(db) {
         let (_diags, typed_body) = check_func_body(db, func);
         let lowered = lower_function(db, func, typed_body.clone())?;
-        module.functions.push(lowered);
+        templates.push(lowered);
     }
 
-    Ok(module)
+    let functions = monomorphize_functions(db, templates);
+    Ok(MirModule { top_mod, functions })
 }
 
 /// Lowers a single HIR function (plus its typed body) into MIR form.
@@ -93,11 +97,18 @@ fn lower_function<'db>(
         builder.set_terminator(block, Terminator::Return(Some(ret_val)));
     }
     let mir_body = builder.finish();
+    let symbol_name = func
+        .name(db)
+        .to_opt()
+        .map(|ident| ident.data(db).to_string())
+        .unwrap_or_else(|| "<anonymous>".into());
 
     Ok(MirFunction {
         func,
         body: mir_body,
         typed_body,
+        generic_args: Vec::new(),
+        symbol_name,
     })
 }
 
@@ -460,6 +471,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: callable.clone(),
                 args,
+                resolved_name: None,
             }),
         }))
     }

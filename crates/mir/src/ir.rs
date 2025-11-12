@@ -9,7 +9,7 @@ use num_bigint::BigUint;
 use rustc_hash::FxHashMap;
 
 /// MIR for an entire top-level module.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MirModule<'db> {
     pub top_mod: TopLevelMod<'db>,
     pub functions: Vec<MirFunction<'db>>,
@@ -25,15 +25,19 @@ impl<'db> MirModule<'db> {
 }
 
 /// MIR for a single function.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MirFunction<'db> {
     pub func: Func<'db>,
     pub body: MirBody<'db>,
     pub typed_body: TypedBody<'db>,
+    /// Concrete generic arguments used to instantiate this function instance.
+    pub generic_args: Vec<TyId<'db>>,
+    /// Symbol name used for codegen (includes monomorphization suffix when present).
+    pub symbol_name: String,
 }
 
 /// A function body expressed as basic blocks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MirBody<'db> {
     pub entry: BasicBlockId,
     pub blocks: Vec<BasicBlock<'db>>,
@@ -109,7 +113,7 @@ impl ValueId {
 }
 
 /// A linear sequence of MIR instructions terminated by a control-flow edge.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BasicBlock<'db> {
     pub insts: Vec<MirInst<'db>>,
     pub terminator: Terminator,
@@ -139,7 +143,7 @@ impl<'db> Default for BasicBlock<'db> {
 }
 
 /// General MIR instruction (does not change control flow).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MirInst<'db> {
     /// A `let` binding statement.
     Let {
@@ -166,7 +170,7 @@ pub enum MirInst<'db> {
 }
 
 /// Control-flow terminating instruction.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Terminator {
     /// Return from the function with an optional value.
     Return(Option<ValueId>),
@@ -189,7 +193,7 @@ pub enum Terminator {
     Unreachable,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SwitchTarget {
     pub value: SwitchValue,
     pub block: BasicBlockId,
@@ -275,4 +279,6 @@ pub struct CallOrigin<'db> {
     pub expr: ExprId,
     pub callable: Callable<'db>,
     pub args: Vec<ValueId>,
+    /// Final lowered symbol name of the callee after monomorphization.
+    pub resolved_name: Option<String>,
 }

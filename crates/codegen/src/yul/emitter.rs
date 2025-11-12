@@ -61,7 +61,7 @@ impl<'db> YulEmitter<'db> {
 
     /// Produces the final Yul text for the current MIR function.
     fn emit(mut self) -> Result<String, YulError> {
-        let func_name = function_name(self.db, self.mir_func.func);
+        let func_name = self.mir_func.symbol_name.as_str();
         let (param_names, mut state) = self.init_function_state();
         let body_docs = self.emit_block(self.mir_func.body.entry, &mut state)?;
         let mut lines = Vec::new();
@@ -604,12 +604,16 @@ impl<'db> YulEmitter<'db> {
         call: &CallOrigin<'_>,
         state: &BlockState,
     ) -> Result<String, YulError> {
-        let Some(func) = call.callable.func_def.hir_func_def(self.db) else {
-            return Err(YulError::Unsupported(
-                "callable without hir function definition is not supported yet".into(),
-            ));
+        let callee = if let Some(name) = &call.resolved_name {
+            name.clone()
+        } else {
+            let Some(func) = call.callable.func_def.hir_func_def(self.db) else {
+                return Err(YulError::Unsupported(
+                    "callable without hir function definition is not supported yet".into(),
+                ));
+            };
+            function_name(self.db, func)
         };
-        let callee = function_name(self.db, func);
         let mut lowered_args = Vec::with_capacity(call.args.len());
         for &arg in &call.args {
             lowered_args.push(self.lower_value(arg, state)?);
