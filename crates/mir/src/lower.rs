@@ -1,8 +1,8 @@
 use std::{error::Error, fmt};
 
 use hir::hir_def::{
-    Body, Expr, ExprId, FieldIndex, Func, IdentId, LitKind, MatchArm, Partial, Pat, PatId, PathId,
-    Stmt, StmtId, TopLevelMod,
+    Body, Expr, ExprId, Field, FieldIndex, Func, IdentId, LitKind, MatchArm, Partial, Pat, PatId,
+    PathId, Stmt, StmtId, TopLevelMod,
 };
 use common::ingot::IngotKind;
 use hir_analysis::{
@@ -76,8 +76,30 @@ pub fn lower_module<'db>(
     top_mod: TopLevelMod<'db>,
 ) -> MirLowerResult<MirModule<'db>> {
     let mut templates = Vec::new();
+    let mut funcs_to_lower = Vec::new();
+    let mut seen = FxHashSet::default();
+
+    let mut queue_func = |func: Func<'db>| {
+        if seen.insert(func) {
+            funcs_to_lower.push(func);
+        }
+    };
 
     for &func in top_mod.all_funcs(db) {
+        queue_func(func);
+    }
+    for &impl_block in top_mod.all_impls(db) {
+        for func in impl_block.funcs(db) {
+            queue_func(func);
+        }
+    }
+    for &impl_trait in top_mod.all_impl_traits(db) {
+        for func in impl_trait.methods(db) {
+            queue_func(func);
+        }
+    }
+
+    for func in funcs_to_lower {
         // Trait methods without a body (signatures only) should be ignored by MIR.
         if func.body(db).is_none() {
             continue;
@@ -110,6 +132,7 @@ pub(crate) fn lower_function<'db>(
     let mut builder = MirBuilder::new(db, body, &typed_body);
     let entry = builder.alloc_block();
     let fallthrough = builder.lower_root(entry, body.expr(db));
+    builder.ensure_field_expr_values();
     let ret_val = builder.ensure_value(body.expr(db));
     if let Some(block) = fallthrough {
         builder.set_terminator(block, Terminator::Return(Some(ret_val)));
@@ -136,7 +159,12 @@ struct MirBuilder<'db, 'a> {
     body: Body<'db>,
     typed_body: &'a TypedBody<'db>,
     mir_body: MirBody<'db>,
+    /// Cached `core::ptr::get_field` definition used for field reads.
     get_field_func: Option<FuncDef<'db>>,
+    /// Cached `core::ptr::store_field` definition used for record writes.
+    store_field_func: Option<FuncDef<'db>>,
+    /// Cached `core::mem::alloc` definition used for record allocation.
+    alloc_func: Option<FuncDef<'db>>,
     address_space_ty: Option<TyId<'db>>,
     loop_stack: Vec<LoopScope>,
 }
@@ -158,6 +186,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             typed_body,
             mir_body: MirBody::new(),
             get_field_func: None,
+            store_field_func: None,
+            alloc_func: None,
             address_space_ty: None,
             loop_stack: Vec::new(),
         }
@@ -465,6 +495,19 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         value
     }
 
+    /// Force every field expression in the body to have a lowered MIR value so later
+    /// stages can look up the synthesized `get_field` call even when the field only
+    /// appears inside larger expressions (e.g. arithmetic).
+    fn ensure_field_expr_values(&mut self) {
+        let exprs = self.body.exprs(self.db);
+        for expr_id in exprs.keys() {
+            let Partial::Present(expr) = &exprs[expr_id] else { continue };
+            if matches!(expr, Expr::Field(..)) {
+                self.ensure_value(expr_id);
+            }
+        }
+    }
+
     /// Lower an expression inside a concrete block, returning the exit block and value.
     fn lower_expr_in(
         &mut self,
@@ -476,6 +519,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 let next_block = self.lower_block(block, expr, stmts);
                 let val = self.ensure_value(expr);
                 (next_block, val)
+            }
+            Partial::Present(Expr::RecordInit(_, fields)) => {
+                self.try_lower_record(block, expr, fields)
             }
             Partial::Present(Expr::Match(scrutinee, arms)) => {
                 if let Partial::Present(arms) = arms {
@@ -561,7 +607,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let lhs_ty = self.typed_body.expr_ty(self.db, *lhs);
         let info = self.field_access_info(lhs_ty, field_index)?;
 
-        let addr_value = self.synthetic_u256(BigUint::from(0u8));
+        let addr_value = self.ensure_value(*lhs);
         let space_value = self.synthetic_address_space_memory()?;
         let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
         let callable = self.get_field_callable(expr, lhs_ty, info.field_ty)?;
@@ -575,6 +621,106 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 resolved_name: None,
             }),
         }))
+    }
+
+    /// Lowers a record literal into an `alloc` call followed by `store_field` writes so the
+    /// expression evaluates to the concrete pointer returned by `alloc`.
+    fn try_lower_record(
+        &mut self,
+        block: BasicBlockId,
+        expr: ExprId,
+        fields: &[Field<'db>],
+    ) -> (Option<BasicBlockId>, ValueId) {
+        // First lower each field expression so we know the value to write later.
+        let mut current = Some(block);
+        let mut lowered_fields = Vec::with_capacity(fields.len());
+        for field in fields {
+            let Some(curr_block) = current else {
+                break;
+            };
+            let (next_block, value) = self.lower_expr_in(curr_block, field.expr);
+            current = next_block;
+            let Some(label) = field.label_eagerly(self.db, self.body) else {
+                let value_id = self.ensure_value(expr);
+                return (current, value_id);
+            };
+            lowered_fields.push((label, value));
+        }
+
+        let Some(curr_block) = current else {
+            let value_id = self.ensure_value(expr);
+            return (None, value_id);
+        };
+
+        let record_ty = self.typed_body.expr_ty(self.db, expr);
+        let record_like = RecordLike::from_ty(record_ty);
+        let Some(size_bytes) = self.record_size_bytes(&record_like) else {
+            let value_id = self.ensure_value(expr);
+            return (Some(curr_block), value_id);
+        };
+
+        // Emit the call to `alloc(size)` and bind its result so subsequent stores can re-use it.
+        let Some(alloc_callable) = self.get_alloc_callable(expr) else {
+            let value_id = self.ensure_value(expr);
+            return (Some(curr_block), value_id);
+        };
+        let alloc_ret_ty = alloc_callable.ret_ty(self.db);
+        let size_value = self.synthetic_u256(BigUint::from(size_bytes));
+        let alloc_value = self.mir_body.alloc_value(ValueData {
+            ty: alloc_ret_ty,
+            origin: ValueOrigin::Call(CallOrigin {
+                expr,
+                callable: alloc_callable,
+                args: vec![size_value],
+                resolved_name: None,
+            }),
+        });
+        self.push_inst(
+            curr_block,
+            MirInst::EvalExpr {
+                expr,
+                value: alloc_value,
+                bind_value: true,
+            },
+        );
+
+        let value_id = self.ensure_value(expr);
+        let Some(space_value) = self.synthetic_address_space_memory() else {
+            return (Some(curr_block), value_id);
+        };
+
+        // Call `store_field` for every initialized member, re-using the allocated pointer.
+        for (label, field_value) in lowered_fields {
+            let field_index = FieldIndex::Ident(label);
+            let Some(info) = self.field_access_info(record_ty, field_index) else {
+                continue;
+            };
+            let Some(store_callable) = self.get_store_field_callable(expr, info.field_ty)
+            else {
+                continue;
+            };
+            let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
+            let store_ret_ty = store_callable.ret_ty(self.db);
+            let store_call = self.mir_body.alloc_value(ValueData {
+                ty: store_ret_ty,
+                origin: ValueOrigin::Call(CallOrigin {
+                    expr,
+                    callable: store_callable,
+                    args: vec![value_id, space_value, offset_value, field_value],
+                    resolved_name: None,
+                }),
+            });
+            self.push_inst(
+                curr_block,
+                MirInst::EvalExpr {
+                    expr,
+                    value: store_call,
+                    bind_value: false,
+                },
+            );
+        }
+
+        (Some(curr_block), value_id)
     }
 
     /// Returns the field type and byte offset for a given receiver/field pair.
@@ -620,6 +766,23 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         Some((field_ty, offset))
     }
 
+    /// Computes the total byte width of a record by summing its fields.
+    fn record_size_bytes(&self, record_like: &RecordLike<'db>) -> Option<u64> {
+        let (_, adt_fields) = record_like.record_field_list(self.db)?;
+        let args = match record_like {
+            RecordLike::Type(ty) => ty.generic_args(self.db),
+            RecordLike::Variant(variant) => variant.ty.generic_args(self.db),
+        };
+
+        let mut size = 0u64;
+        for idx in 0..adt_fields.num_types() {
+            let ty = adt_fields.ty(self.db, idx).instantiate(self.db, args);
+            let field_size = self.ty_size_bytes(ty)?;
+            size += field_size;
+        }
+        Some(size)
+    }
+
     /// Returns the byte width of primitive integer/bool types we can layout today.
     fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
         match ty.data(self.db) {
@@ -654,6 +817,28 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         Callable::new(self.db, ty, expr.span(self.body).into(), None).ok()
     }
 
+    /// Builds the callable metadata for the `store_field` helper.
+    fn get_store_field_callable(
+        &mut self,
+        expr: ExprId,
+        field_ty: TyId<'db>,
+    ) -> Option<Callable<'db>> {
+        let func_def = self.resolve_store_field_func()?;
+        let ty = TyId::foldl(
+            self.db,
+            TyId::func(self.db, func_def),
+            &[field_ty],
+        );
+        Callable::new(self.db, ty, expr.span(self.body).into(), None).ok()
+    }
+
+    /// Builds the callable metadata for `core::mem::alloc`.
+    fn get_alloc_callable(&mut self, expr: ExprId) -> Option<Callable<'db>> {
+        let func_def = self.resolve_alloc_func()?;
+        let ty = TyId::func(self.db, func_def);
+        Callable::new(self.db, ty, expr.span(self.body).into(), None).ok()
+    }
+
     fn resolve_get_field_func(&mut self) -> Option<FuncDef<'db>> {
         if let Some(func) = self.get_field_func {
             return Some(func);
@@ -664,6 +849,36 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
         if let Some(func) = self.find_local_get_field() {
             self.get_field_func = Some(func);
+            return Some(func);
+        }
+        None
+    }
+
+    fn resolve_store_field_func(&mut self) -> Option<FuncDef<'db>> {
+        if let Some(func) = self.store_field_func {
+            return Some(func);
+        }
+        if let Some(func) = self.resolve_store_field_via_path() {
+            self.store_field_func = Some(func);
+            return Some(func);
+        }
+        if let Some(func) = self.find_local_store_field() {
+            self.store_field_func = Some(func);
+            return Some(func);
+        }
+        None
+    }
+
+    fn resolve_alloc_func(&mut self) -> Option<FuncDef<'db>> {
+        if let Some(func) = self.alloc_func {
+            return Some(func);
+        }
+        if let Some(func) = self.resolve_alloc_via_path() {
+            self.alloc_func = Some(func);
+            return Some(func);
+        }
+        if let Some(func) = self.find_local_alloc() {
+            self.alloc_func = Some(func);
             return Some(func);
         }
         None
@@ -685,11 +900,69 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
     }
 
+    fn resolve_store_field_via_path(&self) -> Option<FuncDef<'db>> {
+        let mut path = self.resolve_core_path(&["core", "ptr", "store_field"]);
+        if path.is_none() {
+            path = self.resolve_core_path(&["core", "store_field"]);
+        }
+        let PathRes::Func(func_ty) = path? else {
+            return None;
+        };
+        let base = func_ty.base_ty(self.db);
+        if let TyData::TyBase(TyBase::Func(func_def)) = base.data(self.db) {
+            Some(*func_def)
+        } else {
+            None
+        }
+    }
+
+    fn resolve_alloc_via_path(&self) -> Option<FuncDef<'db>> {
+        let mut path = self.resolve_core_path(&["core", "mem", "alloc"]);
+        if path.is_none() {
+            path = self.resolve_core_path(&["core", "alloc"]);
+        }
+        let PathRes::Func(func_ty) = path? else {
+            return None;
+        };
+        let base = func_ty.base_ty(self.db);
+        if let TyData::TyBase(TyBase::Func(func_def)) = base.data(self.db) {
+            Some(*func_def)
+        } else {
+            None
+        }
+    }
+
     fn find_local_get_field(&self) -> Option<FuncDef<'db>> {
         let top_mod = self.body.top_mod(self.db);
         for &func in top_mod.all_funcs(self.db) {
             let name = func.name(self.db).to_opt()?;
             if name.data(self.db) == "get_field" {
+                if let Some(def) = lower_func(self.db, func) {
+                    return Some(def);
+                }
+            }
+        }
+        None
+    }
+
+    fn find_local_store_field(&self) -> Option<FuncDef<'db>> {
+        let top_mod = self.body.top_mod(self.db);
+        for &func in top_mod.all_funcs(self.db) {
+            let name = func.name(self.db).to_opt()?;
+            if name.data(self.db) == "store_field" {
+                if let Some(def) = lower_func(self.db, func) {
+                    return Some(def);
+                }
+            }
+        }
+        None
+    }
+
+    fn find_local_alloc(&self) -> Option<FuncDef<'db>> {
+        let top_mod = self.body.top_mod(self.db);
+        for &func in top_mod.all_funcs(self.db) {
+            let name = func.name(self.db).to_opt()?;
+            if name.data(self.db) == "alloc" {
                 if let Some(def) = lower_func(self.db, func) {
                     return Some(def);
                 }
@@ -763,7 +1036,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             path,
             self.body.scope(),
             PredicateListId::empty_list(self.db),
-            false,
+            true,
         )
         .ok()
     }

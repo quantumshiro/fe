@@ -1,0 +1,72 @@
+---
+source: crates/codegen/tests/yul.rs
+assertion_line: 38
+expression: output
+input_file: tests/fixtures/struct_init.fe
+---
+{
+  function make_dummy() -> ret {
+    let v0 := alloc(40)
+    store_field__u64__aee7f05a097ffa16(v0, 0, 0, 42)
+    store_field__u256__3271ca15373d4483(v0, 0, 8, 99)
+    let v1 := v0
+    ret := v1
+  }
+}
+{
+  function alloc(size) -> ret {
+    let v0 := mload(FREE_MEMORY_PTR)
+    if eq(v0, 0) {
+      v0 := INITIAL_FREE_MEMORY
+      mstore(FREE_MEMORY_PTR, add(v0, size))
+      ret := v0
+    }
+    if iszero(eq(v0, 0)) {
+      ret := v0
+    }
+  }
+}
+{
+  function store_field__u64__aee7f05a097ffa16(addr, space, offset, value) -> ret {
+    let v1 := add(addr, offset)
+    let v0 := 0
+    switch space
+      case 0 {
+        v0 := mstore(v1, to_word__u64__aee7f05a097ffa16(value))
+      }
+      case 1 {
+        v0 := sstore(v1, to_word__u64__aee7f05a097ffa16(value))
+      }
+      default {
+        v0 := 0
+      }
+    ret := v0
+  }
+}
+{
+  function store_field__u256__3271ca15373d4483(addr, space, offset, value) -> ret {
+    let v1 := add(addr, offset)
+    let v0 := 0
+    switch space
+      case 0 {
+        v0 := mstore(v1, to_word__u256__3271ca15373d4483(value))
+      }
+      case 1 {
+        v0 := sstore(v1, to_word__u256__3271ca15373d4483(value))
+      }
+      default {
+        v0 := 0
+      }
+    ret := v0
+  }
+}
+{
+  function to_word__u64__aee7f05a097ffa16(self) -> ret {
+    ret := self
+  }
+}
+{
+  function to_word__u256__3271ca15373d4483(self) -> ret {
+    ret := self
+  }
+}

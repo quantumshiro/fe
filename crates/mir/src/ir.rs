@@ -167,6 +167,15 @@ pub enum MirInst<'db> {
     },
     /// Plain expression statement (no bindings).
     Eval { stmt: StmtId, value: ValueId },
+    /// Synthetic expression emitted during lowering (no originating statement). This lets
+    /// expression lowering insert helper calls (e.g. alloc/store_field) while still keeping
+    /// the resulting value associated with its originating expression.
+    EvalExpr {
+        expr: ExprId,
+        value: ValueId,
+        /// Whether the value should be bound to a temporary for later reuse.
+        bind_value: bool,
+    },
 }
 
 /// Control-flow terminating instruction.

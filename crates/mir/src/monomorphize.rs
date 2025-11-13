@@ -9,6 +9,7 @@ use hir_analysis::{
     ty::{
         fold::{TyFoldable, TyFolder},
         func_def::{FuncDef, lower_func},
+        trait_def::resolve_trait_method,
         ty_check::check_func_body,
         ty_def::{TyData, TyId},
     },
@@ -16,7 +17,7 @@ use hir_analysis::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    MirFunction, ValueOrigin,
+    CallOrigin, MirFunction, ValueOrigin,
     lower::lower_function,
 };
 
@@ -123,7 +124,7 @@ impl<'db> Monomorphizer<'db> {
             let mut sites = Vec::new();
             for (value_idx, value) in function.body.values.iter().enumerate() {
                 if let ValueOrigin::Call(call) = &value.origin {
-                    if let Some(target_func) = call.callable.func_def.hir_func_def(self.db) {
+                    if let Some(target_func) = self.resolve_call_target(call) {
                         let args = call.callable.generic_args().to_vec();
                         sites.push((value_idx, target_func, args));
                     }
@@ -163,6 +164,18 @@ impl<'db> Monomorphizer<'db> {
         self.instance_map.insert(key, idx);
         self.worklist.push_back(idx);
         Some((idx, symbol))
+    }
+
+    /// Returns the concrete HIR function targeted by the given call, accounting for trait impls.
+    fn resolve_call_target(&self, call: &CallOrigin<'db>) -> Option<Func<'db>> {
+        if let Some(func) = call.callable.func_def.hir_func_def(self.db) {
+            if func.body(self.db).is_some() {
+                return Some(func);
+            }
+        }
+        let inst = call.callable.trait_inst()?;
+        let method_name = call.callable.func_def.name(self.db);
+        resolve_trait_method(self.db, inst, method_name)
     }
 
     /// Substitute concrete type arguments directly into the MIR body values.

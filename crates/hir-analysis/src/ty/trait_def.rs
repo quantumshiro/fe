@@ -5,7 +5,7 @@ use common::{
     ingot::Ingot,
 };
 use hir::{
-    hir_def::{HirIngot, IdentId, ImplTrait, Trait},
+    hir_def::{Func, HirIngot, IdentId, ImplTrait, Trait},
     span::DynLazySpan,
 };
 use rustc_hash::FxHashMap;
@@ -67,6 +67,25 @@ pub(crate) fn impls_for_trait<'db>(
         })
         .cloned()
         .collect()
+}
+
+/// Resolves the concrete HIR function that implements `method` for the given trait inst.
+pub fn resolve_trait_method<'db>(
+    db: &'db dyn HirAnalysisDb,
+    inst: TraitInstId<'db>,
+    method: IdentId<'db>,
+) -> Option<Func<'db>> {
+    let ingot = inst.def(db).ingot(db);
+    let canonical = Canonical::new(db, inst);
+    for implementor in impls_for_trait(db, ingot, canonical) {
+        let implementor = implementor.instantiate_identity();
+        if let Some(func_def) = implementor.methods(db).get(&method) {
+            if let Some(func) = func_def.hir_func_def(db) {
+                return Some(func);
+            }
+        }
+    }
+    None
 }
 
 /// Returns all [`Implementor`] for the given `ty` that satisfy the given assumptions.

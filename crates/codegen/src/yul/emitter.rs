@@ -37,6 +37,8 @@ struct YulEmitter<'db> {
     db: &'db DriverDataBase,
     mir_func: &'db MirFunction<'db>,
     body: Body<'db>,
+    /// Temporaries allocated for expression values that must be re-used later (e.g. struct ptrs).
+    expr_temps: FxHashMap<ExprId, String>,
     match_values: FxHashMap<ExprId, String>,
     /// Intrinsic values already emitted as statements so we do not duplicate side effects.
     emitted_intrinsics: FxHashSet<ValueId>,
@@ -60,6 +62,7 @@ impl<'db> YulEmitter<'db> {
             db,
             mir_func,
             body,
+            expr_temps: FxHashMap::default(),
             match_values: FxHashMap::default(),
             emitted_intrinsics: FxHashSet::default(),
         })
@@ -427,6 +430,20 @@ impl<'db> YulEmitter<'db> {
                         docs.push(doc);
                     }
                 }
+                mir::MirInst::EvalExpr {
+                    expr,
+                    value,
+                    bind_value,
+                } => {
+                    let lowered = self.lower_value(*value, state)?;
+                    if *bind_value {
+                        let temp = state.alloc_local();
+                        self.expr_temps.insert(*expr, temp.clone());
+                        docs.push(YulDoc::line(format!("let {temp} := {lowered}")));
+                    } else {
+                        docs.push(YulDoc::line(lowered));
+                    }
+                }
             }
         }
         Ok(docs)
@@ -582,6 +599,9 @@ impl<'db> YulEmitter<'db> {
 
     /// Lowers a HIR expression into a Yul expression string.
     fn lower_expr(&self, expr_id: ExprId, state: &BlockState) -> Result<String, YulError> {
+        if let Some(temp) = self.expr_temps.get(&expr_id) {
+            return Ok(temp.clone());
+        }
         if let Some(temp) = self.match_values.get(&expr_id) {
             return Ok(temp.clone());
         }
@@ -672,12 +692,11 @@ impl<'db> YulEmitter<'db> {
                 )),
             },
             Expr::Block(stmts) => {
-                let Some(expr) = self.last_expr(stmts) else {
-                    return Err(YulError::Unsupported(
-                        "block without terminal expression".into(),
-                    ));
-                };
-                self.lower_expr(expr, state)
+                if let Some(expr) = self.last_expr(stmts) {
+                    self.lower_expr(expr, state)
+                } else {
+                    Ok("0".into())
+                }
             }
             Expr::Path(path) => {
                 let original = self
@@ -686,11 +705,24 @@ impl<'db> YulEmitter<'db> {
                 Ok(state.resolve_name(&original))
             }
             Expr::Field(..) => {
-                let ty = self.mir_func.typed_body.expr_ty(self.db, expr_id);
-                Err(YulError::Unsupported(format!(
-                    "field expressions should be rewritten before codegen (expr type {})",
-                    ty.pretty_print(self.db)
-                )))
+                if let Some(value_id) = self.mir_func.body.expr_values.get(&expr_id) {
+                    self.lower_value(*value_id, state)
+                } else {
+                    let ty = self.mir_func.typed_body.expr_ty(self.db, expr_id);
+                    Err(YulError::Unsupported(format!(
+                        "field expressions should be rewritten before codegen (expr type {})",
+                        ty.pretty_print(self.db)
+                    )))
+                }
+            }
+            Expr::RecordInit(..) => {
+                if let Some(temp) = self.expr_temps.get(&expr_id) {
+                    Ok(temp.clone())
+                } else {
+                    Err(YulError::Unsupported(
+                        "record initializers should be lowered before codegen".into(),
+                    ))
+                }
             }
             other => Err(YulError::Unsupported(format!(
                 "only simple expressions are supported: {other:?}"
@@ -810,6 +842,9 @@ impl<'db> YulEmitter<'db> {
         docs: &mut Vec<YulDoc>,
         state: &mut BlockState,
     ) -> Result<String, YulError> {
+        if let Some(temp) = self.expr_temps.get(&expr_id) {
+            return Ok(temp.clone());
+        }
         if let Some(temp) = self.match_values.get(&expr_id) {
             return Ok(temp.clone());
         }

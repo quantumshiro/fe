@@ -304,6 +304,19 @@ fn format_inst(db: &DriverDataBase, inst: &MirInst<'_>) -> String {
         MirInst::Eval { stmt, value } => {
             format!("{}: eval {}", stmt_label(*stmt), value_label(*value))
         }
+        MirInst::EvalExpr {
+            expr,
+            value,
+            bind_value,
+        } => {
+            let bind_suffix = if *bind_value { " (bind)" } else { "" };
+            format!(
+                "{}: eval_expr{} {}",
+                expr_label(*expr),
+                bind_suffix,
+                value_label(*value)
+            )
+        }
     }
 }
 
