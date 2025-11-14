@@ -6,7 +6,7 @@ use fe_hir_analysis::{
     analysis_pass::ModuleAnalysisPass,
     name_resolution::{ImportAnalysisPass, NameDerivation, ResolvedImports, resolve_imports},
 };
-use hir::hir_def::Use;
+use hir::{hir_def::Use, span::LazySpan};
 use rustc_hash::FxHashMap;
 use test_db::{HirAnalysisTestDb, HirPropertyFormatter};
 use test_utils::snap_test;
@@ -67,7 +67,14 @@ fn format_imports<'db>(
         }
     }
     for (use_, mut values) in use_res_map.into_iter() {
-        let use_span = use_.span().into();
+        // Skip uses whose spans cannot be resolved (for example,
+        // implicit/prelude imports that do not originate from this file).
+        let span = use_.span();
+        if span.resolve(db).is_none() {
+            continue;
+        }
+
+        let use_span = span.into();
         values.sort_unstable();
         let imported_names = values.join(" | ");
         prop_formatter.push_prop(use_.top_mod(db), use_span, imported_names)

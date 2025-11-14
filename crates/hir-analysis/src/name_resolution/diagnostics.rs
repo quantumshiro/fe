@@ -31,7 +31,11 @@ pub enum PathResDiag<'db> {
     Invisible(DynLazySpan<'db>, IdentId<'db>, Option<DynLazySpan<'db>>),
 
     /// The resolved name is ambiguous.
-    Ambiguous(DynLazySpan<'db>, IdentId<'db>, Vec<DynLazySpan<'db>>),
+    Ambiguous(
+        DynLazySpan<'db>,
+        IdentId<'db>,
+        Vec<(DynLazySpan<'db>, bool)>,
+    ),
 
     /// The associated type is ambiguous.
     AmbiguousAssociatedType {
@@ -139,7 +143,15 @@ impl<'db> PathResDiag<'db> {
     ) -> Self {
         let cands = cands
             .into_iter()
-            .filter_map(|name| name.kind.name_span(db))
+            .filter_map(|name| {
+                let span = name.kind.name_span(db)?;
+                let from_prelude = name
+                    .derivation
+                    .use_stmt()
+                    .map(|use_| use_.is_prelude_use(db))
+                    .unwrap_or(false);
+                Some((span, from_prelude))
+            })
             .collect();
         Self::Ambiguous(span, ident, cands)
     }

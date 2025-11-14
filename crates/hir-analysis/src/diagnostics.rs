@@ -294,16 +294,21 @@ impl DiagnosticVoucher for PathResDiag<'_> {
 
                 let mut cand_spans: Vec<_> = candidates
                     .iter()
-                    .filter_map(|span| span.resolve(db))
+                    .filter_map(|(span, from_prelude)| {
+                        span.resolve(db).map(|resolved| (resolved, *from_prelude))
+                    })
                     .collect();
-                cand_spans.sort_unstable();
-                diags.extend(cand_spans.into_iter().enumerate().map(|(i, span)| {
-                    SubDiagnostic::new(
-                        LabelStyle::Secondary,
-                        format!("candidate {}", i + 1),
-                        Some(span),
-                    )
-                }));
+                cand_spans.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+                diags.extend(cand_spans.into_iter().enumerate().map(
+                    |(i, (span, from_prelude))| {
+                        let label = if from_prelude {
+                            format!("candidate {} (from prelude)", i + 1)
+                        } else {
+                            format!("candidate {}", i + 1)
+                        };
+                        SubDiagnostic::new(LabelStyle::Secondary, label, Some(span))
+                    },
+                ));
 
                 CompleteDiagnostic {
                     severity,
