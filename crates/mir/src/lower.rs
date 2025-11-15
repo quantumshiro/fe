@@ -516,6 +516,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         block: BasicBlockId,
         expr: ExprId,
     ) -> (Option<BasicBlockId>, ValueId) {
+        if let Some(result) = self.try_lower_intrinsic_stmt(block, expr) {
+            return result;
+        }
         match expr.data(self.db, self.body) {
             Partial::Present(Expr::Block(stmts)) => {
                 let next_block = self.lower_block(block, expr, stmts);
@@ -583,6 +586,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         let ty = self.typed_body.expr_ty(self.db, expr);
         if let Some(kind) = self.intrinsic_kind(callable.func_def) {
+            if !kind.returns_value() {
+                return None;
+            }
             return Some(self.mir_body.alloc_value(ValueData {
                 ty,
                 origin: ValueOrigin::Intrinsic(IntrinsicValue { op: kind, args }),
@@ -722,6 +728,50 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
 
         (Some(curr_block), value_id)
+    }
+
+    /// Attempts to lower a statement-only intrinsic call (`mstore`, `sstore`, …).
+    fn try_lower_intrinsic_stmt(
+        &mut self,
+        block: BasicBlockId,
+        expr: ExprId,
+    ) -> Option<(Option<BasicBlockId>, ValueId)> {
+        let (op, args) = self.intrinsic_stmt_args(expr)?;
+        let value_id = self.ensure_value(expr);
+        self.push_inst(block, MirInst::IntrinsicStmt { expr, op, args });
+        Some((Some(block), value_id))
+    }
+
+    fn intrinsic_stmt_args(&mut self, expr: ExprId) -> Option<(IntrinsicOp, Vec<ValueId>)> {
+        let callable = self.typed_body.callable_expr(expr)?;
+        let op = self.intrinsic_kind(callable.func_def)?;
+        if op.returns_value() {
+            return None;
+        }
+
+        let exprs = self.body.exprs(self.db);
+        let Partial::Present(expr_data) = &exprs[expr] else {
+            return None;
+        };
+
+        let mut args = Vec::new();
+        match expr_data {
+            Expr::Call(_, call_args) => {
+                args.reserve(call_args.len());
+                for arg in call_args.iter() {
+                    args.push(self.ensure_value(arg.expr));
+                }
+            }
+            Expr::MethodCall(receiver, _, _, call_args) => {
+                args.reserve(call_args.len() + 1);
+                args.push(self.ensure_value(*receiver));
+                for arg in call_args.iter() {
+                    args.push(self.ensure_value(arg.expr));
+                }
+            }
+            _ => return None,
+        }
+        Some((op, args))
     }
 
     /// Returns the field type and byte offset for a given receiver/field pair.
@@ -1244,6 +1294,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         stmt_id: StmtId,
         expr: ExprId,
     ) -> (Option<BasicBlockId>, Option<ValueId>) {
+        if let Some((next_block, value_id)) = self.try_lower_intrinsic_stmt(block, expr) {
+            return (next_block, Some(value_id));
+        }
         let exprs = self.body.exprs(self.db);
         let Partial::Present(expr_data) = &exprs[expr] else {
             return (Some(block), None);

@@ -22,6 +22,7 @@ input_file: tests/fixtures/struct_init.fe
       ret := v0
     }
     if iszero(eq(v0, 0)) {
+      mstore(FREE_MEMORY_PTR, add(v0, size))
       ret := v0
     }
   }
@@ -40,7 +41,7 @@ input_file: tests/fixtures/struct_init.fe
       default {
         v0 := 0
       }
-    ret := v0
+    ret := 0
   }
 }
 {

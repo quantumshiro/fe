@@ -176,6 +176,12 @@ pub enum MirInst<'db> {
         /// Whether the value should be bound to a temporary for later reuse.
         bind_value: bool,
     },
+    /// Statement-only intrinsic (e.g. `mstore`) that produces no value.
+    IntrinsicStmt {
+        expr: ExprId,
+        op: IntrinsicOp,
+        args: Vec<ValueId>,
+    },
 }
 
 /// Control-flow terminating instruction.
@@ -349,4 +355,11 @@ pub enum IntrinsicOp {
     Sload,
     /// `sstore(slot, value)`
     Sstore,
+}
+
+impl IntrinsicOp {
+    /// Returns `true` if this intrinsic yields a value (load), `false` for pure side effects.
+    pub fn returns_value(self) -> bool {
+        matches!(self, IntrinsicOp::Mload | IntrinsicOp::Sload)
+    }
 }

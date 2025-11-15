@@ -11,7 +11,7 @@ use mir::{
     },
     lower_module,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use super::{
     doc::{YulDoc, render_docs},
@@ -40,8 +40,6 @@ struct YulEmitter<'db> {
     /// Temporaries allocated for expression values that must be re-used later (e.g. struct ptrs).
     expr_temps: FxHashMap<ExprId, String>,
     match_values: FxHashMap<ExprId, String>,
-    /// Intrinsic values already emitted as statements so we do not duplicate side effects.
-    emitted_intrinsics: FxHashSet<ValueId>,
 }
 
 #[derive(Clone, Copy)]
@@ -64,7 +62,6 @@ impl<'db> YulEmitter<'db> {
             body,
             expr_temps: FxHashMap::default(),
             match_values: FxHashMap::default(),
-            emitted_intrinsics: FxHashSet::default(),
         })
     }
 
@@ -151,9 +148,14 @@ impl<'db> YulEmitter<'db> {
                 if self.emit_intrinsic_return(val, &mut docs, state)? {
                     return Ok(docs);
                 }
-                let expr = match self.mir_func.body.value(val).origin {
+                let value = self.mir_func.body.value(val);
+                if value.ty.is_tuple(self.db) && value.ty.field_count(self.db) == 0 {
+                    docs.push(YulDoc::line("ret := 0"));
+                    return Ok(docs);
+                }
+                let expr = match &value.origin {
                     ValueOrigin::Expr(expr_id) => {
-                        self.lower_expr_with_statements(expr_id, &mut docs, state)?
+                        self.lower_expr_with_statements(*expr_id, &mut docs, state)?
                     }
                     _ => self.lower_value(val, state)?,
                 };
@@ -444,6 +446,15 @@ impl<'db> YulEmitter<'db> {
                         docs.push(YulDoc::line(lowered));
                     }
                 }
+                mir::MirInst::IntrinsicStmt { op, args, .. } => {
+                    let intr = IntrinsicValue {
+                        op: *op,
+                        args: args.clone(),
+                    };
+                    if let Some(doc) = self.lower_intrinsic_stmt(&intr, state)? {
+                        docs.push(doc);
+                    }
+                }
             }
         }
         Ok(docs)
@@ -477,16 +488,7 @@ impl<'db> YulEmitter<'db> {
     ) -> Result<Option<YulDoc>, YulError> {
         let value = self.mir_func.body.value(value_id);
         match &value.origin {
-            ValueOrigin::Intrinsic(intr) => {
-                if self.emitted_intrinsics.contains(&value_id) {
-                    return Ok(None);
-                }
-                let doc = self.lower_intrinsic_stmt(intr, state)?;
-                if doc.is_some() {
-                    self.emitted_intrinsics.insert(value_id);
-                }
-                Ok(doc)
-            }
+            ValueOrigin::Intrinsic(intr) => self.lower_intrinsic_stmt(intr, state),
             _ => Ok(None),
         }
     }
@@ -501,12 +503,9 @@ impl<'db> YulEmitter<'db> {
     ) -> Result<bool, YulError> {
         let value = self.mir_func.body.value(value_id);
         if let ValueOrigin::Intrinsic(intr) = &value.origin {
-            if !Self::intrinsic_returns_value(intr.op) {
-                if !self.emitted_intrinsics.contains(&value_id) {
-                    if let Some(doc) = self.lower_intrinsic_stmt(intr, state)? {
-                        docs.push(doc);
-                    }
-                    self.emitted_intrinsics.insert(value_id);
+            if !intr.op.returns_value() {
+                if let Some(doc) = self.lower_intrinsic_stmt(intr, state)? {
+                    docs.push(doc);
                 }
                 docs.push(YulDoc::line("ret := 0"));
                 return Ok(true);
@@ -521,7 +520,7 @@ impl<'db> YulEmitter<'db> {
         intr: &IntrinsicValue,
         state: &BlockState,
     ) -> Result<String, YulError> {
-        if !Self::intrinsic_returns_value(intr.op) {
+        if !intr.op.returns_value() {
             return Err(YulError::Unsupported(
                 "intrinsic does not yield a value".into(),
             ));
@@ -537,7 +536,7 @@ impl<'db> YulEmitter<'db> {
         intr: &IntrinsicValue,
         state: &BlockState,
     ) -> Result<Option<YulDoc>, YulError> {
-        if Self::intrinsic_returns_value(intr.op) {
+        if intr.op.returns_value() {
             return Ok(None);
         }
         let args = self.lower_intrinsic_args(intr, state)?;
@@ -590,11 +589,6 @@ impl<'db> YulEmitter<'db> {
             IntrinsicOp::Sload => "sload",
             IntrinsicOp::Sstore => "sstore",
         }
-    }
-
-    /// Whether the intrinsic yields a value (loader) versus a pure side-effect (store).
-    fn intrinsic_returns_value(op: IntrinsicOp) -> bool {
-        matches!(op, IntrinsicOp::Mload | IntrinsicOp::Sload)
     }
 
     /// Lowers a HIR expression into a Yul expression string.

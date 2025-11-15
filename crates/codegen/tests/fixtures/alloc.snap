@@ -23,6 +23,7 @@ input_file: tests/fixtures/alloc.fe
       ret := v0
     }
     if iszero(eq(v0, 0)) {
+      mstore(FREE_MEMORY_PTR, add(v0, size))
       ret := v0
     }
   }

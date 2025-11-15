@@ -204,6 +204,17 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 self.write_u32(slot);
                 self.write_u8(if *bind_value { 1 } else { 0 });
             }
+            MirInst::IntrinsicStmt { expr, op, args } => {
+                self.write_u8(0x25);
+                let expr_slot = self.placeholder_expr(*expr);
+                self.write_u32(expr_slot);
+                self.write_u8(*op as u8);
+                self.write_usize(args.len());
+                for arg in args {
+                    let slot = self.placeholder_value(*arg);
+                    self.write_u32(slot);
+                }
+            }
         }
     }
 
