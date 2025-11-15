@@ -1,3 +1,5 @@
+mod dedup;
+mod hash;
 pub mod ir;
 mod lower;
 mod monomorphize;

@@ -271,6 +271,24 @@ pub enum ValueOrigin<'db> {
     Intrinsic(IntrinsicValue),
 }
 
+impl<'db> ValueOrigin<'db> {
+    /// Returns the contained call origin if this value represents a function call.
+    pub fn as_call(&self) -> Option<&CallOrigin<'db>> {
+        match self {
+            ValueOrigin::Call(call) => Some(call),
+            _ => None,
+        }
+    }
+
+    /// Returns the contained call origin mutably if this value represents a call.
+    pub fn as_call_mut(&mut self) -> Option<&mut CallOrigin<'db>> {
+        match self {
+            ValueOrigin::Call(call) => Some(call),
+            _ => None,
+        }
+    }
+}
+
 /// Captures compile-time literals synthesized by lowering.
 #[derive(Debug, Clone)]
 pub enum SyntheticValue {

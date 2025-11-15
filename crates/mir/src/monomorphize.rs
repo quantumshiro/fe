@@ -16,10 +16,7 @@ use hir_analysis::{
 };
 use rustc_hash::FxHashMap;
 
-use crate::{
-    CallOrigin, MirFunction, ValueOrigin,
-    lower::lower_function,
-};
+use crate::{CallOrigin, MirFunction, ValueOrigin, dedup::deduplicate_mir, lower::lower_function};
 
 /// Walks generic MIR templates, cloning them per concrete substitution so
 /// downstream passes only ever see monomorphic MIR.
@@ -38,7 +35,8 @@ pub(crate) fn monomorphize_functions<'db>(
     let mut monomorphizer = Monomorphizer::new(db, templates);
     monomorphizer.seed_roots();
     monomorphizer.process_worklist();
-    monomorphizer.into_instances()
+    let instances = monomorphizer.into_instances();
+    deduplicate_mir(db, instances)
 }
 
 /// Worklist-driven builder that instantiates concrete MIR bodies on demand.
@@ -121,7 +119,7 @@ impl<'db> Monomorphizer<'db> {
     fn resolve_calls(&mut self, func_idx: usize) {
         let call_sites = {
             let function = &self.instances[func_idx];
-            let mut sites = Vec::new();
+            let mut sites: Vec<(usize, Func<'db>, Vec<TyId<'db>>)> = Vec::new();
             for (value_idx, value) in function.body.values.iter().enumerate() {
                 if let ValueOrigin::Call(call) = &value.origin {
                     if let Some(target_func) = self.resolve_call_target(call) {

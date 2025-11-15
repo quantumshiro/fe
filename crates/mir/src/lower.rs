@@ -1,10 +1,10 @@
 use std::{error::Error, fmt};
 
+use common::ingot::IngotKind;
 use hir::hir_def::{
     Body, Expr, ExprId, Field, FieldIndex, Func, IdentId, LitKind, MatchArm, Partial, Pat, PatId,
     PathId, Stmt, StmtId, TopLevelMod,
 };
-use common::ingot::IngotKind;
 use hir_analysis::{
     HirAnalysisDb,
     name_resolution::{PathRes, path_resolver::resolve_path},
@@ -501,7 +501,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     fn ensure_field_expr_values(&mut self) {
         let exprs = self.body.exprs(self.db);
         for expr_id in exprs.keys() {
-            let Partial::Present(expr) = &exprs[expr_id] else { continue };
+            let Partial::Present(expr) = &exprs[expr_id] else {
+                continue;
+            };
             if matches!(expr, Expr::Field(..)) {
                 self.ensure_value(expr_id);
             }
@@ -695,8 +697,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             let Some(info) = self.field_access_info(record_ty, field_index) else {
                 continue;
             };
-            let Some(store_callable) = self.get_store_field_callable(expr, info.field_ty)
-            else {
+            let Some(store_callable) = self.get_store_field_callable(expr, info.field_ty) else {
                 continue;
             };
             let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
@@ -824,11 +825,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         field_ty: TyId<'db>,
     ) -> Option<Callable<'db>> {
         let func_def = self.resolve_store_field_func()?;
-        let ty = TyId::foldl(
-            self.db,
-            TyId::func(self.db, func_def),
-            &[field_ty],
-        );
+        let ty = TyId::foldl(self.db, TyId::func(self.db, func_def), &[field_ty]);
         Callable::new(self.db, ty, expr.span(self.body).into(), None).ok()
     }
 
