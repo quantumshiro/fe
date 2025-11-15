@@ -5,7 +5,7 @@
 
 use crate::HirAnalysisDb;
 use crate::name_resolution::{PathRes, ResolvedVariant, resolve_path};
-use crate::ty::ty_def::TyId;
+use crate::ty::ty_def::{InvalidCause, TyId};
 use hir::hir_def::{
     Body as HirBody, LitKind, Partial, Pat as HirPat, PathId, VariantKind, scope_graph::ScopeId,
 };
@@ -261,21 +261,31 @@ fn simplify_tuple_pattern_elements<'db>(
     let mut elem_tys_iter = elem_tys.iter();
     for pat in elements {
         if pat.is_rest(db, body) {
-            for _ in 0..(elem_tys.len() - (elements.len() - 1)) {
-                let ty = elem_tys_iter.next().unwrap();
+            let remaining = elem_tys
+                .len()
+                .saturating_sub(elements.len().saturating_sub(1));
+            for _ in 0..remaining {
+                let ty = elem_tys_iter
+                    .next()
+                    .copied()
+                    .unwrap_or_else(|| TyId::invalid(db, InvalidCause::Other));
                 simplified.push(SimplifiedPattern::new(
                     SimplifiedPatternKind::WildCard(None),
-                    *ty,
+                    ty,
                 ));
             }
         } else {
+            let elem_ty = elem_tys_iter
+                .next()
+                .copied()
+                .unwrap_or_else(|| TyId::invalid(db, InvalidCause::Other));
             simplified.push(SimplifiedPattern::from_hir_pat(
                 db,
                 pat.data(db, body).unwrap_ref(),
                 body,
                 scope,
                 arm_idx,
-                *elem_tys_iter.next().unwrap(),
+                elem_ty,
             ));
         }
     }
