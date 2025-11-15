@@ -30,17 +30,18 @@ input_file: tests/fixtures/struct_init.fe
 }
 {
   function store_field__deduped(addr, space, offset, value) -> ret {
-    let v1 := add(addr, offset)
-    let v0 := 0
+    let v0 := add(addr, offset)
     switch space
       case 0 {
-        v0 := mstore(v1, to_word__deduped(value))
+        mstore(v0, to_word__deduped(value))
+        ret := 0
       }
       case 1 {
-        v0 := sstore(v1, to_word__deduped(value))
+        sstore(v0, to_word__deduped(value))
+        ret := 0
       }
       default {
-        v0 := 0
+        ret := 0
       }
     ret := 0
   }

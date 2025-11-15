@@ -115,7 +115,7 @@ impl<'db> YulEmitter<'db> {
         block_id: BasicBlockId,
         state: &mut BlockState,
     ) -> Result<Vec<YulDoc>, YulError> {
-        self.emit_block_with_ctx(block_id, None, state)
+        self.emit_block_internal(block_id, None, state, None)
     }
 
     /// Emits a block while honoring the provided loop context (if any).
@@ -125,6 +125,37 @@ impl<'db> YulEmitter<'db> {
         loop_ctx: Option<LoopEmitCtx>,
         state: &mut BlockState,
     ) -> Result<Vec<YulDoc>, YulError> {
+        self.emit_block_internal(block_id, loop_ctx, state, None)
+    }
+
+    /// Emits a block while preventing recursion into `stop_block`.
+    ///
+    /// Returns the rendered docs for `block_id`, stopping early when a branch would
+    /// enter `stop_block` (used for match arms that should not re-render the merge).
+    fn emit_block_with_stop(
+        &mut self,
+        block_id: BasicBlockId,
+        loop_ctx: Option<LoopEmitCtx>,
+        state: &mut BlockState,
+        stop_block: Option<BasicBlockId>,
+    ) -> Result<Vec<YulDoc>, YulError> {
+        self.emit_block_internal(block_id, loop_ctx, state, stop_block)
+    }
+
+    /// Core implementation shared by the various block emitters.
+    ///
+    /// Returns the rendered docs starting at `block_id`, honoring `loop_ctx` and
+    /// skipping emission entirely if `block_id == stop_block`.
+    fn emit_block_internal(
+        &mut self,
+        block_id: BasicBlockId,
+        loop_ctx: Option<LoopEmitCtx>,
+        state: &mut BlockState,
+        stop_block: Option<BasicBlockId>,
+    ) -> Result<Vec<YulDoc>, YulError> {
+        if Some(block_id) == stop_block {
+            return Ok(Vec::new());
+        }
         let block = self
             .mir_func
             .body
@@ -137,9 +168,11 @@ impl<'db> YulEmitter<'db> {
             ..
         } = &block.terminator
         {
-            self.match_values
-                .entry(*expr_id)
-                .or_insert_with(|| state.alloc_local());
+            if !self.expr_is_unit(*expr_id) {
+                self.match_values
+                    .entry(*expr_id)
+                    .or_insert_with(|| state.alloc_local());
+            }
         }
 
         let mut docs = self.render_statements(&block.insts, state)?;
@@ -186,57 +219,92 @@ impl<'db> YulEmitter<'db> {
             } => match origin {
                 SwitchOrigin::MatchExpr(expr_id) => {
                     let discr_expr = self.lower_value(discr, state)?;
-                    let temp = self
-                        .match_values
-                        .get(&expr_id)
-                        .cloned()
-                        .expect("match temp must exist");
-                    let match_info = self.mir_func.body.match_info(expr_id).ok_or_else(|| {
-                        YulError::Unsupported("missing match lowering info for switch".into())
-                    })?;
+                    if self.expr_is_unit(expr_id) {
+                        docs.push(YulDoc::line(format!("switch {discr_expr}")));
+                        let merge_block = self.match_merge_block(targets, default)?;
+                        for target in targets {
+                            let mut case_state = state.clone();
+                            let case_docs = self.emit_block_with_stop(
+                                target.block,
+                                loop_ctx,
+                                &mut case_state,
+                                merge_block,
+                            )?;
+                            let literal = switch_value_literal(&target.value);
+                            docs.push(YulDoc::wide_block(
+                                format!("  case {literal} "),
+                                case_docs,
+                            ));
+                        }
+                        let mut default_state = state.clone();
+                        let default_docs = self.emit_block_with_stop(
+                            default,
+                            loop_ctx,
+                            &mut default_state,
+                            merge_block,
+                        )?;
+                        docs.push(YulDoc::wide_block("  default ", default_docs));
+                        if let Some(merge_block) = merge_block {
+                            let next_docs =
+                                self.emit_block_with_ctx(merge_block, loop_ctx, state)?;
+                            docs.extend(next_docs);
+                        }
+                        Ok(docs)
+                    } else {
+                        let temp = self
+                            .match_values
+                            .get(&expr_id)
+                            .cloned()
+                            .expect("match temp must exist");
+                        let match_info =
+                            self.mir_func.body.match_info(expr_id).ok_or_else(|| {
+                                YulError::Unsupported("missing match lowering info for switch".into())
+                            })?;
 
-                    docs.push(YulDoc::line(format!("let {temp} := 0")));
-                    docs.push(YulDoc::line(format!("switch {discr_expr}")));
+                        docs.push(YulDoc::line(format!("let {temp} := 0")));
+                        docs.push(YulDoc::line(format!("switch {discr_expr}")));
 
-                    let mut default_body = None;
-                    for arm in &match_info.arms {
-                        match &arm.pattern {
-                            MatchArmPattern::Literal(value) => {
-                                let body_expr = self.lower_expr(arm.body, state)?;
-                                let literal = switch_value_literal(value);
-                                docs.push(YulDoc::wide_block(
-                                    format!("  case {literal} "),
-                                    vec![YulDoc::line(format!("{temp} := {body_expr}"))],
-                                ));
-                            }
-                            MatchArmPattern::Enum { variant_index, .. } => {
-                                let body_expr = self.lower_expr(arm.body, state)?;
-                                let literal =
-                                    switch_value_literal(&SwitchValue::Enum(*variant_index));
-                                docs.push(YulDoc::wide_block(
-                                    format!("  case {literal} "),
-                                    vec![YulDoc::line(format!("{temp} := {body_expr}"))],
-                                ));
-                            }
-                            MatchArmPattern::Wildcard => {
-                                let body_expr = self.lower_expr(arm.body, state)?;
-                                default_body = Some(body_expr);
+                        let mut default_body = None;
+                        for arm in &match_info.arms {
+                            match &arm.pattern {
+                                MatchArmPattern::Literal(value) => {
+                                    let body_expr = self.lower_expr(arm.body, state)?;
+                                    let literal = switch_value_literal(value);
+                                    docs.push(YulDoc::wide_block(
+                                        format!("  case {literal} "),
+                                        vec![YulDoc::line(format!("{temp} := {body_expr}"))],
+                                    ));
+                                }
+                                MatchArmPattern::Enum { variant_index, .. } => {
+                                    let body_expr = self.lower_expr(arm.body, state)?;
+                                    let literal =
+                                        switch_value_literal(&SwitchValue::Enum(*variant_index));
+                                    docs.push(YulDoc::wide_block(
+                                        format!("  case {literal} "),
+                                        vec![YulDoc::line(format!("{temp} := {body_expr}"))],
+                                    ));
+                                }
+                                MatchArmPattern::Wildcard => {
+                                    let body_expr = self.lower_expr(arm.body, state)?;
+                                    default_body = Some(body_expr);
+                                }
                             }
                         }
-                    }
 
-                    let default_expr = default_body.ok_or_else(|| {
-                        YulError::Unsupported("match lowering missing wildcard arm".into())
-                    })?;
-                    docs.push(YulDoc::wide_block(
-                        "  default ",
-                        vec![YulDoc::line(format!("{temp} := {default_expr}"))],
-                    ));
-                    if let Some(merge_block) = self.match_merge_block(targets, default)? {
-                        let next_docs = self.emit_block_with_ctx(merge_block, loop_ctx, state)?;
-                        docs.extend(next_docs);
+                        let default_expr = default_body.ok_or_else(|| {
+                            YulError::Unsupported("match lowering missing wildcard arm".into())
+                        })?;
+                        docs.push(YulDoc::wide_block(
+                            "  default ",
+                            vec![YulDoc::line(format!("{temp} := {default_expr}"))],
+                        ));
+                        if let Some(merge_block) = self.match_merge_block(targets, default)? {
+                            let next_docs =
+                                self.emit_block_with_ctx(merge_block, loop_ctx, state)?;
+                            docs.extend(next_docs);
+                        }
+                        Ok(docs)
                     }
-                    Ok(docs)
                 }
                 SwitchOrigin::None => {
                     let discr_expr = self.lower_value(discr, state)?;
@@ -866,6 +934,12 @@ impl<'db> YulEmitter<'db> {
         } else {
             self.lower_expr(expr_id, state)
         }
+    }
+
+    /// Returns `true` when the given expression's type is the unit tuple.
+    fn expr_is_unit(&self, expr_id: ExprId) -> bool {
+        let ty = self.mir_func.typed_body.expr_ty(self.db, expr_id);
+        ty.is_tuple(self.db) && ty.field_count(self.db) == 0
     }
 }
 
