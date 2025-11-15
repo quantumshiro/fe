@@ -23,12 +23,6 @@ error[6-0003]: trait bound is not satisfied
 56 │     extract(s)
    │     ^^^^^^^ `S` doesn't implement `Extract`
 
-error[8-0012]: undefined variable
-   ┌─ arg_bound.fe:24:24
-   │
-24 │             Some(t) => t
-   │                        ^ undefined variable `t`
-
 error[8-0031]: type annotation is needed
    ┌─ arg_bound.fe:59:5
    │
