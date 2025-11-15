@@ -6,20 +6,23 @@ input_file: tests/fixtures/ret.fe
 ---
 {
   function retfoo(b1, x) -> ret {
-    if b1 {
+    let v0 := b1
+    if v0 {
       ret := 0
     }
-    if iszero(b1) {
-      if lt(x, 5) {
+    if iszero(v0) {
+      let v1 := lt(x, 5)
+      if v1 {
         ret := 1
       }
-      if iszero(lt(x, 5)) {
-        let v0 := sub(x, 1)
-        if eq(v0, 42) {
+      if iszero(v1) {
+        let v2 := sub(x, 1)
+        let v3 := eq(v2, 42)
+        if v3 {
           ret := 2
         }
-        if iszero(eq(v0, 42)) {
-          ret := add(v0, 1)
+        if iszero(v3) {
+          ret := add(v2, 1)
         }
       }
     }

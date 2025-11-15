@@ -168,12 +168,14 @@ impl<'db> YulEmitter<'db> {
                 else_bb,
             } => {
                 let cond_expr = self.lower_value(cond, state)?;
+                let cond_temp = state.alloc_local();
+                docs.push(YulDoc::line(format!("let {cond_temp} := {cond_expr}")));
                 let mut then_state = state.clone();
                 let mut else_state = state.clone();
                 let then_docs = self.emit_block_with_ctx(then_bb, loop_ctx, &mut then_state)?;
-                docs.push(YulDoc::block(format!("if {cond_expr} "), then_docs));
+                docs.push(YulDoc::block(format!("if {cond_temp} "), then_docs));
                 let else_docs = self.emit_block_with_ctx(else_bb, loop_ctx, &mut else_state)?;
-                docs.push(YulDoc::block(format!("if iszero({cond_expr}) "), else_docs));
+                docs.push(YulDoc::block(format!("if iszero({cond_temp}) "), else_docs));
                 Ok(docs)
             }
             Terminator::Switch {

@@ -16,12 +16,13 @@ input_file: tests/fixtures/struct_init.fe
 {
   function alloc(size) -> ret {
     let v0 := mload(FREE_MEMORY_PTR)
-    if eq(v0, 0) {
+    let v1 := eq(v0, 0)
+    if v1 {
       v0 := INITIAL_FREE_MEMORY
       mstore(FREE_MEMORY_PTR, add(v0, size))
       ret := v0
     }
-    if iszero(eq(v0, 0)) {
+    if iszero(v1) {
       mstore(FREE_MEMORY_PTR, add(v0, size))
       ret := v0
     }
