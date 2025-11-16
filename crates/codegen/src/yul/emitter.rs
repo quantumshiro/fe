@@ -75,7 +75,7 @@ impl<'db> YulEmitter<'db> {
         let body_text = lines.join("\n");
         Ok(format!(
             "{{\n  {} {{\n{body_text}\n  }}\n}}",
-            self.format_function_signature(&func_name, &param_names)
+            self.format_function_signature(func_name, &param_names)
         ))
     }
 
@@ -167,12 +167,11 @@ impl<'db> YulEmitter<'db> {
             origin: SwitchOrigin::MatchExpr(expr_id),
             ..
         } = &block.terminator
+            && !self.expr_is_unit(*expr_id)
         {
-            if !self.expr_is_unit(*expr_id) {
-                self.match_values
-                    .entry(*expr_id)
-                    .or_insert_with(|| state.alloc_local());
-            }
+            self.match_values
+                .entry(*expr_id)
+                .or_insert_with(|| state.alloc_local());
         }
 
         let mut docs = self.render_statements(&block.insts, state)?;
@@ -231,10 +230,7 @@ impl<'db> YulEmitter<'db> {
                                 merge_block,
                             )?;
                             let literal = switch_value_literal(&target.value);
-                            docs.push(YulDoc::wide_block(
-                                format!("  case {literal} "),
-                                case_docs,
-                            ));
+                            docs.push(YulDoc::wide_block(format!("  case {literal} "), case_docs));
                         }
                         let mut default_state = state.clone();
                         let default_docs = self.emit_block_with_stop(
@@ -258,7 +254,9 @@ impl<'db> YulEmitter<'db> {
                             .expect("match temp must exist");
                         let match_info =
                             self.mir_func.body.match_info(expr_id).ok_or_else(|| {
-                                YulError::Unsupported("missing match lowering info for switch".into())
+                                YulError::Unsupported(
+                                    "missing match lowering info for switch".into(),
+                                )
                             })?;
 
                         docs.push(YulDoc::line(format!("let {temp} := 0")));
@@ -572,14 +570,14 @@ impl<'db> YulEmitter<'db> {
         state: &BlockState,
     ) -> Result<bool, YulError> {
         let value = self.mir_func.body.value(value_id);
-        if let ValueOrigin::Intrinsic(intr) = &value.origin {
-            if !intr.op.returns_value() {
-                if let Some(doc) = self.lower_intrinsic_stmt(intr, state)? {
-                    docs.push(doc);
-                }
-                docs.push(YulDoc::line("ret := 0"));
-                return Ok(true);
+        if let ValueOrigin::Intrinsic(intr) = &value.origin
+            && !intr.op.returns_value()
+        {
+            if let Some(doc) = self.lower_intrinsic_stmt(intr, state)? {
+                docs.push(doc);
             }
+            docs.push(YulDoc::line("ret := 0"));
+            return Ok(true);
         }
         Ok(false)
     }
@@ -941,7 +939,6 @@ impl<'db> YulEmitter<'db> {
         let ty = self.mir_func.typed_body.expr_ty(self.db, expr_id);
         ty.is_tuple(self.db) && ty.field_count(self.db) == 0
     }
-
 }
 
 /// Translates MIR switch literal kinds into their Yul literal strings.

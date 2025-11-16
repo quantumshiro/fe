@@ -20,7 +20,7 @@ use crate::{CallOrigin, MirFunction, ValueOrigin, dedup::deduplicate_mir, lower:
 
 /// Walks generic MIR templates, cloning them per concrete substitution so
 /// downstream passes only ever see monomorphic MIR.
-
+///
 /// Create monomorphic MIR instances for every reachable generic instantiation.
 ///
 /// The input `templates` are lowered once from HIR and may contain generic
@@ -100,7 +100,7 @@ impl<'db> Monomorphizer<'db> {
             let should_seed = self
                 .func_defs
                 .get(&func)
-                .map_or(true, |def| def.params(self.db).is_empty());
+                .is_none_or(|def| def.params(self.db).is_empty());
             if should_seed {
                 // Seed non-generic functions immediately so we always emit them.
                 let _ = self.ensure_instance(func, &[]);
@@ -121,23 +121,22 @@ impl<'db> Monomorphizer<'db> {
             let function = &self.instances[func_idx];
             let mut sites: Vec<(usize, Func<'db>, Vec<TyId<'db>>)> = Vec::new();
             for (value_idx, value) in function.body.values.iter().enumerate() {
-                if let ValueOrigin::Call(call) = &value.origin {
-                    if let Some(target_func) = self.resolve_call_target(call) {
-                        let args = call.callable.generic_args().to_vec();
-                        sites.push((value_idx, target_func, args));
-                    }
+                if let ValueOrigin::Call(call) = &value.origin
+                    && let Some(target_func) = self.resolve_call_target(call)
+                {
+                    let args = call.callable.generic_args().to_vec();
+                    sites.push((value_idx, target_func, args));
                 }
             }
             sites
         };
 
         for (value_idx, target, args) in call_sites {
-            if let Some((_, symbol)) = self.ensure_instance(target, &args) {
-                if let ValueOrigin::Call(call) =
+            if let Some((_, symbol)) = self.ensure_instance(target, &args)
+                && let ValueOrigin::Call(call) =
                     &mut self.instances[func_idx].body.values[value_idx].origin
-                {
-                    call.resolved_name = Some(symbol);
-                }
+            {
+                call.resolved_name = Some(symbol);
             }
         }
     }
@@ -166,10 +165,10 @@ impl<'db> Monomorphizer<'db> {
 
     /// Returns the concrete HIR function targeted by the given call, accounting for trait impls.
     fn resolve_call_target(&self, call: &CallOrigin<'db>) -> Option<Func<'db>> {
-        if let Some(func) = call.callable.func_def.hir_func_def(self.db) {
-            if func.body(self.db).is_some() {
-                return Some(func);
-            }
+        if let Some(func) = call.callable.func_def.hir_func_def(self.db)
+            && func.body(self.db).is_some()
+        {
+            return Some(func);
         }
         let inst = call.callable.trait_inst()?;
         let method_name = call.callable.func_def.name(self.db);

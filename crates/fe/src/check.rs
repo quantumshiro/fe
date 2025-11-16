@@ -317,6 +317,14 @@ fn format_inst(db: &DriverDataBase, inst: &MirInst<'_>) -> String {
                 value_label(*value)
             )
         }
+        MirInst::IntrinsicStmt { expr, op, args } => {
+            let args = args
+                .iter()
+                .map(|arg| value_label(*arg))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}: intrinsic {:?}({args})", expr_label(*expr), op)
+        }
     }
 }
 

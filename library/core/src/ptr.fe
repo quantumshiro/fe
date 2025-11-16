@@ -1,9 +1,5 @@
 use ingot::intrinsic::{mload, mstore, sload, sstore}
 
-/// Core pointer helpers that read/write struct fields via raw EVM memory/storage.
-
-use ingot::intrinsic::{mload, mstore, sload, sstore}
-
 // Masks used to truncate a 256-bit word down to the requested primitive width.
 const U8_MASK: u256 = 0xff
 const U16_MASK: u256 = 0xffff
@@ -110,7 +106,7 @@ impl LoadableScalar for i256 {
 }
 
 /// Performs two's-complement sign extension within the provided mask/sign bit.
-fn sign_extend(word: u256, mask: u256, sign_bit: u256) -> u256 {
+fn sign_extend(word: u256, _ mask: u256, _ sign_bit: u256) -> u256 {
     let value = word & mask
     if value & sign_bit != 0 {
         value | (!mask)

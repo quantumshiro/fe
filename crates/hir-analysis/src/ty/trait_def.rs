@@ -79,10 +79,10 @@ pub fn resolve_trait_method<'db>(
     let canonical = Canonical::new(db, inst);
     for implementor in impls_for_trait(db, ingot, canonical) {
         let implementor = implementor.instantiate_identity();
-        if let Some(func_def) = implementor.methods(db).get(&method) {
-            if let Some(func) = func_def.hir_func_def(db) {
-                return Some(func);
-            }
+        if let Some(func_def) = implementor.methods(db).get(&method)
+            && let Some(func) = func_def.hir_func_def(db)
+        {
+            return Some(func);
         }
     }
     None

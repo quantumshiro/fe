@@ -351,10 +351,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             }
 
             if let Some(pattern) = self.enum_pat_value(arm.pat) {
-                if let MatchArmPattern::Enum { variant_index, .. } = pattern {
-                    if !seen_values.insert(SwitchValue::Enum(variant_index)) {
-                        return None;
-                    }
+                if let MatchArmPattern::Enum { variant_index, .. } = pattern
+                    && !seen_values.insert(SwitchValue::Enum(variant_index))
+                {
+                    return None;
                 }
                 patterns.push(pattern);
                 continue;
@@ -409,26 +409,26 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return None;
         };
 
-        if let Pat::Path(path, ..) = pat_data {
-            if let Ok(PathRes::EnumVariant(variant)) = resolve_path(
+        if let Pat::Path(path, ..) = pat_data
+            && let Ok(PathRes::EnumVariant(variant)) = resolve_path(
                 self.db,
                 path.to_opt().unwrap(),
                 self.typed_body.body().unwrap().scope(),
                 PredicateListId::empty_list(self.db),
                 false,
-            ) {
-                let enum_name = variant
-                    .enum_(self.db)
-                    .name(self.db)
-                    .to_opt()
-                    .unwrap()
-                    .data(self.db)
-                    .to_string();
-                return Some(MatchArmPattern::Enum {
-                    variant_index: variant.variant.idx as u64,
-                    enum_name,
-                });
-            }
+            )
+        {
+            let enum_name = variant
+                .enum_(self.db)
+                .name(self.db)
+                .to_opt()
+                .unwrap()
+                .data(self.db)
+                .to_string();
+            return Some(MatchArmPattern::Enum {
+                variant_index: variant.variant.idx as u64,
+                enum_name,
+            });
         }
 
         None
@@ -645,9 +645,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let Partial::Present(Expr::Path(path)) = expr.data(self.db, self.body) else {
             return None;
         };
-        let Some(path) = path.to_opt() else {
-            return None;
-        };
+        let path = path.to_opt()?;
         let mut visited = FxHashSet::default();
         self.const_literal_from_path(path, self.body.scope(), &mut visited)
     }
@@ -703,10 +701,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         };
         let const_scope = body.scope();
         let result = match expr {
-            Expr::Lit(LitKind::Int(value)) => Some(self.alloc_synthetic_value(
-                ty,
-                SyntheticValue::Int(value.data(self.db).clone()),
-            )),
+            Expr::Lit(LitKind::Int(value)) => Some(
+                self.alloc_synthetic_value(ty, SyntheticValue::Int(value.data(self.db).clone())),
+            ),
             Expr::Lit(LitKind::Bool(flag)) => {
                 Some(self.alloc_synthetic_value(ty, SyntheticValue::Bool(*flag)))
             }
@@ -1088,10 +1085,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let top_mod = self.body.top_mod(self.db);
         for &func in top_mod.all_funcs(self.db) {
             let name = func.name(self.db).to_opt()?;
-            if name.data(self.db) == "get_field" {
-                if let Some(def) = lower_func(self.db, func) {
-                    return Some(def);
-                }
+            if name.data(self.db) == "get_field"
+                && let Some(def) = lower_func(self.db, func)
+            {
+                return Some(def);
             }
         }
         None
@@ -1101,10 +1098,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let top_mod = self.body.top_mod(self.db);
         for &func in top_mod.all_funcs(self.db) {
             let name = func.name(self.db).to_opt()?;
-            if name.data(self.db) == "store_field" {
-                if let Some(def) = lower_func(self.db, func) {
-                    return Some(def);
-                }
+            if name.data(self.db) == "store_field"
+                && let Some(def) = lower_func(self.db, func)
+            {
+                return Some(def);
             }
         }
         None
@@ -1114,10 +1111,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let top_mod = self.body.top_mod(self.db);
         for &func in top_mod.all_funcs(self.db) {
             let name = func.name(self.db).to_opt()?;
-            if name.data(self.db) == "alloc" {
-                if let Some(def) = lower_func(self.db, func) {
-                    return Some(def);
-                }
+            if name.data(self.db) == "alloc"
+                && let Some(def) = lower_func(self.db, func)
+            {
+                return Some(def);
             }
         }
         None
@@ -1150,9 +1147,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
     /// Emits a synthetic `AddressSpace::Memory` literal.
     fn synthetic_address_space_memory(&mut self) -> Option<ValueId> {
-        let Some(ty) = self.address_space_ty() else {
-            return None;
-        };
+        let ty = self.address_space_ty()?;
         Some(self.mir_body.alloc_value(ValueData {
             ty,
             origin: ValueOrigin::Synthetic(SyntheticValue::Int(BigUint::from(0u8))),

@@ -72,10 +72,10 @@ fn deduplicate_functions<'db>(
     }
 
     for idx in 0..functions.len() {
-        if canonical_symbol[idx].is_none() {
-            if let Some(canon) = canonical_idx[idx] {
-                canonical_symbol[idx] = Some(functions[canon].symbol_name.clone());
-            }
+        if canonical_symbol[idx].is_none()
+            && let Some(canon) = canonical_idx[idx]
+        {
+            canonical_symbol[idx] = Some(functions[canon].symbol_name.clone());
         }
     }
 
@@ -98,11 +98,11 @@ fn deduplicate_functions<'db>(
         symbol_lookup.insert(func.symbol_name.clone(), func.symbol_name.clone());
     }
     for (idx, func) in functions.iter().enumerate() {
-        if !keep[idx] {
-            if let Some(canon) = canonical_idx[idx] {
-                let name = functions[canon].symbol_name.clone();
-                symbol_lookup.insert(func.symbol_name.clone(), name);
-            }
+        if !keep[idx]
+            && let Some(canon) = canonical_idx[idx]
+        {
+            let name = functions[canon].symbol_name.clone();
+            symbol_lookup.insert(func.symbol_name.clone(), name);
         }
     }
 
@@ -202,8 +202,8 @@ fn topo_order(edges: &[Vec<usize>]) -> Vec<usize> {
     }
 
     if order.len() != n {
-        for idx in 0..n {
-            if !seen[idx] {
+        for (idx, was_seen) in seen.iter().enumerate() {
+            if !was_seen {
                 order.push(idx);
             }
         }
