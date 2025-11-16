@@ -289,14 +289,36 @@ impl<'db> YulEmitter<'db> {
                             }
                         }
 
-                        let default_expr = default_body.ok_or_else(|| {
-                            YulError::Unsupported("match lowering missing wildcard arm".into())
-                        })?;
-                        docs.push(YulDoc::wide_block(
-                            "  default ",
-                            vec![YulDoc::line(format!("{temp} := {default_expr}"))],
-                        ));
-                        if let Some(merge_block) = self.match_merge_block(targets, default)? {
+                        let merge_block = self.match_merge_block(targets, default)?;
+                        if let Some(default_expr) = default_body {
+                            docs.push(YulDoc::wide_block(
+                                "  default ",
+                                vec![YulDoc::line(format!("{temp} := {default_expr}"))],
+                            ));
+                        } else {
+                            let default_block = self
+                                .mir_func
+                                .body
+                                .blocks
+                                .get(default.index())
+                                .ok_or_else(|| {
+                                    YulError::Unsupported("invalid block in match lowering".into())
+                                })?;
+                            if !matches!(default_block.terminator, Terminator::Unreachable) {
+                                return Err(YulError::Unsupported(
+                                    "match lowering missing wildcard arm".into(),
+                                ));
+                            }
+                            let mut default_state = state.clone();
+                            let default_docs = self.emit_block_with_stop(
+                                default,
+                                loop_ctx,
+                                &mut default_state,
+                                merge_block,
+                            )?;
+                            docs.push(YulDoc::wide_block("  default ", default_docs));
+                        }
+                        if let Some(merge_block) = merge_block {
                             let next_docs =
                                 self.emit_block_with_ctx(merge_block, loop_ctx, state)?;
                             docs.extend(next_docs);

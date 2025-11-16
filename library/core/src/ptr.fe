@@ -216,7 +216,6 @@ pub fn get_field<T, F: LoadableScalar>(addr: u256, space: AddressSpace, offset: 
     let word = match space {
         AddressSpace::Memory => mload(target)
         AddressSpace::Storage => sload(slot:target)
-        _ => 0
     }
     F::from_word(word)
 }
@@ -230,8 +229,7 @@ pub fn store_field<T: StorableScalar>(
 ) {
     let target = addr + offset
     match space {
-        AddressSpace::Memory => mstore(target, value.to_word()),
-        AddressSpace::Storage => sstore(slot:target, value.to_word()),
-        _ => {}
+        AddressSpace::Memory => mstore(target, value.to_word())
+        AddressSpace::Storage => sstore(slot:target, value.to_word())
     }
 }

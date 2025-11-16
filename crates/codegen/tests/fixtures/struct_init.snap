@@ -41,7 +41,6 @@ input_file: tests/fixtures/struct_init.fe
         ret := 0
       }
       default {
-        ret := 0
       }
     ret := 0
   }
