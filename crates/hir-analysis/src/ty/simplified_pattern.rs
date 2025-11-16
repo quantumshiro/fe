@@ -32,6 +32,13 @@ impl<'db> SimplifiedPattern<'db> {
         Self::new(SimplifiedPatternKind::WildCard(bind), ty)
     }
 
+    /// Pattern that could not be simplified due to earlier errors
+    /// (e.g. ambiguous or invalid constructor). These are ignored in
+    /// reachability/exhaustiveness checking.
+    pub fn error(ty: TyId<'db>) -> Self {
+        Self::new(SimplifiedPatternKind::Error, ty)
+    }
+
     pub fn constructor(
         ctor: ConstructorKind<'db>,
         fields: Vec<SimplifiedPattern<'db>>,
@@ -113,7 +120,11 @@ impl<'db> SimplifiedPattern<'db> {
                     );
                     SimplifiedPattern::constructor(ctor, simplified, ctor_ty)
                 } else {
-                    SimplifiedPattern::wildcard(None, expected_ty)
+                    // Constructor couldn't be resolved (e.g. ambiguous name).
+                    // Treat this as an errored pattern so that reachability
+                    // analysis does not incorrectly mark later patterns as
+                    // unreachable.
+                    SimplifiedPattern::error(expected_ty)
                 }
             }
 
@@ -301,12 +312,16 @@ pub enum SimplifiedPatternKind<'db> {
         fields: Vec<SimplifiedPattern<'db>>,
     },
     Or(Vec<SimplifiedPattern<'db>>),
+    /// Represents a pattern we failed to resolve (e.g. ambiguous constructor).
+    /// Used to suppress confusing reachability diagnostics when earlier phases
+    /// already reported an error.
+    Error,
 }
 
 impl<'db> SimplifiedPatternKind<'db> {
     pub(crate) fn collect_ctors(&self) -> Vec<ConstructorKind<'db>> {
         match self {
-            Self::WildCard(_) => vec![],
+            Self::WildCard(_) | Self::Error => vec![],
             Self::Constructor { kind, .. } => vec![*kind],
             Self::Or(pats) => {
                 let mut ctors = vec![];
@@ -510,5 +525,8 @@ pub fn display_missing_pattern<'db>(
                 }
             }
         }
+
+        // Errored patterns are represented generically.
+        SimplifiedPatternKind::Error => "_".to_string(),
     }
 }

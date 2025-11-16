@@ -31,11 +31,3 @@ error[8-0031]: type annotation is needed
    │     │
    │     type annotation is needed
    │     consider giving `: fn extract<_, i32>` here
-
-error[8-0035]: unreachable pattern
-   ┌─ arg_bound.fe:25:13
-   │
-25 │             None => todo()
-   │             ^^^^ this pattern is unreachable
-   │
-   = previous patterns already cover all possible values
