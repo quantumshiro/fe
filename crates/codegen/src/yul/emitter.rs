@@ -941,6 +941,7 @@ impl<'db> YulEmitter<'db> {
         let ty = self.mir_func.typed_body.expr_ty(self.db, expr_id);
         ty.is_tuple(self.db) && ty.field_count(self.db) == 0
     }
+
 }
 
 /// Translates MIR switch literal kinds into their Yul literal strings.

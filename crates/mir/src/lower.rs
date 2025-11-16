@@ -2,8 +2,8 @@ use std::{error::Error, fmt};
 
 use common::ingot::IngotKind;
 use hir::hir_def::{
-    Body, Expr, ExprId, Field, FieldIndex, Func, IdentId, LitKind, MatchArm, Partial, Pat, PatId,
-    PathId, Stmt, StmtId, TopLevelMod,
+    Body, Const, Expr, ExprId, Field, FieldIndex, Func, IdentId, LitKind, MatchArm, Partial, Pat,
+    PatId, PathId, Stmt, StmtId, TopLevelMod, scope_graph::ScopeId,
 };
 use hir_analysis::{
     HirAnalysisDb,
@@ -27,7 +27,7 @@ use crate::{
 };
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Errors that can occur while lowering HIR into MIR.
 #[derive(Debug)]
@@ -167,6 +167,8 @@ struct MirBuilder<'db, 'a> {
     alloc_func: Option<FuncDef<'db>>,
     address_space_ty: Option<TyId<'db>>,
     loop_stack: Vec<LoopScope>,
+    /// Memoized literal values for resolved `const` items.
+    const_cache: FxHashMap<Const<'db>, ValueId>,
 }
 
 /// Keeps track of the active loop's continue/break targets so `break`/`continue`
@@ -190,6 +192,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             alloc_func: None,
             address_space_ty: None,
             loop_stack: Vec::new(),
+            const_cache: FxHashMap::default(),
         }
     }
 
@@ -553,6 +556,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         if let Some(value) = self.try_lower_field(expr) {
             return value;
         }
+        if let Some(value) = self.try_const_expr(expr) {
+            return value;
+        }
 
         let ty = self.typed_body.expr_ty(self.db, expr);
         self.mir_body.alloc_value(ValueData {
@@ -629,6 +635,105 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 resolved_name: None,
             }),
         }))
+    }
+
+    /// Attempts to resolve a path expression to a literal `const` value.
+    ///
+    /// Returns a MIR `ValueId` referencing a synthetic literal when the path
+    /// points to a constant that ultimately evaluates to an integer or boolean.
+    fn try_const_expr(&mut self, expr: ExprId) -> Option<ValueId> {
+        let Partial::Present(Expr::Path(path)) = expr.data(self.db, self.body) else {
+            return None;
+        };
+        let Some(path) = path.to_opt() else {
+            return None;
+        };
+        let mut visited = FxHashSet::default();
+        self.const_literal_from_path(path, self.body.scope(), &mut visited)
+    }
+
+    /// Resolves the given path to a const definition in `scope`.
+    ///
+    /// Returns the `ValueId` for its literal, or `None` if the const is not a
+    /// literal or fails to resolve.
+    fn const_literal_from_path(
+        &mut self,
+        path: PathId<'db>,
+        scope: ScopeId<'db>,
+        visited: &mut FxHashSet<Const<'db>>,
+    ) -> Option<ValueId> {
+        let PathRes::Const(const_def, ty) = resolve_path(
+            self.db,
+            path,
+            scope,
+            PredicateListId::empty_list(self.db),
+            true,
+        )
+        .ok()?
+        else {
+            return None;
+        };
+        self.const_literal_from_def(const_def, ty, visited)
+    }
+
+    /// Converts a concrete const definition into a MIR literal.
+    ///
+    /// Returns a cached or newly allocated `ValueId` representing the literal,
+    /// or `None` if the const body is not a literal or forms a cycle.
+    fn const_literal_from_def(
+        &mut self,
+        const_def: Const<'db>,
+        ty: TyId<'db>,
+        visited: &mut FxHashSet<Const<'db>>,
+    ) -> Option<ValueId> {
+        if let Some(&value) = self.const_cache.get(&const_def) {
+            return Some(value);
+        }
+        if !visited.insert(const_def) {
+            return None;
+        }
+        let body = const_def.body(self.db).to_opt()?;
+        let expr_id = body.expr(self.db);
+        let expr = match expr_id.data(self.db, body) {
+            Partial::Present(expr) => expr,
+            Partial::Absent => {
+                visited.remove(&const_def);
+                return None;
+            }
+        };
+        let const_scope = body.scope();
+        let result = match expr {
+            Expr::Lit(LitKind::Int(value)) => Some(self.alloc_synthetic_value(
+                ty,
+                SyntheticValue::Int(value.data(self.db).clone()),
+            )),
+            Expr::Lit(LitKind::Bool(flag)) => {
+                Some(self.alloc_synthetic_value(ty, SyntheticValue::Bool(*flag)))
+            }
+            Expr::Path(path) => {
+                if let Some(inner_path) = path.to_opt() {
+                    self.const_literal_from_path(inner_path, const_scope, visited)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        visited.remove(&const_def);
+        if let Some(value_id) = result {
+            self.const_cache.insert(const_def, value_id);
+        }
+        result
+    }
+
+    /// Allocates a synthetic literal value with the provided type.
+    ///
+    /// Returns the new `ValueId` stored in the MIR body.
+    fn alloc_synthetic_value(&mut self, ty: TyId<'db>, value: SyntheticValue) -> ValueId {
+        self.mir_body.alloc_value(ValueData {
+            ty,
+            origin: ValueOrigin::Synthetic(value),
+        })
     }
 
     /// Lowers a record literal into an `alloc` call followed by `store_field` writes so the
