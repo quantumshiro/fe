@@ -725,6 +725,9 @@ impl<'db> YulEmitter<'db> {
                 for arg in call_args {
                     lowered_args.push(self.lower_expr(arg.expr, state)?);
                 }
+                if let Some(arg) = try_collapse_cast_shim(&callee_expr, &lowered_args)? {
+                    return Ok(arg);
+                }
                 if lowered_args.is_empty() {
                     Ok(format!("{callee_expr}()"))
                 } else {
@@ -905,6 +908,9 @@ impl<'db> YulEmitter<'db> {
         for &arg in &call.args {
             lowered_args.push(self.lower_value(arg, state)?);
         }
+        if let Some(arg) = try_collapse_cast_shim(&callee, &lowered_args)? {
+            return Ok(arg);
+        }
         if lowered_args.is_empty() {
             Ok(format!("{callee}()"))
         } else {
@@ -979,4 +985,45 @@ fn function_name(db: &DriverDataBase, func: Func<'_>) -> String {
         .to_opt()
         .map(|id| id.data(db).to_string())
         .unwrap_or_else(|| "<anonymous>".into())
+}
+
+/// Returns `true` when `name` matches one of the temporary casting shims
+/// (`__{src}_as_{dst}`) used while the `as` syntax is unavailable.
+fn is_cast_shim(name: &str) -> bool {
+    cast_shim_parts(name).is_some()
+}
+
+/// Converts usages of cast shims into their lone argument so we don't emit fake calls.
+fn try_collapse_cast_shim(name: &str, args: &[String]) -> Result<Option<String>, YulError> {
+    if !is_cast_shim(name) {
+        return Ok(None);
+    }
+    debug_assert_eq!(
+        args.len(),
+        1,
+        "cast shims are expected to take a single argument"
+    );
+    let arg = args
+        .first()
+        .cloned()
+        .ok_or_else(|| YulError::Unsupported("cast shim missing argument".into()))?;
+    Ok(Some(arg))
+}
+
+/// Validates that a name follows the `__{src}_as_{dst}` convention and returns the parts.
+fn cast_shim_parts(name: &str) -> Option<(&str, &str)> {
+    let stripped = name.strip_prefix("__")?;
+    let (src, dst) = stripped.split_once("_as_")?;
+    if src.is_empty() || dst.is_empty() {
+        return None;
+    }
+    if !is_cast_ident(src) || !is_cast_ident(dst) {
+        return None;
+    }
+    Some((src, dst))
+}
+
+fn is_cast_ident(part: &str) -> bool {
+    part.chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
 }

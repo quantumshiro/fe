@@ -1,4 +1,5 @@
 use ingot::intrinsic::{mload, mstore, sload, sstore}
+use ingot::num::*
 
 // Masks used to truncate a 256-bit word down to the requested primitive width.
 const U8_MASK: u256 = 0xff
@@ -29,31 +30,31 @@ pub trait LoadableScalar {
 
 impl LoadableScalar for u8 {
     fn from_word(word: u256) -> Self {
-        (word & U8_MASK) as u8
+        __u256_as_u8(word & U8_MASK)
     }
 }
 
 impl LoadableScalar for u16 {
     fn from_word(word: u256) -> Self {
-        (word & U16_MASK) as u16
+        __u256_as_u16(word & U16_MASK)
     }
 }
 
 impl LoadableScalar for u32 {
     fn from_word(word: u256) -> Self {
-        (word & U32_MASK) as u32
+        __u256_as_u32(word & U32_MASK)
     }
 }
 
 impl LoadableScalar for u64 {
     fn from_word(word: u256) -> Self {
-        (word & U64_MASK) as u64
+        __u256_as_u64(word & U64_MASK)
     }
 }
 
 impl LoadableScalar for u128 {
     fn from_word(word: u256) -> Self {
-        (word & U128_MASK) as u128
+        __u256_as_u128(word & U128_MASK)
     }
 }
 
@@ -71,37 +72,37 @@ impl LoadableScalar for bool {
 
 impl LoadableScalar for i8 {
     fn from_word(word: u256) -> Self {
-        sign_extend(word, U8_MASK, I8_SIGN_BIT) as i8
+        __u256_as_i8(sign_extend(word, U8_MASK, I8_SIGN_BIT))
     }
 }
 
 impl LoadableScalar for i16 {
     fn from_word(word: u256) -> Self {
-        sign_extend(word, U16_MASK, I16_SIGN_BIT) as i16
+        __u256_as_i16(sign_extend(word, U16_MASK, I16_SIGN_BIT))
     }
 }
 
 impl LoadableScalar for i32 {
     fn from_word(word: u256) -> Self {
-        sign_extend(word, U32_MASK, I32_SIGN_BIT) as i32
+        __u256_as_i32(sign_extend(word, U32_MASK, I32_SIGN_BIT))
     }
 }
 
 impl LoadableScalar for i64 {
     fn from_word(word: u256) -> Self {
-        sign_extend(word, U64_MASK, I64_SIGN_BIT) as i64
+        __u256_as_i64(sign_extend(word, U64_MASK, I64_SIGN_BIT))
     }
 }
 
 impl LoadableScalar for i128 {
     fn from_word(word: u256) -> Self {
-        sign_extend(word, U128_MASK, I128_SIGN_BIT) as i128
+        __u256_as_i128(sign_extend(word, U128_MASK, I128_SIGN_BIT))
     }
 }
 
 impl LoadableScalar for i256 {
     fn from_word(word: u256) -> Self {
-        sign_extend(word, U256_MASK, I256_SIGN_BIT) as i256
+        __u256_as_i256(sign_extend(word, U256_MASK, I256_SIGN_BIT))
     }
 }
 
@@ -122,31 +123,31 @@ pub trait StorableScalar {
 
 impl StorableScalar for u8 {
     fn to_word(self) -> u256 {
-        self as u256
+        __u8_as_u256(self)
     }
 }
 
 impl StorableScalar for u16 {
     fn to_word(self) -> u256 {
-        self as u256
+        __u16_as_u256(self)
     }
 }
 
 impl StorableScalar for u32 {
     fn to_word(self) -> u256 {
-        self as u256
+        __u32_as_u256(self)
     }
 }
 
 impl StorableScalar for u64 {
     fn to_word(self) -> u256 {
-        self as u256
+        __u64_as_u256(self)
     }
 }
 
 impl StorableScalar for u128 {
     fn to_word(self) -> u256 {
-        self as u256
+        __u128_as_u256(self)
     }
 }
 
@@ -158,7 +159,7 @@ impl StorableScalar for u256 {
 
 impl StorableScalar for usize {
     fn to_word(self) -> u256 {
-        self as u256
+        __usize_as_u256(self)
     }
 }
 
@@ -170,43 +171,43 @@ impl StorableScalar for bool {
 
 impl StorableScalar for i8 {
     fn to_word(self) -> u256 {
-        self as u256
+        __i8_as_u256(self)
     }
 }
 
 impl StorableScalar for i16 {
     fn to_word(self) -> u256 {
-        self as u256
+        __i16_as_u256(self)
     }
 }
 
 impl StorableScalar for i32 {
     fn to_word(self) -> u256 {
-        self as u256
+        __i32_as_u256(self)
     }
 }
 
 impl StorableScalar for i64 {
     fn to_word(self) -> u256 {
-        self as u256
+        __i64_as_u256(self)
     }
 }
 
 impl StorableScalar for i128 {
     fn to_word(self) -> u256 {
-        self as u256
+        __i128_as_u256(self)
     }
 }
 
 impl StorableScalar for i256 {
     fn to_word(self) -> u256 {
-        self as u256
+        __i256_as_u256(self)
     }
 }
 
 impl StorableScalar for isize {
     fn to_word(self) -> u256 {
-        self as u256
+        __isize_as_u256(self)
     }
 }
 
