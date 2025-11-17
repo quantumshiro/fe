@@ -554,6 +554,9 @@ mod tests {
         }
         let item_list = ItemList::cast(node).unwrap();
         let mut items = item_list.into_iter().collect::<Vec<_>>();
+        if items.len() > 1 {
+            error!("expected one item, got: {:?}", &items);
+        }
         assert_eq!(items.len(), 1);
         items.pop().unwrap().kind().unwrap().try_into().unwrap()
     }

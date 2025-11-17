@@ -1,6 +1,7 @@
 mod test_db;
 use std::path::Path;
 
+use camino::Utf8PathBuf;
 use dir_test::{Fixture, dir_test};
 use fe_hir_analysis::{
     analysis_pass::ModuleAnalysisPass,
@@ -33,6 +34,23 @@ fn import_standalone(fixture: Fixture<&str>) {
 
     let res = format_imports(&db, &mut prop_formatter, &resolved_imports.1);
     snap_test!(res, fixture.path());
+}
+
+#[test]
+fn std_evm_import_is_available() {
+    let mut db = HirAnalysisTestDb::default();
+    let file = db.new_stand_alone(
+        Utf8PathBuf::from("std_import.fe"),
+        r#"
+use std::evm::ops::sload
+
+pub fn load0() -> u256 {
+    sload(0)
+}
+"#,
+    );
+    let (top_mod, _) = db.top_mod(file);
+    db.assert_no_diags(top_mod);
 }
 
 fn format_imports<'db>(

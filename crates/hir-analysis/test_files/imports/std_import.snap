@@ -1,6 +1,5 @@
 ---
 source: crates/hir-analysis/tests/import.rs
-assertion_line: 36
 expression: res
 input_file: test_files/imports/std_import.fe
 ---
