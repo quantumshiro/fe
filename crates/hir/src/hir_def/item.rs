@@ -1085,6 +1085,10 @@ impl<'db> Use<'db> {
         ScopeId::from_item(self.into())
     }
 
+    pub fn is_prelude_use(self, db: &'db dyn HirDb) -> bool {
+        matches!(self.origin(db), &HirOrigin::Synthetic)
+    }
+
     /// Returns imported name if it is present and not a glob.
     pub fn imported_name(&self, db: &'db dyn HirDb) -> Option<IdentId<'db>> {
         if let Some(alias) = self.alias(db) {

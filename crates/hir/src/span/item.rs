@@ -583,7 +583,11 @@ mod tests {
         "#;
 
         let file = db.standalone_file(text);
-        let use_ = db.expect_item::<Use>(file);
+        let uses = db.expect_items::<Use>(file);
+        let use_ = uses
+            .into_iter()
+            .find(|use_| !use_.is_prelude_use(&db))
+            .unwrap();
 
         let top_mod = use_.top_mod(&db);
         assert_eq!("foo", db.text_at(top_mod, &use_.span().path().segment(0)));
@@ -603,7 +607,11 @@ mod tests {
         "#;
 
         let file = db.standalone_file(text);
-        let uses = db.expect_items::<Use>(file);
+        let uses: Vec<_> = db
+            .expect_items::<Use>(file)
+            .into_iter()
+            .filter(|use_| !use_.is_prelude_use(&db))
+            .collect();
         assert_eq!(uses.len(), 2);
 
         let top_mod = uses[0].top_mod(&db);

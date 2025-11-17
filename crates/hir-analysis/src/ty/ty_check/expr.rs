@@ -2,9 +2,12 @@ use std::panic;
 
 use common::ingot::IngotKind;
 use either::Either;
-use hir::hir_def::{
-    ArithBinOp, BinOp, Expr, ExprId, FieldIndex, IdentId, Partial, Pat, PatId, PathId, UnOp,
-    VariantKind, WithBinding, scope_graph::ScopeId,
+use hir::{
+    hir_def::{
+        ArithBinOp, BinOp, Expr, ExprId, FieldIndex, IdentId, Partial, Pat, PatId, PathId, UnOp,
+        VariantKind, WithBinding, scope_graph::ScopeId,
+    },
+    span::DynLazySpan,
 };
 
 use super::{
@@ -29,7 +32,8 @@ use crate::ty::{
 use crate::{
     HirAnalysisDb, Spanned,
     name_resolution::{
-        EarlyNameQueryId, ExpectedPathKind, NameDomain, NameResBucket, PathRes, QueryDirective,
+        EarlyNameQueryId, ExpectedPathKind, NameDomain, NameResBucket, NameResolutionError,
+        PathRes, QueryDirective,
         diagnostics::PathResDiag,
         is_scope_visible_from,
         method_selection::{MethodCandidate, MethodSelectionError, select_method_candidate},
@@ -593,7 +597,8 @@ impl<'db> TyChecker<'db> {
         let path_span = path_expr_span.clone().path();
 
         let res = if path.is_bare_ident(self.db) {
-            resolve_ident_expr(self.db, &self.env, *path)
+            let ident_span: DynLazySpan<'db> = path_expr_span.clone().into();
+            resolve_ident_expr(self.db, &self.env, *path, ident_span)
         } else {
             match self.resolve_path(*path, true, path_span.clone()) {
                 Ok(r) => ResolvedPathInBody::Reso(r),
@@ -1466,10 +1471,40 @@ fn resolve_ident_expr<'db>(
     db: &'db dyn HirAnalysisDb,
     env: &TyCheckEnv<'db>,
     path: PathId<'db>,
+    ident_span: DynLazySpan<'db>,
 ) -> ResolvedPathInBody<'db> {
     let ident = path.ident(db).unwrap();
 
     let resolve_bucket = |bucket: &NameResBucket<'db>, scope| {
+        // First, surface any ambiguity/conflict in the bucket as a dedicated
+        // name-resolution diagnostic instead of silently degrading to
+        // "undefined variable".
+        for (_, err) in bucket.errors() {
+            match err {
+                NameResolutionError::Ambiguous(cands) => {
+                    let mut cand_spans = Vec::new();
+                    for name in cands.iter() {
+                        if let Some(span) = name.kind.name_span(db) {
+                            let from_prelude = name
+                                .derivation
+                                .use_stmt()
+                                .map(|use_| use_.is_prelude_use(db))
+                                .unwrap_or(false);
+                            cand_spans.push((span, from_prelude));
+                        }
+                    }
+
+                    let diag = PathResDiag::Ambiguous(ident_span.clone(), ident, cand_spans);
+                    return ResolvedPathInBody::Diag(diag.into());
+                }
+                NameResolutionError::Conflict(conf_ident, spans) => {
+                    let diag = PathResDiag::Conflict(*conf_ident, spans.clone());
+                    return ResolvedPathInBody::Diag(diag.into());
+                }
+                _ => {}
+            }
+        }
+
         let Ok(res) = bucket.pick_any(&[NameDomain::VALUE, NameDomain::TYPE]) else {
             return ResolvedPathInBody::Invalid;
         };
