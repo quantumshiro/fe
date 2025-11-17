@@ -235,13 +235,7 @@ fn dump_module_mir(db: &DriverDataBase, top_mod: TopLevelMod<'_>) {
         Ok(mir_module) => {
             println!("=== MIR for module ===");
             for func in mir_module.functions {
-                let name = func
-                    .func
-                    .name(db)
-                    .to_opt()
-                    .map(|id| id.data(db).to_string())
-                    .unwrap_or_else(|| "<anonymous>".into());
-                println!("fn {name}:");
+                println!("fn {}:", func.symbol_name);
                 for (idx, block) in func.body.blocks.iter().enumerate() {
                     println!("  bb{idx}:");
                     for inst in &block.insts {
@@ -309,6 +303,27 @@ fn format_inst(db: &DriverDataBase, inst: &MirInst<'_>) -> String {
         ),
         MirInst::Eval { stmt, value } => {
             format!("{}: eval {}", stmt_label(*stmt), value_label(*value))
+        }
+        MirInst::EvalExpr {
+            expr,
+            value,
+            bind_value,
+        } => {
+            let bind_suffix = if *bind_value { " (bind)" } else { "" };
+            format!(
+                "{}: eval_expr{} {}",
+                expr_label(*expr),
+                bind_suffix,
+                value_label(*value)
+            )
+        }
+        MirInst::IntrinsicStmt { expr, op, args } => {
+            let args = args
+                .iter()
+                .map(|arg| value_label(*arg))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}: intrinsic {:?}({args})", expr_label(*expr), op)
         }
     }
 }
