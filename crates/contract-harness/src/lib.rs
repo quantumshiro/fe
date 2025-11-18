@@ -10,14 +10,12 @@ use revm::{
         Context, TxEnv,
         result::{ExecutionResult, HaltReason, Output},
     },
-    context_interface::JournalTr,
     database::InMemoryDB,
     handler::{
         ExecuteCommitEvm, MainBuilder, MainContext, MainnetContext, MainnetEvm,
     },
     primitives::{Address, Bytes as EvmBytes},
     state::AccountInfo,
-    Database,
 };
 pub use revm::primitives::U256;
 use solc_runner::{ContractBytecode, YulcError, compile_single_contract};
@@ -135,6 +133,7 @@ fn transact(
     address: Address,
     calldata: &[u8],
     options: ExecutionOptions,
+    nonce: u64,
 ) -> Result<CallResult, HarnessError> {
     let tx = TxEnv::builder()
         .caller(options.caller)
@@ -143,17 +142,7 @@ fn transact(
         .to(address)
         .value(options.value)
         .data(EvmBytes::copy_from_slice(calldata))
-        .nonce(
-            options.nonce.unwrap_or_else(|| {
-                evm.ctx
-                    .journaled_state
-                    .db_mut()
-                    .basic(options.caller)
-                    .expect("in-memory DB queries never fail")
-                    .map(|info| info.nonce)
-                    .unwrap_or(0)
-            }),
-        )
+        .nonce(options.nonce.unwrap_or(nonce))
         .build()
         .map_err(|err| HarnessError::Execution(format!("{err:?}")))?;
 
@@ -184,6 +173,7 @@ fn transact(
 pub struct RuntimeInstance {
     evm: MainnetEvm<MainnetContext<InMemoryDB>>,
     address: Address,
+    next_nonce: u64,
 }
 
 impl RuntimeInstance {
@@ -194,7 +184,11 @@ impl RuntimeInstance {
         db.insert_account_info(address, AccountInfo::new(U256::ZERO, 0, code_hash, bytecode));
         let ctx = Context::mainnet().with_db(db);
         let evm = ctx.build_mainnet();
-        Ok(Self { evm, address })
+        Ok(Self {
+            evm,
+            address,
+            next_nonce: 0,
+        })
     }
 
     /// Executes the runtime with arbitrary calldata.
@@ -203,7 +197,14 @@ impl RuntimeInstance {
         calldata: &[u8],
         options: ExecutionOptions,
     ) -> Result<CallResult, HarnessError> {
-        transact(&mut self.evm, self.address, calldata, options)
+        let nonce = options
+            .nonce
+            .unwrap_or_else(|| {
+                let current = self.next_nonce;
+                self.next_nonce += 1;
+                current
+            });
+        transact(&mut self.evm, self.address, calldata, options, nonce)
     }
 
     /// Executes a strongly-typed function call using ABI encoding.
