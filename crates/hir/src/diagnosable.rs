@@ -11,9 +11,7 @@ use smallvec1::SmallVec;
 use crate::analysis::HirAnalysisDb;
 use crate::analysis::name_resolution;
 use crate::analysis::ty;
-use crate::analysis::ty::diagnostics::{
-    TraitConstraintDiag, TyDiagCollection, TyLowerDiag,
-};
+use crate::analysis::ty::diagnostics::{TraitConstraintDiag, TyDiagCollection, TyLowerDiag};
 use crate::analysis::ty::ty_def::{InvalidCause, TyId};
 use crate::hir_def::scope_graph::ScopeId;
 use crate::hir_def::{
@@ -730,7 +728,9 @@ impl<'db> ImplTrait<'db> {
 
     /// Diagnostics for implemented associated types' WF and invalid types.
     pub fn diags_assoc_types_wf(self, db: &'db dyn HirAnalysisDb) -> Vec<TyDiagCollection<'db>> {
-        self.assoc_types(db).flat_map(|view| view.diags(db)).collect()
+        self.assoc_types(db)
+            .flat_map(|view| view.diags(db))
+            .collect()
     }
 }
 

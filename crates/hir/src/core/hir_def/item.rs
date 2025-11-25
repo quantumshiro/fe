@@ -660,7 +660,11 @@ impl<'db> Func<'db> {
     }
 
     pub fn param_label(self, db: &'db dyn HirDb, idx: usize) -> Option<IdentId<'db>> {
-        self.params_list(db).to_opt()?.data(db).get(idx)?.label_eagerly()
+        self.params_list(db)
+            .to_opt()?
+            .data(db)
+            .get(idx)?
+            .label_eagerly()
     }
 
     pub fn param_label_or_name(self, db: &'db dyn HirDb, idx: usize) -> Option<FuncParamName<'db>> {
