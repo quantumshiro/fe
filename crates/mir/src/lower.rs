@@ -1635,9 +1635,10 @@ fn build_call_graph<'db>(functions: &[MirFunction<'db>]) -> FxHashMap<String, Ve
         for value in &func.body.values {
             if let ValueOrigin::Call(call) = &value.origin
                 && let Some(target) = &call.resolved_name
-                    && known.contains(target) {
-                        callees.insert(target.clone());
-                    }
+                && known.contains(target)
+            {
+                callees.insert(target.clone());
+            }
         }
         graph.insert(func.symbol_name.clone(), callees.into_iter().collect());
     }

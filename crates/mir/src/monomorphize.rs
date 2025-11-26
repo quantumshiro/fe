@@ -12,11 +12,7 @@ use hir::analysis::{
         ty_def::{TyData, TyId},
     },
 };
-use hir::hir_def::{
-    CallableDef, Func,
-    item::ItemKind,
-    scope_graph::ScopeId,
-};
+use hir::hir_def::{CallableDef, Func, item::ItemKind, scope_graph::ScopeId};
 use rustc_hash::FxHashMap;
 
 use crate::{CallOrigin, MirFunction, ValueOrigin, dedup::deduplicate_mir, lower::lower_function};
@@ -234,7 +230,7 @@ impl<'db> Monomorphizer<'db> {
             if ty.has_invalid(self.db) {
                 return None;
             }
-            Some(sanitize_symbol_component(&ty.pretty_print(self.db)).to_lowercase())
+            Some(sanitize_symbol_component(ty.pretty_print(self.db)).to_lowercase())
         } else {
             None
         }

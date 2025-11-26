@@ -231,7 +231,7 @@ impl<'db> FunctionEmitter<'db> {
                 CallableDef::VariantCtor(_) => {
                     return Err(YulError::Unsupported(
                         "callable without hir function definition is not supported yet".into(),
-                    ))
+                    ));
                 }
             }
         };
