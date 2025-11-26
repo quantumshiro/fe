@@ -285,7 +285,16 @@ impl<'db> TyChecker<'db> {
                     return TyId::invalid(self.db, InvalidCause::Other);
                 }
             },
-            Err(_) => return TyId::invalid(self.db, InvalidCause::Other),
+            Err(_) => {
+                // Even when constructor resolution fails (including ambiguity),
+                // still walk element patterns so that variable bindings inside
+                // the tuple pattern are registered. This mirrors the recovery
+                // strategy used for tuple patterns in `check_tuple_pat`.
+                for &elem_pat in elems {
+                    self.check_pat(elem_pat, TyId::invalid(self.db, InvalidCause::Other));
+                }
+                return TyId::invalid(self.db, InvalidCause::Other);
+            }
         };
 
         let expected_len = expected_elems.len(self.db);

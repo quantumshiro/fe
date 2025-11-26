@@ -722,9 +722,13 @@ mod tests {
 
         let file = db.standalone_file(text);
         let scope_graph = db.parse_source(file);
-        assert_eq!(scope_graph.items_dfs(&db).count(), 8);
+        let items: Vec<_> = scope_graph
+            .items_dfs(&db)
+            .filter(|item| !matches!(item, ItemKind::Use(use_) if use_.is_prelude_use(&db)))
+            .collect();
+        assert_eq!(items.len(), 8);
 
-        for (i, item) in scope_graph.items_dfs(&db).enumerate() {
+        for (i, item) in items.into_iter().enumerate() {
             match i {
                 0 => assert!(matches!(item, ItemKind::TopMod(_))),
                 1 => assert!(matches!(item, ItemKind::Mod(_))),
@@ -752,7 +756,10 @@ mod tests {
         let file = db.standalone_file(text);
         let scope_graph = db.parse_source(file);
         let root = scope_graph.top_mod.scope();
-        let enum_ = scope_graph.children(root).next().unwrap();
+        let enum_ = scope_graph
+            .children(root)
+            .find(|scope| !matches!(scope.item(), ItemKind::Use(use_) if use_.is_prelude_use(&db)))
+            .unwrap();
         assert!(matches!(enum_.item(), ItemKind::Enum(_)));
 
         let variant = scope_graph.children(enum_).next().unwrap();
