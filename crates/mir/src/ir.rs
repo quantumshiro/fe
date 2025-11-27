@@ -12,7 +12,10 @@ use rustc_hash::FxHashMap;
 #[derive(Debug, Clone)]
 pub struct MirModule<'db> {
     pub top_mod: TopLevelMod<'db>,
+    /// All lowered functions in the module.
     pub functions: Vec<MirFunction<'db>>,
+    /// Contracts with their reachable functions already computed.
+    pub contracts: Vec<MirContract>,
 }
 
 impl<'db> MirModule<'db> {
@@ -20,8 +23,18 @@ impl<'db> MirModule<'db> {
         Self {
             top_mod,
             functions: Vec::new(),
+            contracts: Vec::new(),
         }
     }
+}
+
+/// A contract with its entry point and reachable functions.
+#[derive(Debug, Clone)]
+pub struct MirContract {
+    /// The contract's name.
+    pub name: String,
+    /// Indices into `MirModule::functions` for all functions reachable from dispatch.
+    pub function_indices: Vec<usize>,
 }
 
 /// MIR for a single function.
@@ -189,6 +202,8 @@ pub enum MirInst<'db> {
 pub enum Terminator {
     /// Return from the function with an optional value.
     Return(Option<ValueId>),
+    /// Return from the function using raw memory pointer/size (core::return_data).
+    ReturnData { offset: ValueId, size: ValueId },
     /// Unconditional jump to another block.
     Goto { target: BasicBlockId },
     /// Conditional branch based on a boolean value.
@@ -347,6 +362,8 @@ pub struct IntrinsicValue {
 pub enum IntrinsicOp {
     /// `mload(address)`
     Mload,
+    /// `calldataload(offset)`
+    Calldataload,
     /// `mstore(address, value)`
     Mstore,
     /// `mstore8(address, byte)`
@@ -355,11 +372,16 @@ pub enum IntrinsicOp {
     Sload,
     /// `sstore(slot, value)`
     Sstore,
+    /// `return(offset, size)`
+    ReturnData,
 }
 
 impl IntrinsicOp {
     /// Returns `true` if this intrinsic yields a value (load), `false` for pure side effects.
     pub fn returns_value(self) -> bool {
-        matches!(self, IntrinsicOp::Mload | IntrinsicOp::Sload)
+        matches!(
+            self,
+            IntrinsicOp::Mload | IntrinsicOp::Sload | IntrinsicOp::Calldataload
+        )
     }
 }
