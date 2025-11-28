@@ -116,6 +116,7 @@ fn walk<'db>(
                 | ItemKind::Struct(_)
                 | ItemKind::Contract(_)
                 | ItemKind::Enum(_)
+                | ItemKind::Msg(_)
                 | ItemKind::TypeAlias(_)
                 | ItemKind::Trait(_) => Domain::Type,
 

@@ -1156,6 +1156,7 @@ pub fn resolve_name_res<'db>(
                     let base = impl_.ty(db);
                     PathRes::Ty(TyId::foldl(db, base, args))
                 }
+                ItemKind::Msg(_) => PathRes::Ty(TyId::invalid(db, InvalidCause::Other)),
                 ItemKind::ImplTrait(impl_) => {
                     let base = impl_.ty(db);
                     PathRes::Ty(TyId::foldl(db, base, args))
@@ -1285,6 +1286,7 @@ pub fn resolve_name_res<'db>(
                     path,
                 })
             }
+            ScopeId::MsgVariant(..) => PathRes::Ty(TyId::invalid(db, InvalidCause::Other)),
             ScopeId::FuncParam(item, idx) => PathRes::FuncParam(item, idx),
             ScopeId::Field(..) => unreachable!(),
             ScopeId::Block(..) => unreachable!(),

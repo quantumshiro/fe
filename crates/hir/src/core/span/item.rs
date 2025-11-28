@@ -7,6 +7,7 @@ use super::{
     params::{
         LazyFuncParamListSpan, LazyGenericParamListSpan, LazyUsesClauseSpan, LazyWhereClauseSpan,
     },
+    pat::LazyPatSpan,
     path::LazyPathSpan,
     transition::SpanTransitionChain,
     types::{LazyTupleTypeSpan, LazyTySpan},
@@ -14,8 +15,8 @@ use super::{
 };
 use crate::{
     hir_def::{
-        Body, Const, Contract, Enum, Func, Impl, ImplTrait, ItemKind, Mod, Struct, TopLevelMod,
-        Trait, TypeAlias, Use,
+        Body, Const, Contract, Enum, Func, Impl, ImplTrait, ItemKind, Mod, Msg, Struct,
+        TopLevelMod, Trait, TypeAlias, Use,
     },
     span::{
         DesugaredOrigin, DesugaredUseFocus,
@@ -153,6 +154,53 @@ impl<'db> LazyContractSpan<'db> {
         Self(crate::span::transition::SpanTransitionChain::new(c))
     }
 }
+
+define_lazy_span_node!(
+    LazyMsgSpan,
+    ast::Msg,
+    @token {
+        (name, name),
+    }
+    @node {
+        (attributes, attr_list, LazyAttrListSpan),
+        (modifier, modifier, LazyItemModifierSpan),
+        (variants, variants, LazyMsgVariantListSpan),
+    }
+);
+impl<'db> LazyMsgSpan<'db> {
+    pub fn new(m: Msg<'db>) -> Self {
+        Self(crate::span::transition::SpanTransitionChain::new(m))
+    }
+}
+
+define_lazy_span_node!(
+    LazyMsgVariantListSpan,
+    ast::MsgVariantList,
+    @idx {
+        (variant, LazyMsgVariantSpan),
+    }
+);
+
+define_lazy_span_node!(
+    LazyMsgVariantSpan,
+    ast::MsgVariant,
+    @token {
+        (name, name),
+    }
+    @node {
+        (attributes, attr_list, LazyAttrListSpan),
+        (params, params, LazyMsgVariantParamsSpan),
+        (ret_ty, ret_ty, LazyTySpan),
+    }
+);
+
+define_lazy_span_node!(
+    LazyMsgVariantParamsSpan,
+    ast::MsgVariantParams,
+    @idx {
+        (param, LazyFieldDefSpan),
+    }
+);
 
 define_lazy_span_node!(
     LazyEnumSpan,
@@ -399,7 +447,7 @@ define_lazy_span_node!(
 );
 
 impl<'db> LazyContractSpan<'db> {
-    /// Nth recv arm span
+    /// Nth recv span
     pub fn recv(mut self, idx: usize) -> LazyContractRecvSpan<'db> {
         use crate::span::transition::{LazyArg, LazyTransitionFn, ResolvedOrigin};
         use parser::ast::prelude::*;
@@ -429,6 +477,26 @@ define_lazy_span_node!(
     ast::ContractRecv,
     @node {
         (path, path, LazyPathSpan),
+        (arms, arms, LazyRecvArmListSpan),
+    }
+);
+
+define_lazy_span_node!(
+    LazyRecvArmListSpan,
+    ast::RecvArmList,
+    @idx {
+        (arm, LazyRecvArmSpan),
+    }
+);
+
+define_lazy_span_node!(
+    LazyRecvArmSpan,
+    ast::RecvArm,
+    @node {
+        (pat, pat, LazyPatSpan),
+        (ret_ty, ret_ty, LazyTySpan),
+        (effects, uses_clause, LazyUsesClauseSpan),
+        (body, body, LazyBodySpan),
     }
 );
 
