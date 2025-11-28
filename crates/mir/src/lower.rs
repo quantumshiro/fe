@@ -173,6 +173,8 @@ struct MirBuilder<'db, 'a> {
     alloc_func: Option<CallableDef<'db>>,
     /// Cached `core::enum::store_discriminant` definition used for enum construction.
     store_discriminant_func: Option<CallableDef<'db>>,
+    /// Cached `core::enum::get_discriminant` definition used for enum destructuring.
+    get_discriminant_func: Option<CallableDef<'db>>,
     /// Cached `core::enum::store_variant_field` definition used for enum construction.
     store_variant_field_func: Option<CallableDef<'db>>,
     /// Cached `core::enum::get_variant_field` definition used for enum destructuring.
@@ -203,6 +205,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             store_field_func: None,
             alloc_func: None,
             store_discriminant_func: None,
+            get_discriminant_func: None,
             store_variant_field_func: None,
             get_variant_field_func: None,
             address_space_ty: None,
@@ -325,16 +328,32 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     .iter()
                     .any(|variant| variant.num_types() > 0);
                 if has_payload {
-                    let ty = TyId::new(self.db, TyData::TyBase(TyBase::Prim(PrimTy::U256)));
+                    if let Some(callable) = self.get_discriminant_callable(match_expr) {
+                        let space_value = self
+                            .synthetic_address_space_memory()
+                            .unwrap_or_else(|| self.synthetic_u256(BigUint::from(0u8)));
+                        let ty = callable.ret_ty(self.db);
+                        self.mir_body.alloc_value(ValueData {
+                            ty,
+                            origin: ValueOrigin::Call(CallOrigin {
+                                expr: match_expr,
+                                callable,
+                                args: vec![scrutinee_value, space_value],
+                                resolved_name: None,
+                            }),
+                        })
+                    } else {
+                        let ty = TyId::new(self.db, TyData::TyBase(TyBase::Prim(PrimTy::U256)));
 
-                    self.mir_body.alloc_value(ValueData {
-                        ty,
-                        origin: ValueOrigin::Intrinsic(IntrinsicValue {
-                            op: IntrinsicOp::Mload,
-                            args: vec![scrutinee_value],
-                            code_region: None,
-                        }),
-                    })
+                        self.mir_body.alloc_value(ValueData {
+                            ty,
+                            origin: ValueOrigin::Intrinsic(IntrinsicValue {
+                                op: IntrinsicOp::Mload,
+                                args: vec![scrutinee_value],
+                                code_region: None,
+                            }),
+                        })
+                    }
                 } else {
                     discr_value
                 }
@@ -1249,6 +1268,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         Callable::new(self.db, ty, expr.span(self.body).into(), None).ok()
     }
 
+    /// Builds the callable metadata for `get_discriminant`.
+    fn get_discriminant_callable(&mut self, expr: ExprId) -> Option<Callable<'db>> {
+        let func_def = self.resolve_get_discriminant_func()?;
+        let ty = TyId::func(self.db, func_def);
+        Callable::new(self.db, ty, expr.span(self.body).into(), None).ok()
+    }
+
     /// Builds the callable metadata for `store_variant_field`.
     fn get_store_variant_field_callable(
         &mut self,
@@ -1306,6 +1332,22 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         None
     }
 
+    fn resolve_get_discriminant_func(&mut self) -> Option<CallableDef<'db>> {
+        if let Some(func) = self.get_discriminant_func {
+            return Some(func);
+        }
+        // Try local first (for test fixtures), then fall back to core library
+        if let Some(func) = self.find_local_get_discriminant() {
+            self.get_discriminant_func = Some(func);
+            return Some(func);
+        }
+        if let Some(func) = self.resolve_get_discriminant_via_path() {
+            self.get_discriminant_func = Some(func);
+            return Some(func);
+        }
+        None
+    }
+
     fn resolve_store_variant_field_func(&mut self) -> Option<CallableDef<'db>> {
         if let Some(func) = self.store_variant_field_func {
             return Some(func);
@@ -1345,6 +1387,22 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let mut path = self.resolve_core_path(&["core", "enum_repr", "store_discriminant"]);
         if path.is_none() {
             path = self.resolve_core_path(&["core", "store_discriminant"]);
+        }
+        let PathRes::Func(func_ty) = path? else {
+            return None;
+        };
+        let base = func_ty.base_ty(self.db);
+        if let TyData::TyBase(TyBase::Func(func_def)) = base.data(self.db) {
+            Some(*func_def)
+        } else {
+            None
+        }
+    }
+
+    fn resolve_get_discriminant_via_path(&self) -> Option<CallableDef<'db>> {
+        let mut path = self.resolve_core_path(&["core", "enum_repr", "get_discriminant"]);
+        if path.is_none() {
+            path = self.resolve_core_path(&["core", "get_discriminant"]);
         }
         let PathRes::Func(func_ty) = path? else {
             return None;
@@ -1397,6 +1455,19 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         for &func in top_mod.all_funcs(self.db) {
             let name = func.name(self.db).to_opt()?;
             if name.data(self.db) == "store_discriminant"
+                && let Some(def) = func.as_callable(self.db)
+            {
+                return Some(def);
+            }
+        }
+        None
+    }
+
+    fn find_local_get_discriminant(&self) -> Option<CallableDef<'db>> {
+        let top_mod = self.body.top_mod(self.db);
+        for &func in top_mod.all_funcs(self.db) {
+            let name = func.name(self.db).to_opt()?;
+            if name.data(self.db) == "get_discriminant"
                 && let Some(def) = func.as_callable(self.db)
             {
                 return Some(def);
