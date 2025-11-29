@@ -37,8 +37,7 @@ pub(crate) fn monomorphize_functions<'db>(
     let mut monomorphizer = Monomorphizer::new(db, templates);
     monomorphizer.seed_roots();
     monomorphizer.process_worklist();
-    let instances = monomorphizer.into_instances();
-    deduplicate_mir(db, instances)
+    deduplicate_mir(db, monomorphizer.into_instances())
 }
 
 /// Worklist-driven builder that instantiates concrete MIR bodies on demand.
