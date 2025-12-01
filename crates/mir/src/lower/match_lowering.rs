@@ -368,7 +368,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 let callable =
                     self.core
                         .make_callable(match_expr, CoreHelper::GetVariantField, &[binding_ty]);
-                let space_value = self.synthetic_address_space_memory();
+                let space_value =
+                    self.address_space_literal(self.value_address_space(scrutinee_value));
                 let offset_value = self.synthetic_u256(BigUint::from(binding.field_offset));
                 let load_value = self.mir_body.alloc_value(ValueData {
                     ty: binding_ty,
