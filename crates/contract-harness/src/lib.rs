@@ -425,7 +425,7 @@ object "Counter" {
             .expect("point selector should succeed");
         assert_eq!(
             bytes_to_u256(&point_result.return_data).unwrap(),
-            U256::from(12u64)
+            U256::from(24u64)
         );
 
         let square_call =
@@ -435,7 +435,7 @@ object "Counter" {
             .expect("square selector should succeed");
         assert_eq!(
             bytes_to_u256(&square_result.return_data).unwrap(),
-            U256::from(25u64)
+            U256::from(64u64)
         );
     }
 

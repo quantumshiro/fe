@@ -326,6 +326,60 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
     }
 
+    /// Lowers an assignment to a field target into a `store_field` helper call.
+    ///
+    /// # Parameters
+    /// - `block`: Basic block where the assignment occurs.
+    /// - `expr`: Expression id for context.
+    /// - `target`: Assignment target expression (expected to be `Expr::Field`).
+    /// - `value`: Lowered value to store.
+    ///
+    /// # Returns
+    /// Updated block when handled, or `None` to fall back to a normal assignment.
+    pub(super) fn try_lower_field_assign(
+        &mut self,
+        block: BasicBlockId,
+        expr: ExprId,
+        target: ExprId,
+        value: ValueId,
+    ) -> Option<BasicBlockId> {
+        let Partial::Present(Expr::Field(lhs, field_index)) = target.data(self.db, self.body)
+        else {
+            return None;
+        };
+        let field_index = field_index.to_opt()?;
+        let lhs_ty = self.typed_body.expr_ty(self.db, *lhs);
+        let info = self.field_access_info(lhs_ty, field_index)?;
+
+        let addr_value = self.ensure_value(*lhs);
+        let space_value = self.synthetic_address_space_memory();
+        let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
+        let callable = self
+            .core
+            .make_callable(expr, CoreHelper::StoreField, &[info.field_ty]);
+
+        let store_ret_ty = callable.ret_ty(self.db);
+        let store_call = self.mir_body.alloc_value(ValueData {
+            ty: store_ret_ty,
+            origin: ValueOrigin::Call(CallOrigin {
+                expr,
+                callable,
+                args: vec![addr_value, space_value, offset_value, value],
+                resolved_name: None,
+            }),
+        });
+
+        self.push_inst(
+            block,
+            MirInst::EvalExpr {
+                expr,
+                value: store_call,
+                bind_value: false,
+            },
+        );
+        Some(block)
+    }
+
     /// Emits a synthetic `u256` literal value.
     ///
     /// # Parameters

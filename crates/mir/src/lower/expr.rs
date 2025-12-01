@@ -442,6 +442,11 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             Expr::Assign(target, value) => {
                 let (next_block, value_id) = self.lower_expr_in(block, *value);
                 if let Some(curr_block) = next_block {
+                    if let Some(block_after_assign) =
+                        self.try_lower_field_assign(curr_block, expr, *target, value_id)
+                    {
+                        return (Some(block_after_assign), None);
+                    }
                     self.push_inst(
                         curr_block,
                         MirInst::Assign {
