@@ -2428,6 +2428,128 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     error_code,
                 }
             }
+            BodyDiag::RecvExpectedMsgType { primary, given } => {
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "expected `msg` type, but `{}` is given",
+                        given.pretty_print(db)
+                    ),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "recv block expects a msg type".to_string(),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvArmNotMsgVariant { primary, msg_ty } => {
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "expected variant of `{}`, but pattern doesn't match any variant",
+                        msg_ty.pretty_print(db)
+                    ),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "recv arm pattern is not a variant of the msg type".to_string(),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvArmRetTypeMissing { primary, expected } => {
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "return type must be annotated as `{}` to match the msg variant",
+                        expected.pretty_print(db)
+                    ),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "recv arm return type annotation required".to_string(),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvArmDuplicateVariant {
+                primary,
+                first_use,
+                variant,
+            } => {
+                let name = variant.data(db);
+                let sub_diagnostics = vec![
+                    SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!("duplicate handling of `{name}`"),
+                        span: primary.resolve(db),
+                    },
+                    SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: "first handled here".to_string(),
+                        span: first_use.resolve(db),
+                    },
+                ];
+                CompleteDiagnostic {
+                    severity,
+                    message: "duplicate msg variant in recv block".to_string(),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvMissingMsgVariants { primary, variants } => {
+                let missing = variants
+                    .iter()
+                    .map(|ident| ident.data(db).to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!("missing variants: {missing}"),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "recv block missing msg variants".to_string(),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvDuplicateMsgBlock {
+                primary,
+                first_use,
+                msg_ty,
+            } => {
+                let msg = msg_ty.pretty_print(db);
+                let sub_diagnostics = vec![
+                    SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!("duplicate recv block for `{msg}`"),
+                        span: primary.resolve(db),
+                    },
+                    SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: "first declared here".to_string(),
+                        span: first_use.resolve(db),
+                    },
+                ];
+                CompleteDiagnostic {
+                    severity,
+                    message: "duplicate recv block".to_string(),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
         }
     }
 }

@@ -10,7 +10,8 @@ use parser::ast;
 
 use super::{
     AttrListId, Body, EffectParamListId, FuncParamListId, FuncParamName, GenericParamListId,
-    HirIngot, IdentId, Partial, PatId, TupleTypeId, TypeBound, TypeId, UseAlias, WhereClauseId,
+    HirIngot, IdentId, Partial, Pat, PatId, TupleTypeId, TypeBound, TypeId, UseAlias,
+    WhereClauseId,
     scope_graph::{ScopeGraph, ScopeId},
 };
 use crate::{
@@ -796,12 +797,31 @@ pub struct ContractRecvArmListId<'db> {
     pub data: Vec<ContractRecvArm<'db>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ContractRecvArm<'db> {
     pub pat: PatId,
     pub ret_ty: Option<TypeId<'db>>,
     pub effects: EffectParamListId<'db>,
     pub body: Body<'db>,
+}
+
+impl<'db> ContractRecvArm<'db> {
+    /// Returns the path from the arm's pattern, if it has one.
+    ///
+    /// This extracts the path from patterns like `Foo::Bar`, `Foo::Bar(..)`,
+    /// or `Foo::Bar { .. }`.
+    pub fn variant_path(&self, db: &'db dyn HirDb) -> Option<PathId<'db>> {
+        let Partial::Present(pat) = self.pat.data(db, self.body) else {
+            return None;
+        };
+
+        match pat {
+            Pat::Path(Partial::Present(path), ..)
+            | Pat::PathTuple(Partial::Present(path), ..)
+            | Pat::Record(Partial::Present(path), ..) => Some(*path),
+            _ => None,
+        }
+    }
 }
 
 #[salsa::tracked]
@@ -872,6 +892,10 @@ impl<'db> MsgVariant<'db> {
 
     pub fn ident(self, db: &'db dyn HirDb) -> Option<IdentId<'db>> {
         self.def(db).name.to_opt()
+    }
+
+    pub fn ret_ty(self, db: &'db dyn HirDb) -> Option<TypeId<'db>> {
+        self.def(db).ret_ty
     }
 
     pub fn scope(self) -> ScopeId<'db> {

@@ -14,7 +14,7 @@ use salsa::Update;
 use smallvec1::SmallVec;
 use thin_vec::ThinVec;
 
-use super::owner::{BodyOwner, RecvArmInfo};
+use super::owner::BodyOwner;
 use super::{Callable, TypedBody};
 use crate::analysis::{
     HirAnalysisDb,
@@ -42,7 +42,6 @@ pub(super) struct TyCheckEnv<'db> {
     owner: BodyOwner<'db>,
     owner_scope: ScopeId<'db>,
     body: Body<'db>,
-    recv_info: Option<RecvArmInfo<'db>>,
 
     pat_ty: FxHashMap<PatId, TyId<'db>>,
     expr_ty: FxHashMap<ExprId, ExprProp<'db>>,
@@ -66,7 +65,6 @@ impl<'db> TyCheckEnv<'db> {
         };
 
         let owner_scope = owner.scope();
-        let recv_info = owner.recv_arm_info(db);
 
         // Compute base assumptions (without effect-derived bounds) up-front
         let (base_preds, base_assumptions) = match owner {
@@ -87,7 +85,6 @@ impl<'db> TyCheckEnv<'db> {
             owner,
             owner_scope,
             body,
-            recv_info,
             pat_ty: FxHashMap::default(),
             expr_ty: FxHashMap::default(),
             callables: FxHashMap::default(),
@@ -366,11 +363,11 @@ impl<'db> TyCheckEnv<'db> {
             BodyOwner::Func(_) => Vec::new(),
             BodyOwner::ContractInit(contract) => vec![
                 (
-                    EffectParamSite::ContractUses(contract),
+                    EffectParamSite::Contract(contract),
                     contract.effects(self.db),
                 ),
                 (
-                    EffectParamSite::ContractInitUses(contract),
+                    EffectParamSite::ContractInit(contract),
                     contract.init_effects(self.db),
                 ),
             ],
@@ -378,16 +375,16 @@ impl<'db> TyCheckEnv<'db> {
                 contract,
                 recv_idx,
                 arm_idx,
+                arm,
+                ..
             } => {
-                let recv = contract.recvs(self.db).data(self.db)[recv_idx as usize].clone();
-                let arm = recv.arms.data(self.db)[arm_idx as usize].clone();
                 vec![
                     (
-                        EffectParamSite::ContractUses(contract),
+                        EffectParamSite::Contract(contract),
                         contract.effects(self.db),
                     ),
                     (
-                        EffectParamSite::ContractRecvArmUses {
+                        EffectParamSite::ContractRecvArm {
                             contract,
                             recv_idx,
                             arm_idx,
@@ -402,17 +399,17 @@ impl<'db> TyCheckEnv<'db> {
     fn effect_param_span(&self, site: EffectParamSite<'db>, idx: usize) -> DynLazySpan<'db> {
         match site {
             EffectParamSite::Func(func) => func.span().effects().param_idx(idx).name().into(),
-            EffectParamSite::ContractUses(contract) => {
+            EffectParamSite::Contract(contract) => {
                 contract.span().effects().param_idx(idx).name().into()
             }
-            EffectParamSite::ContractInitUses(contract) => contract
+            EffectParamSite::ContractInit(contract) => contract
                 .span()
                 .init_block()
                 .effects()
                 .param_idx(idx)
                 .name()
                 .into(),
-            EffectParamSite::ContractRecvArmUses {
+            EffectParamSite::ContractRecvArm {
                 contract,
                 recv_idx,
                 arm_idx,
@@ -430,9 +427,10 @@ impl<'db> TyCheckEnv<'db> {
 
     fn contract_from_site(site: EffectParamSite<'db>) -> Option<Contract<'db>> {
         match site {
-            EffectParamSite::ContractUses(contract)
-            | EffectParamSite::ContractInitUses(contract) => Some(contract),
-            EffectParamSite::ContractRecvArmUses { contract, .. } => Some(contract),
+            EffectParamSite::Contract(contract) | EffectParamSite::ContractInit(contract) => {
+                Some(contract)
+            }
+            EffectParamSite::ContractRecvArm { contract, .. } => Some(contract),
             EffectParamSite::Func(_) => None,
         }
     }
@@ -489,8 +487,8 @@ impl<'db> TyCheckEnv<'db> {
         self.body
     }
 
-    pub(super) fn recv_arm_info(&self) -> Option<&RecvArmInfo<'db>> {
-        self.recv_info.as_ref()
+    pub(super) fn owner(&self) -> BodyOwner<'db> {
+        self.owner
     }
 
     pub(super) fn compute_expected_return(&self) -> TyId<'db> {
@@ -508,11 +506,8 @@ impl<'db> TyCheckEnv<'db> {
                 }
             }
             BodyOwner::ContractInit(_) => TyId::unit(self.db),
-            BodyOwner::ContractRecvArm { .. } => {
-                let Some(info) = self.recv_info.as_ref() else {
-                    return TyId::unit(self.db);
-                };
-                let Some(ret_ty) = info.arm.ret_ty else {
+            BodyOwner::ContractRecvArm { arm, .. } => {
+                let Some(ret_ty) = arm.ret_ty else {
                     return TyId::unit(self.db);
                 };
 
@@ -1051,9 +1046,9 @@ impl<'db> EffectEnv<'db> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum EffectParamSite<'db> {
     Func(Func<'db>),
-    ContractUses(Contract<'db>),
-    ContractInitUses(Contract<'db>),
-    ContractRecvArmUses {
+    Contract(Contract<'db>),
+    ContractInit(Contract<'db>),
+    ContractRecvArm {
         contract: Contract<'db>,
         recv_idx: u32,
         arm_idx: u32,

@@ -1,0 +1,22 @@
+// Test that recv arm return types must match the msg variant
+
+msg BankMsg {
+    Withdraw { amount: u64 } -> bool,
+    Deposit { amount: u64 } -> u64,
+}
+
+pub contract BadReturns {
+    data: u64,
+
+    recv BankMsg {
+        // Annotated return type disagrees with the variant return type (should be bool)
+        Withdraw { amount } -> u32 {
+            0
+        }
+
+        // No annotation; still expects the variant return type (u64)
+        Deposit { amount } {
+            false
+        }
+    }
+}

@@ -1,0 +1,24 @@
+// Recv blocks must handle each msg variant exactly once
+
+msg BankMsg {
+    Deposit,
+    Withdraw,
+    Transfer { amount: u64 } -> bool,
+}
+
+pub contract BadContract {
+    data: u64,
+
+    recv BankMsg {
+        // OK: first Deposit handler
+        Deposit {}
+
+        // Error: duplicate Deposit handler
+        Deposit {}
+
+        // OK: Withdraw handler
+        Withdraw -> bool {
+            false
+        }
+    }
+}

@@ -9,7 +9,8 @@ mod stmt;
 pub use self::path::RecordLike;
 use crate::{
     hir_def::{
-        Body, Contract, Expr, ExprId, Func, LitKind, Partial, Pat, PatId, PathId, TypeId as HirTyId,
+        Body, Contract, ContractRecvArm, Expr, ExprId, Func, LitKind, MsgVariant, Partial, Pat,
+        PatId, PathId, TypeId as HirTyId,
     },
     span::{
         DynLazySpan, expr::LazyExprSpan, pat::LazyPatSpan, path::LazyPathSpan, types::LazyTySpan,
@@ -20,12 +21,13 @@ pub use callable::Callable;
 pub use env::ExprProp;
 use env::{LocalBinding, TyCheckEnv};
 pub(super) use expr::TraitOps;
-use owner::{BodyOwner, RecvArmInfo};
+use owner::BodyOwner;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use salsa::Update;
 
 use super::{
+    adt_def::AdtRef,
     diagnostics::{BodyDiag, FuncBodyDiag, TyDiagCollection, TyLowerDiag},
     fold::TyFoldable,
     trait_def::TraitInstId,
@@ -38,7 +40,8 @@ use crate::analysis::ty::{normalize::normalize_ty, ty_error::collect_ty_lower_er
 use crate::analysis::{
     HirAnalysisDb,
     name_resolution::{
-        PathRes, PathResError, diagnostics::PathResDiag, resolve_path_with_observer,
+        ExpectedPathKind, PathRes, PathResError, ResolvedMsgVariant, diagnostics::PathResDiag,
+        resolve_path, resolve_path_with_observer,
     },
     ty::ty_def::{TyFlags, inference_keys},
 };
@@ -60,18 +63,159 @@ pub fn check_contract_init_body<'db>(
 }
 
 #[salsa::tracked(return_ref)]
+pub fn check_contract_recv_block<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+    recv_idx: u32,
+) -> Vec<FuncBodyDiag<'db>> {
+    let mut diags = Vec::new();
+
+    let Some(recv) = contract.recvs(db).data(db).get(recv_idx as usize) else {
+        return diags;
+    };
+
+    let recv_span = contract.span().recv(recv_idx as usize);
+    let path_span = recv_span.clone().path();
+
+    let Some(msg_ty) = resolve_recv_msg_ty(
+        db,
+        contract,
+        recv.msg_path,
+        path_span.clone(),
+        &mut diags,
+        true,
+    ) else {
+        return diags;
+    };
+
+    let adt_def = match msg_ty.adt_def(db) {
+        Some(adt_def) => adt_def,
+        None => return diags,
+    };
+
+    let AdtRef::Msg(msg) = adt_def.adt_ref(db) else {
+        return diags;
+    };
+
+    let assumptions = PredicateListId::empty_list(db);
+    let mut seen = FxHashMap::<MsgVariant<'db>, DynLazySpan<'db>>::default();
+    let mut covered = FxHashSet::<MsgVariant<'db>>::default();
+
+    for (arm_idx, arm) in recv.arms.data(db).iter().enumerate() {
+        let Some(path) = arm.variant_path(db) else {
+            continue;
+        };
+
+        let Some(resolved) = resolve_msg_variant_in_msg(db, msg_ty, path, assumptions) else {
+            continue;
+        };
+
+        let Some(ident) = resolved.variant.ident(db) else {
+            continue;
+        };
+
+        let pat_span: DynLazySpan<'db> = recv_span.clone().arms().arm(arm_idx).pat().into();
+
+        if let Some(first_span) = seen.get(&resolved.variant) {
+            diags.push(
+                BodyDiag::RecvArmDuplicateVariant {
+                    primary: pat_span.clone(),
+                    first_use: first_span.clone(),
+                    variant: ident,
+                }
+                .into(),
+            );
+        } else {
+            seen.insert(resolved.variant, pat_span.clone());
+        }
+
+        covered.insert(resolved.variant);
+    }
+
+    let missing: Vec<_> = adt_def
+        .fields(db)
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, _)| {
+            let variant = MsgVariant::new(msg, idx);
+            (!covered.contains(&variant))
+                .then(|| variant.ident(db))
+                .flatten()
+        })
+        .collect();
+
+    if !missing.is_empty() {
+        diags.push(
+            BodyDiag::RecvMissingMsgVariants {
+                primary: recv_span.clone().path().into(),
+                variants: missing,
+            }
+            .into(),
+        );
+    }
+
+    diags
+}
+
+#[salsa::tracked(return_ref)]
+pub fn check_contract_recv_blocks<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+) -> Vec<FuncBodyDiag<'db>> {
+    let mut diags = Vec::new();
+    let mut seen = FxHashMap::<TyId<'db>, DynLazySpan<'db>>::default();
+
+    for (idx, recv) in contract.recvs(db).data(db).iter().enumerate() {
+        let recv_span = contract.span().recv(idx);
+        let path_span = recv_span.clone().path();
+
+        let Some(msg_ty) = resolve_recv_msg_ty(
+            db,
+            contract,
+            recv.msg_path,
+            path_span.clone(),
+            &mut diags,
+            false,
+        ) else {
+            continue;
+        };
+
+        let path_span: DynLazySpan<'db> = path_span.into();
+        if let Some(first_span) = seen.get(&msg_ty) {
+            diags.push(
+                BodyDiag::RecvDuplicateMsgBlock {
+                    primary: path_span.clone(),
+                    first_use: first_span.clone(),
+                    msg_ty,
+                }
+                .into(),
+            );
+        } else {
+            seen.insert(msg_ty, path_span);
+        }
+    }
+
+    diags
+}
+
+#[salsa::tracked(return_ref)]
 pub fn check_contract_recv_arm_body<'db>(
     db: &'db dyn HirAnalysisDb,
     contract: Contract<'db>,
     recv_idx: u32,
     arm_idx: u32,
 ) -> (Vec<FuncBodyDiag<'db>>, TypedBody<'db>) {
+    let recv = contract.recvs(db).data(db).get(recv_idx as usize).unwrap();
+    let arm = *recv.arms.data(db).get(arm_idx as usize).unwrap();
+
     check_body_owner(
         db,
         BodyOwner::ContractRecvArm {
             contract,
             recv_idx,
             arm_idx,
+            msg_path: recv.msg_path,
+            arm,
         },
     )
 }
@@ -86,6 +230,51 @@ fn check_body_owner<'db>(
 
     checker.run();
     checker.finish()
+}
+
+pub(super) fn resolve_recv_msg_ty<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+    msg_path: Option<PathId<'db>>,
+    span: LazyPathSpan<'db>,
+    diags: &mut Vec<FuncBodyDiag<'db>>,
+    emit_diag: bool,
+) -> Option<TyId<'db>> {
+    let msg_path = msg_path?;
+    let assumptions = PredicateListId::empty_list(db);
+
+    match resolve_path(db, msg_path, contract.scope(), assumptions, false) {
+        Ok(PathRes::Ty(ty) | PathRes::TyAlias(_, ty)) => match ty.adt_def(db) {
+            Some(adt) if matches!(adt.adt_ref(db), AdtRef::Msg(_)) => Some(ty),
+            _ => {
+                if emit_diag {
+                    diags.push(
+                        BodyDiag::RecvExpectedMsgType {
+                            primary: span.clone().into(),
+                            given: ty,
+                        }
+                        .into(),
+                    );
+                }
+                None
+            }
+        },
+        Ok(other) => {
+            let ident = msg_path.ident(db).to_opt()?;
+            if emit_diag {
+                diags.push(PathResDiag::ExpectedType(span.into(), ident, other.kind_name()).into());
+            }
+            None
+        }
+        Err(err) => {
+            if emit_diag
+                && let Some(diag) = err.into_diag(db, msg_path, span, ExpectedPathKind::Type)
+            {
+                diags.push(diag.into());
+            }
+            None
+        }
+    }
 }
 
 pub struct TyChecker<'db> {
@@ -105,10 +294,19 @@ impl<'db> TyChecker<'db> {
     }
 
     fn run(&mut self) {
-        if let Some(recv) = self.env.recv_arm_info().cloned() {
-            let pat_ty = self.recv_arm_expected_pat_ty(&recv);
-            self.check_pat(recv.arm.pat, pat_ty);
-            self.seed_pat_bindings(recv.arm.pat);
+        if let BodyOwner::ContractRecvArm {
+            contract,
+            msg_path,
+            arm,
+            ..
+        } = self.env.owner()
+        {
+            let span = self.env.owner().recv_span().unwrap().path();
+            let pat_ty = self.recv_arm_expected_pat_ty(contract, msg_path, span);
+            let ret_ty = self.recv_arm_expected_ret_ty(arm, pat_ty);
+            self.expected = ret_ty;
+            self.check_pat(arm.pat, pat_ty);
+            self.seed_pat_bindings(arm.pat);
             self.env.flush_pending_bindings();
         }
 
@@ -131,17 +329,57 @@ impl<'db> TyChecker<'db> {
         }
     }
 
-    fn recv_arm_expected_pat_ty(&mut self, recv: &RecvArmInfo<'db>) -> TyId<'db> {
-        let Some(msg_path) = recv.msg_path else {
-            return self.fresh_ty();
-        };
+    fn recv_arm_expected_pat_ty(
+        &mut self,
+        contract: Contract<'db>,
+        msg_path: Option<PathId<'db>>,
+        span: LazyPathSpan<'db>,
+    ) -> TyId<'db> {
+        resolve_recv_msg_ty(self.db, contract, msg_path, span, &mut self.diags, false)
+            .unwrap_or_else(|| TyId::invalid(self.db, InvalidCause::Other))
+    }
 
-        let span = recv.contract.span().recv(recv.recv_idx as usize).path();
+    fn recv_arm_expected_ret_ty(
+        &mut self,
+        arm: ContractRecvArm<'db>,
+        msg_ty: TyId<'db>,
+    ) -> TyId<'db> {
+        let arm_span = self.env.owner().recv_arm_span().unwrap();
+        let arm_ret_span = arm_span.clone().ret_ty();
+        let annotated = arm
+            .ret_ty
+            .map(|hir_ty| self.lower_ty(hir_ty, arm_ret_span.clone(), true));
 
-        match self.resolve_path(msg_path, false, span) {
-            Ok(PathRes::Ty(ty) | PathRes::TyAlias(_, ty)) => ty,
-            Ok(_) => TyId::invalid(self.db, InvalidCause::Other),
-            Err(_) => TyId::invalid(self.db, InvalidCause::Other),
+        // Try to get return type from msg variant definition
+        let variant_ret = arm
+            .variant_path(self.db)
+            .and_then(|path| self.resolve_msg_variant(msg_ty, path))
+            .map(|variant| {
+                let ret_opt = variant.variant.ret_ty(self.db);
+                let var_ty = ret_opt
+                    .map(|hir_ty| self.lower_ty(hir_ty, variant.variant.span().ret_ty(), true));
+                (
+                    var_ty.unwrap_or_else(|| TyId::unit(self.db)),
+                    ret_opt.is_some(),
+                )
+            });
+
+        match (variant_ret, annotated) {
+            (Some((var_ty, _has_ret)), Some(annot_ty)) => {
+                self.equate_ty(annot_ty, var_ty, arm_ret_span.into());
+                var_ty
+            }
+            (Some((var_ty, has_ret)), None) => {
+                if has_ret && var_ty != TyId::unit(self.db) {
+                    self.push_diag(BodyDiag::RecvArmRetTypeMissing {
+                        primary: arm_span.pat().into(),
+                        expected: var_ty,
+                    });
+                }
+                var_ty
+            }
+            (None, Some(annot_ty)) => annot_ty,
+            (None, None) => TyId::unit(self.db),
         }
     }
 
@@ -372,6 +610,15 @@ impl<'db> TyChecker<'db> {
         res
     }
 
+    /// Resolves a path as a msg variant within the given msg type.
+    fn resolve_msg_variant(
+        &self,
+        msg_ty: TyId<'db>,
+        path: PathId<'db>,
+    ) -> Option<ResolvedMsgVariant<'db>> {
+        resolve_msg_variant_in_msg(self.db, msg_ty, path, self.env.assumptions())
+    }
+
     /// Resolve associated type to concrete type if possible
     fn normalize_ty(&mut self, ty: TyId<'db>) -> TyId<'db> {
         normalize_ty(
@@ -380,6 +627,23 @@ impl<'db> TyChecker<'db> {
             self.env.scope(),
             self.env.assumptions(),
         )
+    }
+}
+
+fn resolve_msg_variant_in_msg<'db>(
+    db: &'db dyn HirAnalysisDb,
+    msg_ty: TyId<'db>,
+    path: PathId<'db>,
+    assumptions: PredicateListId<'db>,
+) -> Option<ResolvedMsgVariant<'db>> {
+    let adt_def = msg_ty.adt_def(db)?;
+    let AdtRef::Msg(msg) = adt_def.adt_ref(db) else {
+        return None;
+    };
+
+    match resolve_path(db, path, msg.scope(), assumptions, true) {
+        Ok(PathRes::MsgVariant(reso)) => Some(reso),
+        _ => None,
     }
 }
 

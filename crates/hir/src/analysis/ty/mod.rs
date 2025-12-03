@@ -168,8 +168,20 @@ impl ModuleAnalysisPass for BodyAnalysisPass {
                 );
             }
 
+            diags.extend(
+                ty_check::check_contract_recv_blocks(db, contract)
+                    .iter()
+                    .map(|diag| diag.to_voucher()),
+            );
+
             let recvs = contract.recvs(db);
             for (recv_idx, recv) in recvs.data(db).iter().enumerate() {
+                diags.extend(
+                    ty_check::check_contract_recv_block(db, contract, recv_idx as u32)
+                        .iter()
+                        .map(|diag| diag.to_voucher()),
+                );
+
                 for (arm_idx, _) in recv.arms.data(db).iter().enumerate() {
                     diags.extend(
                         ty_check::check_contract_recv_arm_body(

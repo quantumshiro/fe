@@ -1,0 +1,47 @@
+---
+source: crates/uitest/tests/ty_check.rs
+assertion_line: 27
+expression: diags
+input_file: fixtures/ty_check/recv_arm_not_msg_variant.fe
+---
+error[2-0002]: `Foo` is not found
+   ┌─ recv_arm_not_msg_variant.fe:15:10
+   │
+15 │     recv Foo {
+   │          ^^^ `Foo` is not found
+
+error[8-0042]: recv arm pattern is not a variant of the msg type
+   ┌─ recv_arm_not_msg_variant.fe:26:9
+   │
+26 │         NotAVariant { foo } -> u64 {
+   │         ^^^^^^^^^^^^^^^^^^^ expected variant of `BankMsg`, but pattern doesn't match any variant
+
+error[8-0042]: recv arm pattern is not a variant of the msg type
+   ┌─ recv_arm_not_msg_variant.fe:37:9
+   │
+37 │         Ping -> bool {
+   │         ^^^^ expected variant of `BankMsg`, but pattern doesn't match any variant
+
+error[8-0042]: recv arm pattern is not a variant of the msg type
+   ┌─ recv_arm_not_msg_variant.fe:48:9
+   │
+48 │         random_identifier -> bool {
+   │         ^^^^^^^^^^^^^^^^^ expected variant of `BankMsg`, but pattern doesn't match any variant
+
+error[8-0045]: recv block missing msg variants
+   ┌─ recv_arm_not_msg_variant.fe:19:10
+   │
+19 │     recv BankMsg {
+   │          ^^^^^^^ missing variants: Deposit
+
+error[8-0045]: recv block missing msg variants
+   ┌─ recv_arm_not_msg_variant.fe:35:10
+   │
+35 │     recv BankMsg {
+   │          ^^^^^^^ missing variants: Withdraw, Deposit
+
+error[8-0045]: recv block missing msg variants
+   ┌─ recv_arm_not_msg_variant.fe:46:10
+   │
+46 │     recv BankMsg {
+   │          ^^^^^^^ missing variants: Withdraw, Deposit

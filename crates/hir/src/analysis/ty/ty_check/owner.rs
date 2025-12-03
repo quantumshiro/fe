@@ -1,7 +1,7 @@
 use crate::{
     analysis::HirAnalysisDb,
-    hir_def::scope_graph::ScopeId,
-    hir_def::{Body, Contract, ContractRecvArm, Func, PathId},
+    hir_def::{Body, Contract, ContractRecvArm, Func, PathId, scope_graph::ScopeId},
+    span::item::{LazyContractRecvSpan, LazyRecvArmSpan},
 };
 
 /// Identifies the HIR owner of a [`Body`].
@@ -13,16 +13,9 @@ pub enum BodyOwner<'db> {
         contract: Contract<'db>,
         recv_idx: u32,
         arm_idx: u32,
+        msg_path: Option<PathId<'db>>,
+        arm: ContractRecvArm<'db>,
     },
-}
-
-#[derive(Clone, Debug)]
-pub struct RecvArmInfo<'db> {
-    pub contract: Contract<'db>,
-    pub recv_idx: u32,
-    pub _arm_idx: u32,
-    pub msg_path: Option<PathId<'db>>,
-    pub arm: ContractRecvArm<'db>,
 }
 
 impl<'db> BodyOwner<'db> {
@@ -30,14 +23,7 @@ impl<'db> BodyOwner<'db> {
         match self {
             BodyOwner::Func(func) => func.body(db),
             BodyOwner::ContractInit(contract) => contract.init_body(db),
-            BodyOwner::ContractRecvArm {
-                contract,
-                recv_idx,
-                arm_idx,
-            } => {
-                let recv = contract.recvs(db).data(db).get(recv_idx as usize)?;
-                recv.arms.data(db).get(arm_idx as usize).map(|arm| arm.body)
-            }
+            BodyOwner::ContractRecvArm { arm, .. } => Some(arm.body),
         }
     }
 
@@ -49,23 +35,29 @@ impl<'db> BodyOwner<'db> {
         }
     }
 
-    pub fn recv_arm_info(self, db: &'db dyn HirAnalysisDb) -> Option<RecvArmInfo<'db>> {
+    pub fn recv_span(self) -> Option<LazyContractRecvSpan<'db>> {
+        match self {
+            BodyOwner::ContractRecvArm {
+                contract, recv_idx, ..
+            } => Some(contract.span().recv(recv_idx as usize)),
+            _ => None,
+        }
+    }
+
+    pub fn recv_arm_span(self) -> Option<LazyRecvArmSpan<'db>> {
         match self {
             BodyOwner::ContractRecvArm {
                 contract,
                 recv_idx,
                 arm_idx,
-            } => {
-                let recv = contract.recvs(db).data(db).get(recv_idx as usize)?;
-                let arm = recv.arms.data(db).get(arm_idx as usize)?.clone();
-                Some(RecvArmInfo {
-                    contract,
-                    recv_idx,
-                    _arm_idx: arm_idx,
-                    msg_path: recv.msg_path,
-                    arm,
-                })
-            }
+                ..
+            } => Some(
+                contract
+                    .span()
+                    .recv(recv_idx as usize)
+                    .arms()
+                    .arm(arm_idx as usize),
+            ),
             _ => None,
         }
     }

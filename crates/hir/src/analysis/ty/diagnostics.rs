@@ -380,6 +380,44 @@ pub enum BodyDiag<'db> {
     UnreachablePattern {
         primary: DynLazySpan<'db>,
     },
+
+    /// The root path of a recv block doesn't refer to a msg type
+    RecvExpectedMsgType {
+        primary: DynLazySpan<'db>,
+        given: TyId<'db>,
+    },
+
+    /// A recv arm pattern is not a variant of the expected msg type
+    RecvArmNotMsgVariant {
+        primary: DynLazySpan<'db>,
+        msg_ty: TyId<'db>,
+    },
+
+    /// A recv arm return type annotation is required and must match the msg variant
+    RecvArmRetTypeMissing {
+        primary: DynLazySpan<'db>,
+        expected: TyId<'db>,
+    },
+
+    /// A recv arm pattern is duplicated for the same msg variant
+    RecvArmDuplicateVariant {
+        primary: DynLazySpan<'db>,
+        first_use: DynLazySpan<'db>,
+        variant: IdentId<'db>,
+    },
+
+    /// Some msg variants are not covered in the recv block
+    RecvMissingMsgVariants {
+        primary: DynLazySpan<'db>,
+        variants: Vec<IdentId<'db>>,
+    },
+
+    /// Duplicate recv blocks for the same msg type
+    RecvDuplicateMsgBlock {
+        primary: DynLazySpan<'db>,
+        first_use: DynLazySpan<'db>,
+        msg_ty: TyId<'db>,
+    },
 }
 
 impl<'db> BodyDiag<'db> {
@@ -499,6 +537,12 @@ impl<'db> BodyDiag<'db> {
             Self::NotAMethod { .. } => 33,
             Self::NonExhaustiveMatch { .. } => 34,
             Self::UnreachablePattern { .. } => 35,
+            Self::RecvExpectedMsgType { .. } => 41,
+            Self::RecvArmNotMsgVariant { .. } => 42,
+            Self::RecvArmRetTypeMissing { .. } => 43,
+            Self::RecvArmDuplicateVariant { .. } => 44,
+            Self::RecvMissingMsgVariants { .. } => 45,
+            Self::RecvDuplicateMsgBlock { .. } => 46,
         }
     }
 }
