@@ -3,7 +3,10 @@ use std::{error::Error, fmt};
 use common::ingot::IngotKind;
 use hir::analysis::{
     HirAnalysisDb,
-    name_resolution::{PathRes, path_resolver::resolve_path},
+    name_resolution::{
+        PathRes,
+        path_resolver::{ResolvedVariant, resolve_path},
+    },
     ty::{
         adt_def::AdtRef,
         trait_resolution::PredicateListId,
@@ -470,20 +473,35 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
     }
 
+    fn resolve_enum_variant(
+        &self,
+        path: PathId<'db>,
+        scope: ScopeId<'db>,
+    ) -> Option<ResolvedVariant<'db>> {
+        let res = resolve_path(
+            self.db,
+            path,
+            scope,
+            PredicateListId::empty_list(self.db),
+            false,
+        )
+        .ok()?;
+        match res {
+            PathRes::EnumVariant(variant) => Some(variant),
+            _ => None,
+        }
+    }
+
     fn enum_pat_value(&self, pat: PatId) -> Option<MatchArmPattern> {
         let Partial::Present(pat_data) = pat.data(self.db, self.body) else {
             return None;
         };
+        let scope = self.typed_body.body().unwrap().scope();
 
         // Handle unit variant patterns like `MyEnum::A`
         if let Pat::Path(path, ..) = pat_data
-            && let Ok(PathRes::EnumVariant(variant)) = resolve_path(
-                self.db,
-                path.to_opt().unwrap(),
-                self.typed_body.body().unwrap().scope(),
-                PredicateListId::empty_list(self.db),
-                false,
-            )
+            && let Some(path) = path.to_opt()
+            && let Some(variant) = self.resolve_enum_variant(path, scope)
         {
             let enum_name = variant
                 .enum_(self.db)
@@ -502,13 +520,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // Handle tuple variant patterns like `MyEnum::Some(x)`
         if let Pat::PathTuple(path, elem_pats) = pat_data
             && let Some(path) = path.to_opt()
-            && let Ok(PathRes::EnumVariant(variant)) = resolve_path(
-                self.db,
-                path,
-                self.typed_body.body().unwrap().scope(),
-                PredicateListId::empty_list(self.db),
-                false,
-            )
+            && let Some(variant) = self.resolve_enum_variant(path, scope)
         {
             let enum_name = variant
                 .enum_(self.db)
@@ -695,39 +707,52 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         block: BasicBlockId,
         expr: ExprId,
     ) -> (Option<BasicBlockId>, ValueId) {
-        if let Some(result) = self.try_lower_intrinsic_stmt(block, expr) {
-            return result;
+        let (next, value, _) = self.lower_expr_core(block, expr);
+        (next, value)
+    }
+
+    /// Lower an expression, returning the exit block, value, and whether a statement position
+    /// should emit a `MirInst::Eval` wrapper for the resulting value.
+    fn lower_expr_core(
+        &mut self,
+        block: BasicBlockId,
+        expr: ExprId,
+    ) -> (Option<BasicBlockId>, ValueId, bool) {
+        if let Some((next, val)) = self.try_lower_intrinsic_stmt(block, expr) {
+            return (next, val, false);
         }
-        // Check for variant constructor calls before the generic match
-        if let Some(result) = self.try_lower_variant_ctor(block, expr) {
-            return result;
+        if let Some((next, val)) = self.try_lower_variant_ctor(block, expr) {
+            return (next, val, true);
         }
-        // Check for unit variant paths (e.g., MyOption::None)
-        if let Some(result) = self.try_lower_unit_variant(block, expr) {
-            return result;
+        if let Some((next, val)) = self.try_lower_unit_variant(block, expr) {
+            return (next, val, true);
         }
+
         match expr.data(self.db, self.body) {
             Partial::Present(Expr::Block(stmts)) => {
                 let next_block = self.lower_block(block, expr, stmts);
                 let val = self.ensure_value(expr);
-                (next_block, val)
+                // Block statements already emit their own instructions; no extra Eval needed.
+                (next_block, val, false)
             }
             Partial::Present(Expr::RecordInit(_, fields)) => {
-                self.try_lower_record(block, expr, fields)
+                let (next, val) = self.try_lower_record(block, expr, fields);
+                (next, val, true)
             }
             Partial::Present(Expr::Match(scrutinee, arms)) => {
                 if let Partial::Present(arms) = arms {
-                    // Try to lower `match` into a `Switch` if it only uses supported patterns.
                     if let Some(mut patterns) = self.match_arm_patterns(arms) {
-                        return self.lower_match_expr(block, expr, *scrutinee, arms, &mut patterns);
+                        let (next, val) =
+                            self.lower_match_expr(block, expr, *scrutinee, arms, &mut patterns);
+                        return (next, val, false);
                     }
                 }
                 let val = self.ensure_value(expr);
-                (Some(block), val)
+                (Some(block), val, true)
             }
             _ => {
                 let val = self.ensure_value(expr);
-                (Some(block), val)
+                (Some(block), val, true)
             }
         }
     }
@@ -751,33 +776,41 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         })
     }
 
-    /// Attempt to lower a function or method call into a call-origin MIR value.
-    fn try_lower_call(&mut self, expr: ExprId) -> Option<ValueId> {
-        let (mut args, arg_exprs, callable) = match expr.data(self.db, self.body) {
-            Partial::Present(Expr::Call(_, call_args)) => {
-                let callable = self.typed_body.callable_expr(expr)?;
+    /// Collect all argument expressions and their lowered values for a call or method call.
+    fn collect_call_args(&mut self, expr: ExprId) -> Option<(Vec<ValueId>, Vec<ExprId>)> {
+        let exprs = self.body.exprs(self.db);
+        let Partial::Present(expr_data) = &exprs[expr] else {
+            return None;
+        };
+        match expr_data {
+            Expr::Call(_, call_args) => {
                 let mut args = Vec::with_capacity(call_args.len());
                 let mut arg_exprs = Vec::with_capacity(call_args.len());
                 for arg in call_args.iter() {
                     arg_exprs.push(arg.expr);
                     args.push(self.ensure_value(arg.expr));
                 }
-                (args, arg_exprs, callable)
+                Some((args, arg_exprs))
             }
-            Partial::Present(Expr::MethodCall(receiver, _, _, call_args)) => {
-                let callable = self.typed_body.callable_expr(expr)?;
+            Expr::MethodCall(receiver, _, _, call_args) => {
                 let mut args = Vec::with_capacity(call_args.len() + 1);
                 let mut arg_exprs = Vec::with_capacity(call_args.len() + 1);
-                args.push(self.ensure_value(*receiver));
                 arg_exprs.push(*receiver);
+                args.push(self.ensure_value(*receiver));
                 for arg in call_args.iter() {
                     arg_exprs.push(arg.expr);
                     args.push(self.ensure_value(arg.expr));
                 }
-                (args, arg_exprs, callable)
+                Some((args, arg_exprs))
             }
-            _ => return None,
-        };
+            _ => None,
+        }
+    }
+
+    /// Attempt to lower a function or method call into a call-origin MIR value.
+    fn try_lower_call(&mut self, expr: ExprId) -> Option<ValueId> {
+        let callable = self.typed_body.callable_expr(expr)?;
+        let (mut args, arg_exprs) = self.collect_call_args(expr)?;
 
         let ty = self.typed_body.expr_ty(self.db, expr);
         if let Some(kind) = self.intrinsic_kind(callable.callable_def) {
@@ -938,6 +971,102 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         })
     }
 
+    /// Emit an allocation call for `size_bytes` and register the result as the value for `expr`.
+    fn emit_alloc(&mut self, expr: ExprId, block: BasicBlockId, size_bytes: u64) -> ValueId {
+        let alloc_callable = self.core.make_callable(expr, CoreHelper::Alloc, &[]);
+        let alloc_ret_ty = alloc_callable.ret_ty(self.db);
+        let size_value = self.synthetic_u256(BigUint::from(size_bytes));
+        let alloc_value = self.mir_body.alloc_value(ValueData {
+            ty: alloc_ret_ty,
+            origin: ValueOrigin::Call(CallOrigin {
+                expr,
+                callable: alloc_callable,
+                args: vec![size_value],
+                resolved_name: None,
+            }),
+        });
+        self.mir_body.expr_values.insert(expr, alloc_value);
+        self.push_inst(
+            block,
+            MirInst::EvalExpr {
+                expr,
+                value: alloc_value,
+                bind_value: true,
+            },
+        );
+        alloc_value
+    }
+
+    /// Emit a `store_discriminant` call for a variant index on an allocated enum.
+    fn emit_store_discriminant(
+        &mut self,
+        expr: ExprId,
+        block: BasicBlockId,
+        base_value: ValueId,
+        variant_index: u64,
+    ) {
+        let space_value = self.synthetic_address_space_memory();
+        let store_discr_callable =
+            self.core
+                .make_callable(expr, CoreHelper::StoreDiscriminant, &[]);
+        let discr_value = self.synthetic_u256(BigUint::from(variant_index));
+        let store_ret_ty = store_discr_callable.ret_ty(self.db);
+        let store_discr_call = self.mir_body.alloc_value(ValueData {
+            ty: store_ret_ty,
+            origin: ValueOrigin::Call(CallOrigin {
+                expr,
+                callable: store_discr_callable,
+                args: vec![base_value, space_value, discr_value],
+                resolved_name: None,
+            }),
+        });
+        self.push_inst(
+            block,
+            MirInst::EvalExpr {
+                expr,
+                value: store_discr_call,
+                bind_value: false,
+            },
+        );
+    }
+
+    /// Emit a batch of field/variant stores using the provided helper.
+    fn emit_store_fields(
+        &mut self,
+        expr: ExprId,
+        block: BasicBlockId,
+        base_value: ValueId,
+        stores: &[(u64, TyId<'db>, ValueId)],
+        helper: CoreHelper,
+    ) {
+        if stores.is_empty() {
+            return;
+        }
+        let space_value = self.synthetic_address_space_memory();
+        for (offset_bytes, field_ty, field_value) in stores {
+            let callable = self.core.make_callable(expr, helper, &[*field_ty]);
+            let offset_value = self.synthetic_u256(BigUint::from(*offset_bytes));
+            let store_ret_ty = callable.ret_ty(self.db);
+            let store_call = self.mir_body.alloc_value(ValueData {
+                ty: store_ret_ty,
+                origin: ValueOrigin::Call(CallOrigin {
+                    expr,
+                    callable,
+                    args: vec![base_value, space_value, offset_value, *field_value],
+                    resolved_name: None,
+                }),
+            });
+            self.push_inst(
+                block,
+                MirInst::EvalExpr {
+                    expr,
+                    value: store_call,
+                    bind_value: false,
+                },
+            );
+        }
+    }
+
     /// Lowers a record literal into an `alloc` call followed by `store_field` writes so the
     /// expression evaluates to the concrete pointer returned by `alloc`.
     fn try_lower_record(
@@ -974,63 +1103,18 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return (Some(curr_block), value_id);
         };
 
-        // Emit the call to `alloc(size)` and bind its result so subsequent stores can re-use it.
-        let alloc_callable = self.core.make_callable(expr, CoreHelper::Alloc, &[]);
-        let alloc_ret_ty = alloc_callable.ret_ty(self.db);
-        let size_value = self.synthetic_u256(BigUint::from(size_bytes));
-        let alloc_value = self.mir_body.alloc_value(ValueData {
-            ty: alloc_ret_ty,
-            origin: ValueOrigin::Call(CallOrigin {
-                expr,
-                callable: alloc_callable,
-                args: vec![size_value],
-                resolved_name: None,
-            }),
-        });
-        // Insert the alloc result into expr_values so subsequent uses can find it.
-        // This also serves as the value for this record init expression.
-        self.mir_body.expr_values.insert(expr, alloc_value);
-        let value_id = alloc_value;
-
-        self.push_inst(
-            curr_block,
-            MirInst::EvalExpr {
-                expr,
-                value: alloc_value,
-                bind_value: true,
-            },
-        );
-        let space_value = self.synthetic_address_space_memory();
+        let value_id = self.emit_alloc(expr, curr_block, size_bytes);
 
         // Call `store_field` for every initialized member, re-using the allocated pointer.
+        let mut stores = Vec::with_capacity(lowered_fields.len());
         for (label, field_value) in lowered_fields {
             let field_index = FieldIndex::Ident(label);
             let Some(info) = self.field_access_info(record_ty, field_index) else {
                 continue;
             };
-            let store_callable =
-                self.core
-                    .make_callable(expr, CoreHelper::StoreField, &[info.field_ty]);
-            let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
-            let store_ret_ty = store_callable.ret_ty(self.db);
-            let store_call = self.mir_body.alloc_value(ValueData {
-                ty: store_ret_ty,
-                origin: ValueOrigin::Call(CallOrigin {
-                    expr,
-                    callable: store_callable,
-                    args: vec![value_id, space_value, offset_value, field_value],
-                    resolved_name: None,
-                }),
-            });
-            self.push_inst(
-                curr_block,
-                MirInst::EvalExpr {
-                    expr,
-                    value: store_call,
-                    bind_value: false,
-                },
-            );
+            stores.push((info.offset_bytes, info.field_ty, field_value));
         }
+        self.emit_store_fields(expr, curr_block, value_id, &stores, CoreHelper::StoreField);
 
         (Some(curr_block), value_id)
     }
@@ -1074,87 +1158,24 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return Some((None, value_id));
         };
 
-        // Emit alloc(total_size)
-        let alloc_callable = self.core.make_callable(expr, CoreHelper::Alloc, &[]);
-        let alloc_ret_ty = alloc_callable.ret_ty(self.db);
-        let size_value = self.synthetic_u256(BigUint::from(total_size));
-        let alloc_value = self.mir_body.alloc_value(ValueData {
-            ty: alloc_ret_ty,
-            origin: ValueOrigin::Call(CallOrigin {
-                expr,
-                callable: alloc_callable,
-                args: vec![size_value],
-                resolved_name: None,
-            }),
-        });
-        // The allocated pointer becomes the value for this expression.
-        // We manually insert it into the cache BEFORE push_inst to avoid ensure_value
-        // calling alloc_expr_value which would create a CallOrigin with VariantCtor.
-        self.mir_body.expr_values.insert(expr, alloc_value);
-        let value_id = alloc_value;
-
-        self.push_inst(
-            curr_block,
-            MirInst::EvalExpr {
-                expr,
-                value: alloc_value,
-                bind_value: true,
-            },
-        );
-        let space_value = self.synthetic_address_space_memory();
-
-        // Emit store_discriminant(addr, space, discriminant)
-        let discriminant_value = self.synthetic_u256(BigUint::from(variant_index));
-        let store_discr_callable =
-            self.core
-                .make_callable(expr, CoreHelper::StoreDiscriminant, &[]);
-        let store_discr_ret_ty = store_discr_callable.ret_ty(self.db);
-        let store_discr_call = self.mir_body.alloc_value(ValueData {
-            ty: store_discr_ret_ty,
-            origin: ValueOrigin::Call(CallOrigin {
-                expr,
-                callable: store_discr_callable,
-                args: vec![value_id, space_value, discriminant_value],
-                resolved_name: None,
-            }),
-        });
-        self.push_inst(
-            curr_block,
-            MirInst::EvalExpr {
-                expr,
-                value: store_discr_call,
-                bind_value: false,
-            },
-        );
+        let value_id = self.emit_alloc(expr, curr_block, total_size);
+        self.emit_store_discriminant(expr, curr_block, value_id, variant_index);
 
         // Emit store_variant_field for each argument
         let mut offset: u64 = 0;
+        let mut stores = Vec::with_capacity(lowered_args.len());
         for (i, arg_value) in lowered_args.iter().enumerate() {
             let arg_ty = self.typed_body.expr_ty(self.db, call_args[i].expr);
-            let store_callable =
-                self.core
-                    .make_callable(expr, CoreHelper::StoreVariantField, &[arg_ty]);
-            let offset_value = self.synthetic_u256(BigUint::from(offset));
-            let store_ret_ty = store_callable.ret_ty(self.db);
-            let store_call = self.mir_body.alloc_value(ValueData {
-                ty: store_ret_ty,
-                origin: ValueOrigin::Call(CallOrigin {
-                    expr,
-                    callable: store_callable,
-                    args: vec![value_id, space_value, offset_value, *arg_value],
-                    resolved_name: None,
-                }),
-            });
-            self.push_inst(
-                curr_block,
-                MirInst::EvalExpr {
-                    expr,
-                    value: store_call,
-                    bind_value: false,
-                },
-            );
+            stores.push((offset, arg_ty, *arg_value));
             offset += self.ty_size_bytes(arg_ty).unwrap_or(32);
         }
+        self.emit_store_fields(
+            expr,
+            curr_block,
+            value_id,
+            &stores,
+            CoreHelper::StoreVariantField,
+        );
 
         Some((Some(curr_block), value_id))
     }
@@ -1172,13 +1193,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         };
         let path = path.to_opt()?;
         let scope = self.typed_body.body()?.scope();
-        let Ok(PathRes::EnumVariant(variant)) = resolve_path(
-            self.db,
-            path,
-            scope,
-            PredicateListId::empty_list(self.db),
-            false,
-        ) else {
+        let Some(variant) = self.resolve_enum_variant(path, scope) else {
             return None;
         };
 
@@ -1195,55 +1210,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         let curr_block = block;
 
-        // Emit alloc(enum_size) and bind result
-        let alloc_callable = self.core.make_callable(expr, CoreHelper::Alloc, &[]);
-        let alloc_ret_ty = alloc_callable.ret_ty(self.db);
-        let size_value = self.synthetic_u256(BigUint::from(enum_size));
-        let alloc_value = self.mir_body.alloc_value(ValueData {
-            ty: alloc_ret_ty,
-            origin: ValueOrigin::Call(CallOrigin {
-                expr,
-                callable: alloc_callable,
-                args: vec![size_value],
-                resolved_name: None,
-            }),
-        });
-        self.mir_body.expr_values.insert(expr, alloc_value);
-        let value_id = alloc_value;
-
-        self.push_inst(
-            curr_block,
-            MirInst::EvalExpr {
-                expr,
-                value: alloc_value,
-                bind_value: true,
-            },
-        );
-
-        // Emit store_discriminant(addr, space, discriminant)
-        let space_value = self.synthetic_address_space_memory();
-        let store_discr_callable =
-            self.core
-                .make_callable(expr, CoreHelper::StoreDiscriminant, &[]);
-        let discr_value = self.synthetic_u256(BigUint::from(variant_index));
-        let store_ret_ty = store_discr_callable.ret_ty(self.db);
-        let store_discr_call = self.mir_body.alloc_value(ValueData {
-            ty: store_ret_ty,
-            origin: ValueOrigin::Call(CallOrigin {
-                expr,
-                callable: store_discr_callable,
-                args: vec![value_id, space_value, discr_value],
-                resolved_name: None,
-            }),
-        });
-        self.push_inst(
-            curr_block,
-            MirInst::EvalExpr {
-                expr,
-                value: store_discr_call,
-                bind_value: false,
-            },
-        );
+        let value_id = self.emit_alloc(expr, curr_block, enum_size);
+        self.emit_store_discriminant(expr, curr_block, value_id, variant_index);
 
         Some((Some(curr_block), value_id))
     }
@@ -1277,28 +1245,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return None;
         }
 
-        let exprs = self.body.exprs(self.db);
-        let Partial::Present(expr_data) = &exprs[expr] else {
-            return None;
-        };
-
-        let mut args = Vec::new();
-        match expr_data {
-            Expr::Call(_, call_args) => {
-                args.reserve(call_args.len());
-                for arg in call_args.iter() {
-                    args.push(self.ensure_value(arg.expr));
-                }
-            }
-            Expr::MethodCall(receiver, _, _, call_args) => {
-                args.reserve(call_args.len() + 1);
-                args.push(self.ensure_value(*receiver));
-                for arg in call_args.iter() {
-                    args.push(self.ensure_value(arg.expr));
-                }
-            }
-            _ => return None,
-        }
+        let (args, _) = self.collect_call_args(expr)?;
         Some((op, args))
     }
 
@@ -1717,33 +1664,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 }
                 (next_block, None)
             }
-            Expr::Block(stmts) => {
-                let next_block = self.lower_block(block, expr, stmts);
-                let value_id = self.ensure_value(expr);
-                (next_block, Some(value_id))
-            }
-            Expr::Match(scrutinee, arms) => {
-                if let Partial::Present(arms) = arms {
-                    // Expression-position match: re-use the same lowering so we can produce a value.
-                    if let Some(mut patterns) = self.match_arm_patterns(arms) {
-                        let (next_block, value_id) =
-                            self.lower_match_expr(block, expr, *scrutinee, arms, &mut patterns);
-                        return (next_block, Some(value_id));
-                    }
-                }
-                let value_id = self.ensure_value(expr);
-                self.push_inst(
-                    block,
-                    MirInst::Eval {
-                        stmt: stmt_id,
-                        value: value_id,
-                    },
-                );
-                (Some(block), Some(value_id))
-            }
             _ => {
-                // Try to lower variant constructor calls first (they need to emit multiple instructions)
-                if let Some((next_block, value_id)) = self.try_lower_variant_ctor(block, expr) {
+                let (next_block, value_id, push_eval) = self.lower_expr_core(block, expr);
+                if push_eval {
                     if let Some(curr_block) = next_block {
                         self.push_inst(
                             curr_block,
@@ -1753,17 +1676,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                             },
                         );
                     }
-                    return (next_block, Some(value_id));
                 }
-                let value_id = self.ensure_value(expr);
-                self.push_inst(
-                    block,
-                    MirInst::Eval {
-                        stmt: stmt_id,
-                        value: value_id,
-                    },
-                );
-                (Some(block), Some(value_id))
+                (next_block, Some(value_id))
             }
         }
     }
