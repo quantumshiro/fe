@@ -75,37 +75,33 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         self.populate_enum_binding_values(patterns, scrutinee_value, match_expr);
 
-        // For enum scrutinees, switch on the in-memory discriminant instead of the heap pointer.
+        // For enum scrutinees, always switch on the in-memory discriminant instead of the heap
+        // pointer, even for payload-less enums.
         let discr_value = if patterns
             .iter()
             .any(|pat| matches!(pat, MatchArmPattern::Enum { .. }))
         {
             let scrut_ty = self.typed_body.expr_ty(self.db, scrutinee);
-            if let TyData::TyBase(TyBase::Adt(adt_def)) = scrut_ty.data(self.db)
+            let (base_ty, _) = scrut_ty.decompose_ty_app(self.db);
+            let is_address_space = base_ty == self.core.helper_ty(CoreHelperTy::AddressSpace);
+            if let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db)
                 && matches!(adt_def.adt_ref(self.db), AdtRef::Enum(_))
+                && !is_address_space
             {
-                let has_payload = adt_def
-                    .fields(self.db)
-                    .iter()
-                    .any(|variant| variant.num_types() > 0);
-                if has_payload {
-                    let callable =
-                        self.core
-                            .make_callable(match_expr, CoreHelper::GetDiscriminant, &[]);
-                    let space_value = self.synthetic_address_space_memory();
-                    let ty = callable.ret_ty(self.db);
-                    self.mir_body.alloc_value(ValueData {
-                        ty,
-                        origin: ValueOrigin::Call(CallOrigin {
-                            expr: match_expr,
-                            callable,
-                            args: vec![scrutinee_value, space_value],
-                            resolved_name: None,
-                        }),
-                    })
-                } else {
-                    discr_value
-                }
+                let callable =
+                    self.core
+                        .make_callable(match_expr, CoreHelper::GetDiscriminant, &[]);
+                let space_value = self.synthetic_address_space_memory();
+                let ty = callable.ret_ty(self.db);
+                self.mir_body.alloc_value(ValueData {
+                    ty,
+                    origin: ValueOrigin::Call(CallOrigin {
+                        expr: match_expr,
+                        callable,
+                        args: vec![scrutinee_value, space_value],
+                        resolved_name: None,
+                    }),
+                })
             } else {
                 discr_value
             }
