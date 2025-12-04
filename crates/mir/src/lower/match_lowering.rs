@@ -36,6 +36,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         for arm in arms {
             let arm_entry = self.alloc_block();
             let (arm_end, _) = self.lower_expr_in(arm_entry, arm.body);
+            let terminates = arm_end.is_none();
             if let Some(end_block) = arm_end {
                 let merge = match merge_block {
                     Some(block) => block,
@@ -47,13 +48,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 };
                 self.set_terminator(end_block, Terminator::Goto { target: merge });
             }
-            arm_blocks.push(arm_entry);
+            arm_blocks.push((arm_entry, terminates));
         }
 
         let mut targets = Vec::new();
         let mut default_block = None;
         for (idx, pattern) in patterns.iter().enumerate() {
-            let block_id = arm_blocks[idx];
+            let (block_id, _) = arm_blocks[idx];
             match pattern {
                 MatchArmPattern::Literal(value) => targets.push(SwitchTarget {
                     value: value.clone(),
@@ -122,16 +123,22 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let arms_info = arms
             .iter()
             .zip(patterns.iter())
-            .map(|(arm, pattern)| MatchArmLowering {
-                pattern: pattern.clone(),
-                body: arm.body,
-            })
+            .zip(arm_blocks.iter())
+            .map(
+                |((arm, pattern), (block_id, terminates))| MatchArmLowering {
+                    pattern: pattern.clone(),
+                    body: arm.body,
+                    block: *block_id,
+                    terminates: *terminates,
+                },
+            )
             .collect();
 
         self.mir_body.match_info.insert(
             match_expr,
             MatchLoweringInfo {
                 scrutinee: scrutinee_value,
+                merge_block,
                 arms: arms_info,
             },
         );
