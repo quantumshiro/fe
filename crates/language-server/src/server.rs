@@ -13,7 +13,7 @@ use async_lsp::lsp_types::notification::{
 
 use async_lsp::lsp_types::request::{
     DocumentHighlightRequest, Formatting, GotoDefinition, GotoTypeDefinition, HoverRequest,
-    References, Rename, SemanticTokensFullRequest, Shutdown,
+    InlayHintRequest, References, Rename, SemanticTokensFullRequest, Shutdown,
 };
 use async_std::stream::StreamExt;
 use futures_batch::ChunksTimeoutStreamExt;
@@ -23,7 +23,7 @@ use tracing::{info, warn};
 
 use crate::backend::Backend;
 use crate::functionality::{
-    goto, handlers, highlight, references, rename, semantic_tokens, type_definition,
+    goto, handlers, highlight, inlay_hints, references, rename, semantic_tokens, type_definition,
 };
 use async_lsp::lsp_types::request::Initialize;
 use async_lsp::router::Router;
@@ -59,6 +59,7 @@ pub(crate) fn setup(
         .handle_request::<Rename>(rename::handle_rename)
         .handle_request::<SemanticTokensFullRequest>(semantic_tokens::handle_semantic_tokens_full)
         .handle_request::<Formatting>(handlers::handle_formatting)
+        .handle_request::<InlayHintRequest>(inlay_hints::handle_inlay_hints)
         .handle_notification::<DidOpenTextDocument>(handlers::handle_did_open_text_document)
         .handle_notification::<DidChangeTextDocument>(handlers::handle_did_change_text_document)
         .handle_notification::<DidChangeWatchedFiles>(handlers::handle_did_change_watched_files)
