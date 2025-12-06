@@ -18,11 +18,8 @@ use super::{FieldAccessView, MethodCallView, PathId, PathView, ReferenceView, Us
 pub(super) struct ReferenceCollector<'db> {
     db: &'db dyn HirDb,
     pub refs: Vec<ReferenceView<'db>>,
-    /// Current body context (set during body traversal)
     current_body: Option<Body<'db>>,
-    /// Current use item context (set during use traversal)
     current_use: Option<Use<'db>>,
-    /// Whether to skip body traversal (for signature-only collection)
     skip_body: bool,
 }
 
@@ -51,9 +48,8 @@ impl<'db> ReferenceCollector<'db> {
 impl<'db> Visitor<'db> for ReferenceCollector<'db> {
     fn visit_path(&mut self, ctxt: &mut VisitorCtxt<'db, LazyPathSpan<'db>>, path: PathId<'db>) {
         if let Some(span) = ctxt.span() {
-            let scope = ctxt.scope();
             self.refs
-                .push(ReferenceView::Path(PathView::new(path, scope, span)));
+                .push(ReferenceView::Path(PathView::new(path, ctxt.scope(), span)));
         }
         walk_path(self, ctxt, path);
     }
