@@ -1329,7 +1329,6 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let ty = match record_like {
             RecordLike::Type(ty) => *ty,
             RecordLike::EnumVariant(variant) => variant.ty,
-            RecordLike::MsgVariant(variant) => variant.ty,
         };
         let field_types = ty.field_types(self.db);
         if idx >= field_types.len() {
@@ -1349,7 +1348,6 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let ty = match record_like {
             RecordLike::Type(ty) => *ty,
             RecordLike::EnumVariant(variant) => variant.ty,
-            RecordLike::MsgVariant(variant) => variant.ty,
         };
         let field_types = ty.field_types(self.db);
 

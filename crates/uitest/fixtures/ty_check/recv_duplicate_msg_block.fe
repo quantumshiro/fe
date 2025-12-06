@@ -1,6 +1,7 @@
 // Multiple recv blocks for the same msg type are not allowed
 
 msg BankMsg {
+    #[selector = 0x01]
     Deposit,
 }
 

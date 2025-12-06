@@ -20,6 +20,7 @@ use crate::{
     },
     span::HirOrigin,
 };
+pub use item::{SelectorError, SelectorErrorKind};
 pub use parse::parse_file_impl;
 
 pub(crate) mod parse;

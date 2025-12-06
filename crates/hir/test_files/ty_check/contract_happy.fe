@@ -24,6 +24,8 @@ pub contract Bank {
 }
 
 msg BankMsg {
+    #[selector = 0x01]
     Withdraw { amount: u64 } -> bool,
+    #[selector = 0x02]
     Deposit { amount: u64 } -> u64,
 }

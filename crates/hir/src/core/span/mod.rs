@@ -5,7 +5,7 @@ use salsa::Update;
 use crate::{
     HirDb, SpannedHirDb,
     core::hir_def::{
-        Body, Const, Contract, Enum, Func, Impl, ImplTrait, Mod, Msg, Struct, TopLevelMod, Trait,
+        Body, Const, Contract, Enum, Func, Impl, ImplTrait, Mod, Struct, TopLevelMod, Trait,
         TypeAlias, Use,
     },
     core::lower::top_mod_ast,
@@ -41,7 +41,6 @@ pub mod lazy_spans {
             LazyBodySpan, LazyConstSpan, LazyContractRecvSpan, LazyContractSpan, LazyEnumSpan,
             LazyFieldDefListSpan, LazyFieldDefSpan, LazyFuncSignatureSpan, LazyFuncSpan,
             LazyImplSpan, LazyImplTraitSpan, LazyItemModifierSpan, LazyItemSpan, LazyModSpan,
-            LazyMsgSpan, LazyMsgVariantListSpan, LazyMsgVariantParamsSpan, LazyMsgVariantSpan,
             LazyRecvArmListSpan, LazyRecvArmSpan, LazyStructSpan, LazyTopModSpan, LazyTraitSpan,
             LazyTypeAliasSpan, LazyUseSpan, LazyVariantDefListSpan, LazyVariantDefSpan,
         },
@@ -126,10 +125,6 @@ pub fn contract_ast<'db>(
     db: &'db dyn SpannedHirDb,
     item: Contract<'db>,
 ) -> &'db HirOrigin<ast::Contract> {
-    item.origin(db)
-}
-
-pub fn msg_ast<'db>(db: &'db dyn SpannedHirDb, item: Msg<'db>) -> &'db HirOrigin<ast::Msg> {
     item.origin(db)
 }
 
@@ -237,6 +232,32 @@ pub enum DesugaredOrigin {
     /// The HIR node is the result of desugaring a AST use.
     /// In HIR lowering, nested use tree is flattened into a single use path.
     Use(UseDesugared),
+    /// The HIR node is the result of desugaring a `msg` block.
+    /// `msg` blocks are desugared into modules containing structs and trait impls.
+    Msg(MsgDesugared),
+}
+
+/// Tracks the origin of HIR nodes desugared from a `msg` block.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MsgDesugared {
+    /// The original `msg` AST node.
+    pub msg: AstPtr<ast::Msg>,
+    /// If this is a desugared variant, the index of the variant.
+    pub variant_idx: Option<usize>,
+    /// Which part of the msg/variant to point to.
+    pub focus: MsgDesugaredFocus,
+}
+
+/// Specifies which part of a desugared msg block to point to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum MsgDesugaredFocus {
+    /// Point to the entire msg block (or variant if variant_idx is set).
+    #[default]
+    Block,
+    /// Point to the variant name.
+    VariantName,
+    /// Point to the selector attribute value (if any).
+    Selector,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

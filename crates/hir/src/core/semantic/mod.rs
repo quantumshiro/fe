@@ -2056,23 +2056,13 @@ impl<'db> FieldView<'db> {
 
     /// Returns the semantic type of this field.
     pub fn ty(self, db: &'db dyn HirAnalysisDb) -> TyId<'db> {
-        match self.parent {
-            FieldParent::Struct(_) | FieldParent::Contract(_) | FieldParent::Variant(_) => {
-                let (adt_field, idx) = self.as_adt_field(db);
-                *adt_field.ty(db, idx).skip_binder()
-            }
-            FieldParent::MsgVariant(_) => TyId::invalid(db, InvalidCause::Other),
-        }
+        let (adt_field, idx) = self.as_adt_field(db);
+        *adt_field.ty(db, idx).skip_binder()
     }
 
     /// Returns the semantic ADT field-set and index for this field.
     pub fn as_adt_field(self, db: &'db dyn HirAnalysisDb) -> (&'db AdtField<'db>, usize) {
-        match self.parent {
-            FieldParent::Struct(_) | FieldParent::Contract(_) | FieldParent::Variant(_) => {
-                (self.parent.as_adt_fields(db), self.idx)
-            }
-            FieldParent::MsgVariant(_) => unreachable!("message variants do not form ADTs"),
-        }
+        (self.parent.as_adt_fields(db), self.idx)
     }
 
     pub fn ty_span(self) -> crate::span::DynLazySpan<'db> {
@@ -2080,7 +2070,6 @@ impl<'db> FieldView<'db> {
             FieldParent::Struct(s) => s.span().fields().field(self.idx).ty().into(),
             FieldParent::Contract(c) => c.span().fields().field(self.idx).ty().into(),
             FieldParent::Variant(v) => v.span().fields().field(self.idx).ty().into(),
-            FieldParent::MsgVariant(v) => v.span().params().param(self.idx).ty().into(),
         }
     }
 
@@ -2090,7 +2079,6 @@ impl<'db> FieldView<'db> {
             FieldParent::Struct(s) => s.span().fields().field(self.idx).ty(),
             FieldParent::Contract(c) => c.span().fields().field(self.idx).ty(),
             FieldParent::Variant(v) => v.span().fields().field(self.idx).ty(),
-            FieldParent::MsgVariant(v) => v.span().params().param(self.idx).ty(),
         }
     }
 
@@ -2100,7 +2088,6 @@ impl<'db> FieldView<'db> {
             FieldParent::Struct(s) => s.scope(),
             FieldParent::Contract(c) => c.scope(),
             FieldParent::Variant(v) => v.enum_.scope(),
-            FieldParent::MsgVariant(v) => v.msg.scope(),
         }
     }
 
@@ -2110,7 +2097,6 @@ impl<'db> FieldView<'db> {
             FieldParent::Struct(s) => ItemKind::Struct(s),
             FieldParent::Contract(c) => ItemKind::Contract(c),
             FieldParent::Variant(v) => ItemKind::Enum(v.enum_),
-            FieldParent::MsgVariant(v) => ItemKind::Msg(v.msg),
         }
     }
 
@@ -2214,9 +2200,6 @@ impl<'db> FieldParent<'db> {
             FieldParent::Struct(s) => &s.as_adt(db).fields(db)[0],
             FieldParent::Contract(c) => &c.as_adt(db).fields(db)[0],
             FieldParent::Variant(v) => v.as_adt_fields(db),
-            FieldParent::MsgVariant(_) => {
-                panic!("message variants are not represented as ADTs yet")
-            }
         }
     }
 }

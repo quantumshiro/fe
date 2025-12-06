@@ -4,10 +4,10 @@ expression: diags
 input_file: fixtures/ty_check/recv_duplicate_msg_block.fe
 ---
 error[8-0046]: duplicate recv block
-   ┌─ recv_duplicate_msg_block.fe:14:10
+   ┌─ recv_duplicate_msg_block.fe:15:10
    │
-10 │     recv BankMsg {
+11 │     recv BankMsg {
    │          ------- first declared here
    ·
-14 │     recv BankMsg {
+15 │     recv BankMsg {
    │          ^^^^^^^ duplicate recv block for `BankMsg`

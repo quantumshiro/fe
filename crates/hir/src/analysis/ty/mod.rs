@@ -20,6 +20,7 @@ pub mod adt_def;
 pub mod binder;
 pub mod canonical;
 pub mod const_ty;
+pub mod corelib;
 
 pub mod decision_tree;
 pub mod diagnostics;
@@ -54,8 +55,7 @@ impl ModuleAnalysisPass for AdtDefAnalysisPass {
             .copied()
             .map(AdtRef::from)
             .chain(top_mod.all_enums(db).iter().copied().map(AdtRef::from))
-            .chain(top_mod.all_contracts(db).iter().copied().map(AdtRef::from))
-            .chain(top_mod.all_msgs(db).iter().copied().map(AdtRef::from));
+            .chain(top_mod.all_contracts(db).iter().copied().map(AdtRef::from));
 
         let mut diags = vec![];
         let mut cycle_participants = FxHashSet::<AdtDef<'db>>::default();
@@ -117,7 +117,6 @@ fn walk<'db>(
                 | ItemKind::Struct(_)
                 | ItemKind::Contract(_)
                 | ItemKind::Enum(_)
-                | ItemKind::Msg(_)
                 | ItemKind::TypeAlias(_)
                 | ItemKind::Trait(_) => Domain::Type,
 

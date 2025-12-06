@@ -5,11 +5,9 @@ use crate::analysis::{
         ty_lower::{GenericParamTypeSet, collect_generic_params},
     },
 };
-use crate::core::hir_def::{
-    FieldDefListId, MsgVariantListId, VariantDefListId, VariantKind, scope_graph::ScopeId,
-};
+use crate::core::hir_def::{FieldDefListId, VariantDefListId, VariantKind, scope_graph::ScopeId};
 
-/// Lower HIR ADT definition (`struct/enum/contract/msg`) to [`AdtDef`].
+/// Lower HIR ADT definition (`struct/enum/contract`) to [`AdtDef`].
 #[salsa::tracked]
 pub(crate) fn lower_adt<'db>(db: &'db dyn HirAnalysisDb, adt: AdtRef<'db>) -> AdtDef<'db> {
     let scope = adt.scope();
@@ -26,10 +24,6 @@ pub(crate) fn lower_adt<'db>(db: &'db dyn HirAnalysisDb, adt: AdtRef<'db>) -> Ad
         AdtRef::Enum(e) => (
             collect_generic_params(db, e.into()),
             collect_enum_variant_types(db, scope, e.variants_list(db)),
-        ),
-        AdtRef::Msg(m) => (
-            GenericParamTypeSet::empty(db, scope),
-            collect_msg_variant_types(db, scope, m.variants(db)),
         ),
     };
 
@@ -61,26 +55,6 @@ fn collect_enum_variant_types<'db>(
                 }
                 VariantKind::Unit => vec![],
             };
-            AdtField::new(tys, scope)
-        })
-        .collect()
-}
-
-fn collect_msg_variant_types<'db>(
-    db: &'db dyn HirAnalysisDb,
-    scope: ScopeId<'db>,
-    variants: MsgVariantListId<'db>,
-) -> Vec<AdtField<'db>> {
-    variants
-        .data(db)
-        .iter()
-        .map(|variant| {
-            let tys = variant
-                .params
-                .data(db)
-                .iter()
-                .map(|field| field.type_ref)
-                .collect();
             AdtField::new(tys, scope)
         })
         .collect()

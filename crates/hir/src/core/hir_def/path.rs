@@ -32,6 +32,16 @@ impl<'db> PathId<'db> {
         )
     }
 
+    pub fn from_segments(db: &'db dyn HirDb, segments: &[&str]) -> Self {
+        debug_assert!(!segments.is_empty());
+        let mut segs = segments.iter();
+        let mut path = PathId::from_ident(db, IdentId::new(db, segs.next().unwrap().to_string()));
+        for s in segs {
+            path = path.push_ident(db, IdentId::new(db, s.to_string()));
+        }
+        path
+    }
+
     pub fn self_ty(db: &'db dyn HirDb, args: GenericArgListId<'db>) -> Self {
         Self::new(
             db,

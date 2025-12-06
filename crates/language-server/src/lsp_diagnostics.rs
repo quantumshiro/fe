@@ -4,7 +4,7 @@ use codespan_reporting::files as cs_files;
 use common::{diagnostics::CompleteDiagnostic, file::File};
 use driver::DriverDataBase;
 use hir::Ingot;
-use hir::analysis::analysis_pass::{AnalysisPassManager, ParsingPass};
+use hir::analysis::analysis_pass::{AnalysisPassManager, MsgLowerPass, ParsingPass};
 use hir::analysis::name_resolution::ImportAnalysisPass;
 use hir::analysis::ty::{
     AdtDefAnalysisPass, BodyAnalysisPass, DefConflictAnalysisPass, FuncAnalysisPass,
@@ -123,6 +123,7 @@ impl<'a> cs_files::Files<'a> for LspDb<'a> {
 fn initialize_analysis_pass() -> AnalysisPassManager {
     let mut pass_manager = AnalysisPassManager::new();
     pass_manager.add_module_pass(Box::new(ParsingPass {}));
+    pass_manager.add_module_pass(Box::new(MsgLowerPass {}));
     pass_manager.add_module_pass(Box::new(DefConflictAnalysisPass {}));
     pass_manager.add_module_pass(Box::new(ImportAnalysisPass {}));
     pass_manager.add_module_pass(Box::new(AdtDefAnalysisPass {}));

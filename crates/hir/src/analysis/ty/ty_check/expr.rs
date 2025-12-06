@@ -1,6 +1,3 @@
-use std::panic;
-
-use common::ingot::IngotKind;
 use either::Either;
 
 use crate::core::hir_def::{
@@ -17,6 +14,7 @@ use super::{
 use crate::analysis::ty::{
     binder::Binder,
     canonical::Canonicalized,
+    corelib::resolve_core_trait,
     diagnostics::{BodyDiag, FuncBodyDiag},
     fold::{AssocTySubst, TyFoldable as _},
     trait_def::TraitInstId,
@@ -35,7 +33,7 @@ use crate::analysis::{
         diagnostics::PathResDiag,
         is_scope_visible_from,
         method_selection::{MethodCandidate, MethodSelectionError, select_method_candidate},
-        resolve_ident_to_bucket, resolve_name_res, resolve_path, resolve_query,
+        resolve_name_res, resolve_path, resolve_query,
     },
     ty::{
         const_ty::ConstTyId,
@@ -703,14 +701,6 @@ impl<'db> TyChecker<'db> {
 
                     ExprProp::new(self.table.instantiate_to_term(ty), true)
                 }
-                PathRes::MsgVariant(_variant) => {
-                    let diag = BodyDiag::NotValue {
-                        primary: path_expr_span.clone().into(),
-                        given: Either::Left(self.env.body().top_mod(self.db).into()),
-                    };
-                    self.push_diag(diag);
-                    ExprProp::invalid(self.db)
-                }
                 PathRes::Const(_, ty) => ExprProp::new(ty, true),
                 PathRes::Method(receiver_ty, candidate) => {
                     let canonical_r_ty = Canonicalized::new(self.db, receiver_ty);
@@ -828,19 +818,6 @@ impl<'db> TyChecker<'db> {
             PathRes::EnumVariant(variant) => {
                 let ty = variant.ty;
                 let record_like = RecordLike::from_variant(variant);
-                if record_like.is_record(self.db) {
-                    self.check_record_init_fields(&record_like, expr);
-                    ExprProp::new(ty, true)
-                } else {
-                    let diag = BodyDiag::record_expected(self.db, span.path().into(), None);
-                    self.push_diag(diag);
-
-                    ExprProp::invalid(self.db)
-                }
-            }
-            PathRes::MsgVariant(variant) => {
-                let ty = variant.ty;
-                let record_like = RecordLike::from_msg_variant(variant);
                 if record_like.is_record(self.db) {
                     self.check_record_init_fields(&record_like, expr);
                     ExprProp::new(ty, true)
@@ -988,36 +965,6 @@ impl<'db> TyChecker<'db> {
 
         let ty = TyId::tuple_with_elems(self.db, &elem_tys);
         ExprProp::new(ty, true)
-    }
-
-    fn resolve_core_trait(
-        &self,
-        trait_path: PathId<'db>,
-    ) -> Option<crate::core::hir_def::Trait<'db>> {
-        let scope = self.env.scope();
-        let assumptions = self.env.assumptions();
-        let mut module_path = trait_path.parent(self.db)?;
-
-        // If we are inside the core ingot, replace `core` with `ingot` in the trait path.
-        let ingot = self.env.body().top_mod(self.db).ingot(self.db);
-        if ingot.kind(self.db) == IngotKind::Core && trait_path.is_core_lib_path(self.db) {
-            module_path = module_path.replace_root(
-                IdentId::make_core(self.db),
-                IdentId::make_ingot(self.db),
-                self.db,
-            );
-        }
-        let trait_name = trait_path.ident(self.db).to_opt()?;
-        let Ok(PathRes::Mod(mod_scope)) =
-            resolve_path(self.db, module_path, scope, assumptions, false)
-        else {
-            return None;
-        };
-
-        let bucket =
-            resolve_ident_to_bucket(self.db, PathId::from_ident(self.db, trait_name), mod_scope);
-        let nameres = bucket.pick(NameDomain::TYPE).as_ref().ok()?;
-        nameres.trait_()
     }
 
     fn check_array(
@@ -1245,9 +1192,7 @@ impl<'db> TyChecker<'db> {
         op: &dyn TraitOps,
         rhs_expr: Option<ExprId>,
     ) -> ExprProp<'db> {
-        let Some(trait_def) = self.resolve_core_trait(op.trait_path(self.db)) else {
-            panic!("failed to resolve core::ops trait");
-        };
+        let trait_def = resolve_core_trait(self.db, self.env.scope(), &op.trait_path_segments());
 
         let c_lhs_ty = Canonicalized::new(self.db, lhs_ty);
 
@@ -1599,42 +1544,43 @@ fn resolve_ident_expr<'db>(
 /// TODO: We need to refine this trait definition to connect core library traits
 /// smoothly.
 pub(crate) trait TraitOps {
-    fn trait_path<'db>(&self, db: &'db dyn HirAnalysisDb) -> PathId<'db> {
-        let path = core_ops_path(db);
-        path.push_ident(db, self.trait_name(db))
+    fn trait_path_segments(&self) -> [&str; 2] {
+        ["ops", self.triple()[0]]
     }
 
-    fn trait_name<'db>(&self, db: &'db dyn HirAnalysisDb) -> IdentId<'db> {
-        self.triple(db)[0]
+    fn core_trait_path<'db>(&self, db: &'db dyn HirAnalysisDb) -> PathId<'db> {
+        let mut path = PathId::from_ident(db, IdentId::new(db, "core".to_string()));
+        for s in self.trait_path_segments() {
+            path = path.push_ident(db, IdentId::new(db, s.to_string()));
+        }
+        path
     }
 
     fn trait_method<'db>(&self, db: &'db dyn HirAnalysisDb) -> IdentId<'db> {
-        self.triple(db)[1]
+        IdentId::new(db, self.triple()[1].to_string())
     }
 
     fn op_symbol<'db>(&self, db: &'db dyn HirAnalysisDb) -> IdentId<'db> {
-        self.triple(db)[2]
+        IdentId::new(db, self.triple()[2].to_string())
     }
 
-    fn triple<'db>(&self, db: &'db dyn HirAnalysisDb) -> [IdentId<'db>; 3];
+    fn triple(&self) -> [&str; 3];
 }
 
 impl TraitOps for UnOp {
-    fn triple<'db>(&self, db: &'db dyn HirAnalysisDb) -> [IdentId<'db>; 3] {
-        let triple = match self {
+    fn triple(&self) -> [&str; 3] {
+        match self {
             UnOp::Plus => ["UnaryPlus", "add", "+"],
             UnOp::Minus => ["Neg", "neg", "-"],
             UnOp::Not => ["Not", "not", "!"],
             UnOp::BitNot => ["BitNot", "bit_not", "~"],
-        };
-
-        triple.map(|s| IdentId::new(db, s.to_string()))
+        }
     }
 }
 
 impl TraitOps for BinOp {
-    fn triple<'db>(&self, db: &'db dyn HirAnalysisDb) -> [IdentId<'db>; 3] {
-        let triple = match self {
+    fn triple(&self) -> [&str; 3] {
+        match self {
             BinOp::Arith(arith_op) => {
                 use ArithBinOp::*;
 
@@ -1672,9 +1618,7 @@ impl TraitOps for BinOp {
             }
 
             BinOp::Index => ["Index", "index", "[]"],
-        };
-
-        triple.map(|s| IdentId::new(db, s.to_string()))
+        }
     }
 }
 
@@ -1682,9 +1626,9 @@ impl TraitOps for BinOp {
 struct AugAssignOp(ArithBinOp);
 
 impl TraitOps for AugAssignOp {
-    fn triple<'db>(&self, db: &'db dyn HirAnalysisDb) -> [IdentId<'db>; 3] {
+    fn triple(&self) -> [&str; 3] {
         use ArithBinOp::*;
-        let triple = match self.0 {
+        match self.0 {
             Add => ["AddAssign", "add_assign", "+="],
             Sub => ["SubAssign", "sub_assign", "-="],
             Mul => ["MulAssign", "mul_assign", "*="],
@@ -1696,14 +1640,6 @@ impl TraitOps for AugAssignOp {
             BitAnd => ["BitAndAssign", "bitand_assign", "&="],
             BitOr => ["BitOrAssign", "bitor_assign", "|="],
             BitXor => ["BitXorAssign", "bitxor_assign", "^="],
-        };
-
-        triple.map(|s| IdentId::new(db, s.to_string()))
+        }
     }
-}
-
-fn core_ops_path(db: &dyn HirAnalysisDb) -> PathId<'_> {
-    let core = IdentId::new(db, "core".to_string());
-    let ops_ = IdentId::new(db, "ops".to_string());
-    PathId::from_ident(db, core).push_ident(db, ops_)
 }

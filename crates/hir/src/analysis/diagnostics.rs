@@ -97,6 +97,92 @@ impl DiagnosticVoucher for ParserError {
     }
 }
 
+impl DiagnosticVoucher for crate::SelectorError {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        use crate::SelectorErrorKind;
+
+        let primary_span = Span::new(self.file, self.primary_range, SpanKind::Original);
+
+        let (code, message, label, notes, secondary) = match &self.kind {
+            SelectorErrorKind::Overflow => (
+                1,
+                format!(
+                    "selector value overflows u32 for msg variant `{}`",
+                    self.variant_name
+                ),
+                "selector value exceeds u32::MAX".to_string(),
+                vec!["selector must be a u32 integer".to_string()],
+                None,
+            ),
+            SelectorErrorKind::InvalidType => (
+                2,
+                format!(
+                    "selector must be an integer for msg variant `{}`",
+                    self.variant_name
+                ),
+                "expected integer literal".to_string(),
+                vec!["use an integer literal like `#[selector = 0x01]`".to_string()],
+                None,
+            ),
+            SelectorErrorKind::Missing => (
+                3,
+                format!("missing selector for msg variant `{}`", self.variant_name),
+                "no #[selector] attribute found".to_string(),
+                vec!["add a #[selector = <value>] attribute to the variant".to_string()],
+                None,
+            ),
+            SelectorErrorKind::InvalidForm => (
+                5,
+                format!(
+                    "invalid selector attribute form for msg variant `{}`",
+                    self.variant_name
+                ),
+                "expected `#[selector = <value>]` form".to_string(),
+                vec!["use `#[selector = 0x01]` instead of `#[selector(0x01)]`".to_string()],
+                None,
+            ),
+            SelectorErrorKind::Duplicate {
+                first_variant_name,
+                selector,
+            } => (
+                4,
+                "duplicate selector in msg block".to_string(),
+                format!(
+                    "`{}` has selector {:#010x} which conflicts with `{}`",
+                    self.variant_name, selector, first_variant_name
+                ),
+                vec!["each variant in a msg block must have a unique selector".to_string()],
+                self.secondary_range.map(|range| SubDiagnostic {
+                    style: LabelStyle::Secondary,
+                    message: format!(
+                        "`{first_variant_name}` with selector {selector:#010x} declared here"
+                    ),
+                    span: Some(Span::new(self.file, range, SpanKind::Original)),
+                }),
+            ),
+        };
+
+        let error_code = GlobalErrorCode::new(DiagnosticPass::MsgLower, code);
+
+        let mut sub_diagnostics = vec![SubDiagnostic {
+            style: LabelStyle::Primary,
+            message: label,
+            span: Some(primary_span),
+        }];
+        if let Some(sec) = secondary {
+            sub_diagnostics.push(sec);
+        }
+
+        CompleteDiagnostic {
+            severity: Severity::Error,
+            message,
+            sub_diagnostics,
+            notes,
+            error_code,
+        }
+    }
+}
+
 pub trait LazyDiagnostic<'db> {
     fn to_complete(&self, db: &'db dyn SpannedHirAnalysisDb) -> CompleteDiagnostic;
 }
@@ -2445,12 +2531,12 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     error_code,
                 }
             }
-            BodyDiag::RecvArmNotMsgVariant { primary, msg_ty } => {
+            BodyDiag::RecvArmNotMsgVariant { primary, msg_name } => {
                 let sub_diagnostics = vec![SubDiagnostic {
                     style: LabelStyle::Primary,
                     message: format!(
                         "expected variant of `{}`, but pattern doesn't match any variant",
-                        msg_ty.pretty_print(db)
+                        msg_name.data(db)
                     ),
                     span: primary.resolve(db),
                 }];
@@ -2527,9 +2613,9 @@ impl DiagnosticVoucher for BodyDiag<'_> {
             BodyDiag::RecvDuplicateMsgBlock {
                 primary,
                 first_use,
-                msg_ty,
+                msg_name,
             } => {
-                let msg = msg_ty.pretty_print(db);
+                let msg = msg_name.data(db);
                 let sub_diagnostics = vec![
                     SubDiagnostic {
                         style: LabelStyle::Primary,
@@ -2547,6 +2633,39 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     message: "duplicate recv block".to_string(),
                     sub_diagnostics,
                     notes: vec![],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvDuplicateSelector {
+                primary,
+                first_use,
+                selector,
+                first_variant,
+                second_variant,
+            } => {
+                let first = first_variant.data(db);
+                let second = second_variant.data(db);
+                let sub_diagnostics = vec![
+                    SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "`{second}` has selector 0x{selector:08x} which conflicts with `{first}`"
+                        ),
+                        span: primary.resolve(db),
+                    },
+                    SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format!("`{first}` with selector 0x{selector:08x} declared here"),
+                        span: first_use.resolve(db),
+                    },
+                ];
+                CompleteDiagnostic {
+                    severity,
+                    message: "duplicate selector across recv blocks".to_string(),
+                    sub_diagnostics,
+                    notes: vec![
+                        "each msg variant in a contract must have a unique selector".to_string(),
+                    ],
                     error_code,
                 }
             }

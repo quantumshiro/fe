@@ -15,11 +15,11 @@ use super::{
 };
 use crate::{
     hir_def::{
-        Body, Const, Contract, Enum, Func, Impl, ImplTrait, ItemKind, Mod, Msg, Struct,
-        TopLevelMod, Trait, TypeAlias, Use,
+        Body, Const, Contract, Enum, Func, Impl, ImplTrait, ItemKind, Mod, Struct, TopLevelMod,
+        Trait, TypeAlias, Use,
     },
     span::{
-        DesugaredOrigin, DesugaredUseFocus,
+        DesugaredOrigin, DesugaredUseFocus, MsgDesugaredFocus,
         params::LazyTraitRefSpan,
         transition::{LazyArg, LazyTransitionFn, ResolvedOrigin, ResolvedOriginKind},
         use_tree::LazyUsePathSpan,
@@ -116,9 +116,7 @@ impl<'db> LazyFuncSpan<'db> {
 define_lazy_span_node!(
     LazyStructSpan,
     ast::Struct,
-    @token {
-        (name, name),
-    }
+    // Note: `name` is handled specially below to support msg desugared structs
     @node {
         (attributes, attr_list, LazyAttrListSpan),
         (generic_params, generic_params, LazyGenericParamListSpan),
@@ -129,7 +127,32 @@ define_lazy_span_node!(
 );
 impl<'db> LazyStructSpan<'db> {
     pub fn new(s: Struct<'db>) -> Self {
-        Self(crate::span::transition::SpanTransitionChain::new(s))
+        Self(SpanTransitionChain::new(s))
+    }
+
+    /// Returns the span of the struct name.
+    /// For msg-desugared structs, this points to the variant name in the original msg block.
+    pub fn name(mut self) -> LazySpanAtom<'db> {
+        fn f(origin: ResolvedOrigin, _: LazyArg) -> ResolvedOrigin {
+            origin
+                .map(|node| {
+                    ast::Struct::cast(node)
+                        .and_then(|n| n.name())
+                        .map(Into::into)
+                })
+                .map_desugared(|root, desugared| match desugared {
+                    DesugaredOrigin::Msg(mut msg) => {
+                        msg.focus = MsgDesugaredFocus::VariantName;
+                        ResolvedOriginKind::Desugared(root, DesugaredOrigin::Msg(msg))
+                    }
+                    other => ResolvedOriginKind::Desugared(root, other),
+                })
+        }
+        self.0.push(LazyTransitionFn {
+            f,
+            arg: LazyArg::None,
+        });
+        LazySpanAtom(self.0)
     }
 }
 
@@ -143,8 +166,6 @@ define_lazy_span_node!(
         (attributes, attr_list, LazyAttrListSpan),
         (modifier, modifier, LazyItemModifierSpan),
         (effects, uses_clause, LazyUsesClauseSpan),
-        // Contract fields are wrapped in a dedicated AST node `ContractFields`.
-        // Expose them via a specialized span list.
         (fields, fields, LazyContractFieldsSpan),
         (init_block, init_block, LazyContractInitSpan),
     }
@@ -154,53 +175,6 @@ impl<'db> LazyContractSpan<'db> {
         Self(crate::span::transition::SpanTransitionChain::new(c))
     }
 }
-
-define_lazy_span_node!(
-    LazyMsgSpan,
-    ast::Msg,
-    @token {
-        (name, name),
-    }
-    @node {
-        (attributes, attr_list, LazyAttrListSpan),
-        (modifier, modifier, LazyItemModifierSpan),
-        (variants, variants, LazyMsgVariantListSpan),
-    }
-);
-impl<'db> LazyMsgSpan<'db> {
-    pub fn new(m: Msg<'db>) -> Self {
-        Self(crate::span::transition::SpanTransitionChain::new(m))
-    }
-}
-
-define_lazy_span_node!(
-    LazyMsgVariantListSpan,
-    ast::MsgVariantList,
-    @idx {
-        (variant, LazyMsgVariantSpan),
-    }
-);
-
-define_lazy_span_node!(
-    LazyMsgVariantSpan,
-    ast::MsgVariant,
-    @token {
-        (name, name),
-    }
-    @node {
-        (attributes, attr_list, LazyAttrListSpan),
-        (params, params, LazyMsgVariantParamsSpan),
-        (ret_ty, ret_ty, LazyTySpan),
-    }
-);
-
-define_lazy_span_node!(
-    LazyMsgVariantParamsSpan,
-    ast::MsgVariantParams,
-    @idx {
-        (param, LazyFieldDefSpan),
-    }
-);
 
 define_lazy_span_node!(
     LazyEnumSpan,
@@ -382,6 +356,7 @@ impl<'db> LazyUseSpan<'db> {
                         use_.focus = DesugaredUseFocus::Path;
                         ResolvedOriginKind::Desugared(root, DesugaredOrigin::Use(use_))
                     }
+                    DesugaredOrigin::Msg(_) => ResolvedOriginKind::None,
                 })
         }
 
@@ -408,6 +383,7 @@ impl<'db> LazyUseSpan<'db> {
                         use_.focus = DesugaredUseFocus::Alias;
                         ResolvedOriginKind::Desugared(root, DesugaredOrigin::Use(use_))
                     }
+                    DesugaredOrigin::Msg(_) => ResolvedOriginKind::None,
                 })
         }
 

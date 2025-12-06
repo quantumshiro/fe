@@ -10,8 +10,8 @@ use salsa::Update;
 use super::{
     AssocTyDecl, AttrListId, Body, Const, Contract, Enum, EnumVariant, ExprId, FieldDef,
     FieldParent, Func, FuncParam, FuncParamName, GenericParam, IdentId, Impl, ImplTrait, ItemKind,
-    Mod, Msg, MsgVariant, MsgVariantDef, Struct, TopLevelMod, Trait, TypeAlias, Use, VariantDef,
-    VariantKind, Visibility, scope_graph_viz::ScopeGraphFormatter,
+    Mod, Struct, TopLevelMod, Trait, TypeAlias, Use, VariantDef, VariantKind, Visibility,
+    scope_graph_viz::ScopeGraphFormatter,
 };
 use crate::{
     HirDb,
@@ -96,7 +96,6 @@ pub enum ScopeId<'db> {
 
     /// A variant scope.
     Variant(EnumVariant<'db>),
-    MsgVariant(MsgVariant<'db>),
 
     /// A block scope.
     Block(Body<'db>, ExprId),
@@ -112,7 +111,6 @@ impl<'db> ScopeId<'db> {
             ScopeId::FuncParam(item, _) => item.top_mod(db),
             ScopeId::Field(p, _) => p.top_mod(db),
             ScopeId::Variant(v) => v.enum_.top_mod(db),
-            ScopeId::MsgVariant(v) => v.msg.top_mod(db),
             ScopeId::Block(body, _) => body.top_mod(db),
         }
     }
@@ -142,7 +140,6 @@ impl<'db> ScopeId<'db> {
             ScopeId::Field(FieldParent::Struct(s), _) => s.into(),
             ScopeId::Field(FieldParent::Contract(c), _) => c.into(),
             ScopeId::Field(FieldParent::Variant(v), _) | ScopeId::Variant(v) => v.enum_.into(),
-            ScopeId::Field(FieldParent::MsgVariant(v), _) | ScopeId::MsgVariant(v) => v.msg.into(),
             ScopeId::Block(body, _) => body.into(),
         }
     }
@@ -166,10 +163,6 @@ impl<'db> ScopeId<'db> {
             }
             ScopeId::Variant(..) => {
                 let def: &VariantDef = self.resolve_to(db).unwrap();
-                Some(def.attributes)
-            }
-            ScopeId::MsgVariant(..) => {
-                let def: &MsgVariantDef = self.resolve_to(db).unwrap();
                 Some(def.attributes)
             }
             _ => None,
@@ -302,7 +295,6 @@ impl<'db> ScopeId<'db> {
             ScopeId::Item(item) => item.name(db),
 
             ScopeId::Variant(..) => self.resolve_to::<&VariantDef>(db).unwrap().name.to_opt(),
-            ScopeId::MsgVariant(..) => self.resolve_to::<&MsgVariantDef>(db).unwrap().name.to_opt(),
 
             ScopeId::Field(..) => self.resolve_to::<&FieldDef>(db).unwrap().name.to_opt(),
 
@@ -332,7 +324,6 @@ impl<'db> ScopeId<'db> {
             ScopeId::Item(item) => item.name_span(),
 
             ScopeId::Variant(v) => Some(v.span().name().into()),
-            ScopeId::MsgVariant(v) => Some(v.span().name().into()),
 
             ScopeId::Field(p, idx) => Some(p.field_name_span(idx as usize)),
 
@@ -373,7 +364,6 @@ impl<'db> ScopeId<'db> {
             ScopeId::FuncParam(_, _) => "value",
             ScopeId::Field(_, _) => "field",
             ScopeId::Variant(..) => "value",
-            ScopeId::MsgVariant(..) => "value",
             ScopeId::Block(_, _) => "block",
         }
     }
@@ -631,7 +621,6 @@ item_from_scope! {
     Func<'db>,
     Struct<'db>,
     Contract<'db>,
-    Msg<'db>,
     Enum<'db>,
     TypeAlias<'db>,
     Impl<'db>,
@@ -656,7 +645,6 @@ impl<'db> FromScope<'db> for &'db FieldDef<'db> {
                 VariantKind::Record(fields) => Some(&fields.data(db)[idx]),
                 _ => unreachable!(),
             },
-            FieldParent::MsgVariant(v) => Some(&v.def(db).params.data(db)[idx]),
         }
     }
 }
@@ -664,15 +652,6 @@ impl<'db> FromScope<'db> for &'db FieldDef<'db> {
 impl<'db> FromScope<'db> for &'db VariantDef<'db> {
     fn from_scope(scope: ScopeId<'db>, db: &'db dyn HirDb) -> Option<Self> {
         let ScopeId::Variant(v) = scope else {
-            return None;
-        };
-        Some(v.def(db))
-    }
-}
-
-impl<'db> FromScope<'db> for &'db MsgVariantDef<'db> {
-    fn from_scope(scope: ScopeId<'db>, db: &'db dyn HirDb) -> Option<Self> {
-        let ScopeId::MsgVariant(v) = scope else {
             return None;
         };
         Some(v.def(db))
@@ -795,6 +774,7 @@ mod tests {
     fn msg_variant_fields() {
         let mut db = TestDb::default();
 
+        // msg blocks are desugared into modules containing structs and impl MsgVariant
         let text = r#"
             msg Foo {
                 Bar { a: u8, b: u8 } -> bool,
@@ -804,19 +784,30 @@ mod tests {
         let file = db.standalone_file(text);
         let scope_graph = db.parse_source(file);
         let root = scope_graph.top_mod.scope();
-        let msg = scope_graph
+
+        // The msg block becomes a module with #[msg] attribute
+        let msg_mod = scope_graph
             .children(root)
-            .find(|scope| !matches!(scope.item(), ItemKind::Use(use_) if use_.is_prelude_use(&db)))
+            .find(|scope| matches!(scope.item(), ItemKind::Mod(_)))
             .unwrap();
-        assert!(matches!(msg.item(), ItemKind::Msg(_)));
+        assert!(matches!(msg_mod.item(), ItemKind::Mod(_)));
 
-        let variant = scope_graph.children(msg).next().unwrap();
-        assert!(matches!(variant, ScopeId::MsgVariant(..)));
+        // Skip the Use item (prelude) and find the struct
+        let variant_struct = scope_graph
+            .children(msg_mod)
+            .find(|scope| matches!(scope.item(), ItemKind::Struct(_)))
+            .unwrap();
+        assert!(matches!(variant_struct.item(), ItemKind::Struct(_)));
 
-        let field = scope_graph.children(variant).next().unwrap();
-        assert!(matches!(
-            field,
-            ScopeId::Field(FieldParent::MsgVariant(..), _)
-        ));
+        // Check that there's also an ImplTrait for MsgVariant
+        let impl_trait = scope_graph
+            .children(msg_mod)
+            .find(|scope| matches!(scope.item(), ItemKind::ImplTrait(_)))
+            .unwrap();
+        assert!(matches!(impl_trait.item(), ItemKind::ImplTrait(_)));
+
+        // Fields are now struct fields, not msg variant fields
+        let field = scope_graph.children(variant_struct).next().unwrap();
+        assert!(matches!(field, ScopeId::Field(FieldParent::Struct(..), _)));
     }
 }

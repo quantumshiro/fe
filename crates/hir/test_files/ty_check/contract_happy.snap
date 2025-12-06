@@ -1,6 +1,5 @@
 ---
 source: crates/hir/tests/ty_check.rs
-assertion_line: 49
 expression: res
 input_file: test_files/ty_check/contract_happy.fe
 ---
@@ -35,7 +34,7 @@ note:
    ┌─ contract_happy.fe:10:9
    │
 10 │         Withdraw { amount } -> bool
-   │         ^^^^^^^^^^^^^^^^^^^ BankMsg
+   │         ^^^^^^^^^^^^^^^^^^^ Withdraw
 
 note: 
    ┌─ contract_happy.fe:10:20
@@ -138,7 +137,7 @@ note:
    ┌─ contract_happy.fe:19:9
    │
 19 │         Deposit { amount } -> u64 uses (mut total) {
-   │         ^^^^^^^^^^^^^^^^^^ BankMsg
+   │         ^^^^^^^^^^^^^^^^^^ Deposit
 
 note: 
    ┌─ contract_happy.fe:19:19

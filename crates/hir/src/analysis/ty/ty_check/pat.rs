@@ -108,7 +108,7 @@ impl<'db> TyChecker<'db> {
         &mut self,
         pat: PatId,
         pat_data: &Pat<'db>,
-        expected: TyId<'db>,
+        _expected: TyId<'db>,
     ) -> TyId<'db> {
         let Pat::Path(path, is_mut) = pat_data else {
             unreachable!()
@@ -127,33 +127,9 @@ impl<'db> TyChecker<'db> {
         if let Some(name) = path.as_ident(self.db)
             && !matches!(
                 res,
-                Ok(PathRes::Ty(..)
-                    | PathRes::TyAlias(..)
-                    | PathRes::EnumVariant(..)
-                    | PathRes::MsgVariant(..))
+                Ok(PathRes::Ty(..) | PathRes::TyAlias(..) | PathRes::EnumVariant(..))
             )
         {
-            // Try to resolve as a msg variant if expected type is a msg
-            if let Some(reso) = self.resolve_msg_variant(expected, *path) {
-                if reso.is_unit(self.db) {
-                    return self.table.instantiate_to_term(reso.ty);
-                } else {
-                    return self
-                        .emit_unit_variant_expected(pat, RecordLike::from_msg_variant(reso));
-                }
-            }
-
-            // If expected type is a msg type but we couldn't resolve the identifier as a
-            // variant, emit a diagnostic. This catches cases like recv arm patterns that
-            // don't match any variant of the msg type.
-            if self.is_msg_type(expected) {
-                self.push_diag(BodyDiag::RecvArmNotMsgVariant {
-                    primary: span.into(),
-                    msg_ty: expected,
-                });
-                return TyId::invalid(self.db, InvalidCause::Other);
-            }
-
             let binding = LocalBinding::local(pat, *is_mut);
             if let Some(LocalBinding::Local {
                 pat: conflict_with, ..
@@ -199,14 +175,6 @@ impl<'db> TyChecker<'db> {
                     self.table.instantiate_to_term(variant.ty)
                 } else {
                     self.emit_unit_variant_expected(pat, RecordLike::from_variant(variant))
-                }
-            }
-
-            Ok(PathRes::MsgVariant(variant)) => {
-                if variant.is_unit(self.db) {
-                    self.table.instantiate_to_term(variant.ty)
-                } else {
-                    self.emit_unit_variant_expected(pat, RecordLike::from_msg_variant(variant))
                 }
             }
 
@@ -281,16 +249,6 @@ impl<'db> TyChecker<'db> {
                         return TyId::invalid(self.db, InvalidCause::Other);
                     }
                 },
-                PathRes::MsgVariant(variant) => {
-                    let diag = BodyDiag::tuple_variant_expected(
-                        self.db,
-                        pat.span(self.body()).into(),
-                        Some(RecordLike::from_msg_variant(variant)),
-                    );
-                    self.push_diag(diag);
-                    return TyId::invalid(self.db, InvalidCause::Other);
-                }
-
                 PathRes::Mod(scope) => {
                     let diag = BodyDiag::NotValue {
                         primary: span.into(),
@@ -433,15 +391,6 @@ impl<'db> TyChecker<'db> {
                     }
                     ty
                 }
-                PathRes::MsgVariant(variant) => {
-                    let ty = variant.ty;
-                    let record_like = RecordLike::from_msg_variant(variant);
-                    if record_like.is_record(self.db) {
-                        self.check_record_pat_fields(record_like, pat);
-                    }
-                    ty
-                }
-
                 PathRes::Mod(scope) => {
                     let diag = BodyDiag::NotValue {
                         primary: span.into(),
@@ -458,26 +407,27 @@ impl<'db> TyChecker<'db> {
                     TyId::invalid(self.db, InvalidCause::Other)
                 }
             },
-            Err(_) => match self.resolve_msg_variant(expected, *path) {
-                Some(reso) => {
-                    let record_like = RecordLike::from_msg_variant(reso);
-                    if record_like.is_record(self.db) {
-                        self.check_record_pat_fields(record_like, pat);
+            Err(_) => {
+                // Check if expected type is a struct from a desugared msg module
+                // that matches the pattern path
+                if let Some(adt_def) = expected.adt_def(self.db)
+                    && let AdtRef::Struct(struct_) = adt_def.adt_ref(self.db)
+                {
+                    // Check if the path matches the struct name
+                    if let Some(struct_name) = struct_.name(self.db).to_opt()
+                        && path.as_ident(self.db) == Some(struct_name)
+                    {
+                        // The pattern matches the expected struct type
+                        let record_like = RecordLike::from_ty(expected);
+                        if record_like.is_record(self.db) {
+                            self.check_record_pat_fields(record_like, pat);
+                        }
+                        return expected;
                     }
-                    reso.ty
                 }
-                None => {
-                    // If expected type is a msg type but we couldn't resolve as a variant,
-                    // emit a specific diagnostic.
-                    if self.is_msg_type(expected) {
-                        self.push_diag(BodyDiag::RecvArmNotMsgVariant {
-                            primary: span.into(),
-                            msg_ty: expected,
-                        });
-                    }
-                    TyId::invalid(self.db, InvalidCause::Other)
-                }
-            },
+
+                TyId::invalid(self.db, InvalidCause::Other)
+            }
         }
     }
 
@@ -522,11 +472,6 @@ impl<'db> TyChecker<'db> {
         if let Err(diag) = rec_checker.finalize(pat_span.fields().into(), contains_rest) {
             self.push_diag(diag);
         }
-    }
-
-    pub(super) fn is_msg_type(&self, ty: TyId<'db>) -> bool {
-        ty.adt_def(self.db)
-            .is_some_and(|adt| matches!(adt.adt_ref(self.db), AdtRef::Msg(_)))
     }
 
     fn unpack_rest_pat(

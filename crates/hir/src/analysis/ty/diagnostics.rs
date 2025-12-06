@@ -390,7 +390,7 @@ pub enum BodyDiag<'db> {
     /// A recv arm pattern is not a variant of the expected msg type
     RecvArmNotMsgVariant {
         primary: DynLazySpan<'db>,
-        msg_ty: TyId<'db>,
+        msg_name: IdentId<'db>,
     },
 
     /// A recv arm return type annotation is required and must match the msg variant
@@ -416,7 +416,16 @@ pub enum BodyDiag<'db> {
     RecvDuplicateMsgBlock {
         primary: DynLazySpan<'db>,
         first_use: DynLazySpan<'db>,
-        msg_ty: TyId<'db>,
+        msg_name: IdentId<'db>,
+    },
+
+    /// Multiple msg variants across recv blocks have the same selector value
+    RecvDuplicateSelector {
+        primary: DynLazySpan<'db>,
+        first_use: DynLazySpan<'db>,
+        selector: u32,
+        first_variant: IdentId<'db>,
+        second_variant: IdentId<'db>,
     },
 }
 
@@ -486,7 +495,7 @@ impl<'db> BodyDiag<'db> {
     ) -> Self {
         let ty = ty.pretty_print(db).to_string();
         let op = ops.op_symbol(db);
-        let trait_path = ops.trait_path(db);
+        let trait_path = ops.core_trait_path(db);
         Self::OpsTraitNotImplemented {
             span,
             ty,
@@ -543,6 +552,7 @@ impl<'db> BodyDiag<'db> {
             Self::RecvArmDuplicateVariant { .. } => 44,
             Self::RecvMissingMsgVariants { .. } => 45,
             Self::RecvDuplicateMsgBlock { .. } => 46,
+            Self::RecvDuplicateSelector { .. } => 47,
         }
     }
 }

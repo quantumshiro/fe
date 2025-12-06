@@ -1,11 +1,14 @@
 // Test that recv arm patterns must be variants of the specified msg type
 
 msg BankMsg {
+    #[selector = 0x01]
     Withdraw { amount: u64 } -> bool,
+    #[selector = 0x02]
     Deposit { amount: u64 } -> u64,
 }
 
 msg OtherMsg {
+    #[selector = 0x10]
     Ping -> bool,
 }
 
