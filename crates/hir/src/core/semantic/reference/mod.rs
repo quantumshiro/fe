@@ -81,6 +81,8 @@ pub enum Target<'db> {
         expr: ExprId,
         /// For params, the parameter index (used when cursor is on param definition)
         param_idx: Option<usize>,
+        /// For local bindings, the pattern ID (used when cursor is on let binding)
+        pat_id: Option<crate::hir_def::PatId>,
     },
 }
 
@@ -199,12 +201,14 @@ impl<'db> PathView<'db> {
         let def_span = typed_body.expr_binding_def_span(func, expr_id)?;
         let ty = typed_body.expr_ty(db, expr_id);
         let param_idx = typed_body.expr_param_idx(expr_id);
+        let pat_id = typed_body.expr_pat_id(expr_id);
         Some(Target::Local {
             span: def_span,
             ty,
             func,
             expr: expr_id,
             param_idx,
+            pat_id,
         })
     }
 

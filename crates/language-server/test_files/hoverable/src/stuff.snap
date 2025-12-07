@@ -1,5 +1,6 @@
 ---
 source: crates/language-server/src/functionality/references.rs
+assertion_line: 372
 expression: snapshot
 input_file: test_files/hoverable/src/stuff.fe
 ---
@@ -106,6 +107,12 @@ note:
    │   ^^^^^^^^^^^^ ref: 17:2
 
 note: 
+   ┌─ lib.fe:18:7
+   │
+18 │   let x: stuff::calculations::ambiguous
+   │       ^ def: defined here @ 18:6 (1 refs)
+
+note: 
    ┌─ lib.fe:18:10
    │
 18 │   let x: stuff::calculations::ambiguous
@@ -202,10 +209,34 @@ note:
    │           ^ ref: 46:10
 
 note: 
+   ┌─ lib.fe:47:7
+   │
+47 │   let x = a + 1
+   │       ^ def: defined here @ 47:6 (2 refs)
+
+note: 
    ┌─ lib.fe:47:11
    │
 47 │   let x = a + 1
    │           ^ ref: 47:10
+
+note: 
+   ┌─ lib.fe:49:9
+   │
+49 │     let x = x + 1
+   │         ^ def: defined here @ 49:8 (2 refs)
+
+note: 
+   ┌─ lib.fe:49:13
+   │
+49 │     let x = x + 1
+   │             ^ ref: 49:12
+
+note: 
+   ┌─ lib.fe:50:5
+   │
+50 │     x
+   │     ^ ref: 50:4
 
 note: 
    ┌─ lib.fe:55:4

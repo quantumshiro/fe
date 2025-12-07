@@ -235,12 +235,28 @@ mod tests {
                 cursors.push(span.range.start());
             }
 
-            // Also collect cursors from function parameter names
+            // Also collect cursors from function parameter names and local bindings
             if let ItemKind::Func(func) = item {
                 for (idx, _param) in func.params(db).enumerate() {
                     let param_span = func.span().params().param(idx);
                     if let Some(span) = param_span.name().resolve(db) {
                         cursors.push(span.range.start());
+                    }
+                }
+
+                // Collect cursors from local variable bindings in the body
+                if let Some(body) = func.body(db) {
+                    use hir::hir_def::{Partial, Pat};
+                    for (pat_id, pat) in body.pats(db).iter() {
+                        // Only collect simple identifier patterns (local bindings)
+                        if let Partial::Present(Pat::Path(Partial::Present(path), _)) = pat
+                            && path.as_ident(db).is_some()
+                        {
+                            let pat_span = pat_id.span(body).into_path_pat().path();
+                            if let Some(span) = pat_span.resolve(db) {
+                                cursors.push(span.range.start());
+                            }
+                        }
                     }
                 }
             }

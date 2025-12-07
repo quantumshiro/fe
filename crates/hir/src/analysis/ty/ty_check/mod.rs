@@ -355,6 +355,14 @@ impl<'db> TypedBody<'db> {
         }
     }
 
+    /// Get the pattern ID if this expression refers to a local variable binding.
+    pub(crate) fn expr_pat_id(&self, expr: ExprId) -> Option<PatId> {
+        match self.expr_binding(expr)? {
+            LocalBinding::Local { pat, .. } => Some(pat),
+            _ => None,
+        }
+    }
+
     fn expr_binding(&self, expr: ExprId) -> Option<LocalBinding<'db>> {
         self.expr_ty.get(&expr)?.binding
     }
@@ -392,6 +400,25 @@ impl<'db> TypedBody<'db> {
             .filter_map(|(id, p)| {
                 if let Some(LocalBinding::Param { idx, .. }) = p.binding
                     && idx == param_idx
+                {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Find all expressions that reference a local binding by its pattern ID.
+    ///
+    /// Returns a list of ExprIds that reference the local bound by the given pattern.
+    /// This is used for find-all-references when the cursor is on a local binding site.
+    pub fn local_references_by_pat(&self, pat_id: PatId) -> Vec<ExprId> {
+        self.expr_ty
+            .iter()
+            .filter_map(|(id, p)| {
+                if let Some(LocalBinding::Local { pat, .. }) = p.binding
+                    && pat == pat_id
                 {
                     Some(*id)
                 } else {

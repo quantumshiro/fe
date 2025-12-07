@@ -7,7 +7,7 @@ use crate::{
     analysis::HirAnalysisDb,
     analysis::ty::ty_check::check_func_body,
     hir_def::scope_graph::ScopeId,
-    hir_def::{Body, Func, ItemKind, TopLevelMod},
+    hir_def::{Body, Func, ItemKind, Partial, Pat, TopLevelMod},
     span::{DynLazySpan, LazySpan},
 };
 
@@ -138,8 +138,10 @@ impl<'db> TopLevelMod<'db> {
             return Some(target);
         }
 
-        // TODO: Check if cursor is on a local variable binding (let x = ...)
-        // This would require checking pattern spans in the body
+        // Check if cursor is on a local variable binding (let x = ...)
+        if let Some(target) = self.local_binding_at(db, func, cursor) {
+            return Some(target);
+        }
 
         None
     }
@@ -182,7 +184,57 @@ impl<'db> TopLevelMod<'db> {
                     // Use the first reference expr, or the body root if none exist
                     expr: expr.unwrap_or_else(|| body.expr(db)),
                     param_idx: Some(idx),
+                    pat_id: None,
                 });
+            }
+        }
+
+        None
+    }
+
+    /// Check if cursor is on a local variable binding in a let pattern.
+    fn local_binding_at<DB>(
+        self,
+        db: &'db DB,
+        func: Func<'db>,
+        cursor: TextSize,
+    ) -> Option<Target<'db>>
+    where
+        DB: HirAnalysisDb + SpannedHirDb,
+    {
+        let body = func.body(db)?;
+        let (_, typed_body) = check_func_body(db, func);
+
+        // Iterate through all patterns in the body looking for simple identifier bindings
+        for (pat_id, pat) in body.pats(db).iter() {
+            // Only check simple identifier patterns (Pat::Path with single ident)
+            if let Partial::Present(Pat::Path(Partial::Present(path), _)) = pat
+                && path.as_ident(db).is_some()
+            {
+                // Get the span for this pattern's path
+                let pat_span = pat_id.span(body).into_path_pat().path();
+                if let Some(resolved) = pat_span.resolve(db)
+                    && resolved.range.contains(cursor)
+                {
+                    // Found cursor on a local binding pattern
+                    // Get the type directly from the pattern
+                    let ty = typed_body.pat_ty(db, pat_id);
+
+                    // Find any expression that references this binding (for find-all-refs)
+                    let local_refs = typed_body.local_references_by_pat(pat_id);
+                    let expr = local_refs.first().copied();
+
+                    let def_span: DynLazySpan = pat_span.into();
+
+                    return Some(Target::Local {
+                        span: def_span,
+                        ty,
+                        func,
+                        expr: expr.unwrap_or_else(|| body.expr(db)),
+                        param_idx: None,
+                        pat_id: Some(pat_id),
+                    });
+                }
             }
         }
 
@@ -191,9 +243,17 @@ impl<'db> TopLevelMod<'db> {
 
     /// Find the innermost function containing the cursor.
     fn find_enclosing_func(self, db: &'db dyn SpannedHirDb, cursor: TextSize) -> Option<Func<'db>> {
-        for item in self.find_enclosing_items(db, cursor) {
-            if let ItemKind::Func(func) = item {
-                return Some(func);
+        let items = self.find_enclosing_items(db, cursor);
+        for item in items {
+            match item {
+                ItemKind::Func(func) => return Some(func),
+                ItemKind::Body(body) => {
+                    // Body is inside a function - get the parent func
+                    if let Some(func) = body.containing_func(db) {
+                        return Some(func);
+                    }
+                }
+                _ => {}
             }
         }
         None
@@ -229,6 +289,7 @@ impl<'db> TopLevelMod<'db> {
                 func,
                 expr,
                 param_idx,
+                pat_id,
                 ..
             } => {
                 let (_, typed_body) = check_func_body(db, *func);
@@ -236,10 +297,14 @@ impl<'db> TopLevelMod<'db> {
                     return vec![];
                 };
 
-                // If we have a param_idx, use it to find references (more reliable)
-                // Otherwise fall back to finding references via the expression's binding
+                // Use the most reliable method to find references:
+                // 1. param_idx for function parameters
+                // 2. pat_id for local variable bindings
+                // 3. expr binding as fallback
                 let expr_ids = if let Some(idx) = param_idx {
                     typed_body.param_references(*idx)
+                } else if let Some(pat) = pat_id {
+                    typed_body.local_references_by_pat(*pat)
                 } else {
                     typed_body.local_references(*expr)
                 };
@@ -354,6 +419,7 @@ impl<'db> TopLevelMod<'db> {
                 func,
                 expr,
                 param_idx,
+                pat_id,
                 ..
             } => {
                 let (_, typed_body) = check_func_body(db, *func);
@@ -361,10 +427,14 @@ impl<'db> TopLevelMod<'db> {
                     return vec![];
                 };
 
-                // If we have a param_idx, use it to find references (more reliable)
-                // Otherwise fall back to finding references via the expression's binding
+                // Use the most reliable method to find references:
+                // 1. param_idx for function parameters
+                // 2. pat_id for local variable bindings
+                // 3. expr binding as fallback
                 let expr_ids = if let Some(idx) = param_idx {
                     typed_body.param_references(*idx)
+                } else if let Some(pat) = pat_id {
+                    typed_body.local_references_by_pat(*pat)
                 } else {
                     typed_body.local_references(*expr)
                 };
