@@ -13,8 +13,9 @@ use async_lsp::lsp_types::notification::{
 
 use async_lsp::lsp_types::request::{
     CodeActionRequest, Completion, DocumentHighlightRequest, DocumentSymbolRequest, Formatting,
-    GotoDefinition, GotoTypeDefinition, HoverRequest, InlayHintRequest, References, Rename,
-    SemanticTokensFullRequest, Shutdown, SignatureHelpRequest, WorkspaceSymbolRequest,
+    GotoDefinition, GotoImplementation, GotoTypeDefinition, HoverRequest, InlayHintRequest,
+    References, Rename, SemanticTokensFullRequest, Shutdown, SignatureHelpRequest,
+    WorkspaceSymbolRequest,
 };
 use async_std::stream::StreamExt;
 use futures_batch::ChunksTimeoutStreamExt;
@@ -24,8 +25,9 @@ use tracing::{info, warn};
 
 use crate::backend::Backend;
 use crate::functionality::{
-    code_actions, completion, document_symbols, goto, handlers, highlight, inlay_hints, references,
-    rename, semantic_tokens, signature_help, type_definition, workspace_symbols,
+    code_actions, completion, document_symbols, goto, handlers, highlight, implementations,
+    inlay_hints, references, rename, semantic_tokens, signature_help, type_definition,
+    workspace_symbols,
 };
 use async_lsp::lsp_types::request::Initialize;
 use async_lsp::router::Router;
@@ -61,6 +63,7 @@ pub(crate) fn setup(
         .handle_request::<References>(references::handle_references)
         .handle_request::<DocumentHighlightRequest>(highlight::handle_document_highlight)
         .handle_request::<GotoTypeDefinition>(type_definition::handle_goto_type_definition)
+        .handle_request::<GotoImplementation>(implementations::handle_goto_implementation)
         .handle_request::<Rename>(rename::handle_rename)
         .handle_request::<SemanticTokensFullRequest>(semantic_tokens::handle_semantic_tokens_full)
         .handle_request::<Formatting>(handlers::handle_formatting)
