@@ -51,6 +51,11 @@ pub(super) struct TyCheckEnv<'db> {
     pending_vars: FxHashMap<IdentId<'db>, LocalBinding<'db>>,
     loop_stack: Vec<StmtId>,
     expr_stack: Vec<ExprId>,
+
+    /// Param bindings for transfer to TypedBody
+    param_bindings: Vec<LocalBinding<'db>>,
+    /// Pat bindings for transfer to TypedBody
+    pat_bindings: FxHashMap<PatId, LocalBinding<'db>>,
 }
 
 impl<'db> TyCheckEnv<'db> {
@@ -77,6 +82,8 @@ impl<'db> TyCheckEnv<'db> {
             pending_vars: FxHashMap::default(),
             loop_stack: Vec::new(),
             expr_stack: Vec::new(),
+            param_bindings: Vec::new(),
+            pat_bindings: FxHashMap::default(),
         };
 
         env.enter_scope(body.expr(db));
@@ -86,6 +93,17 @@ impl<'db> TyCheckEnv<'db> {
         let arg_tys = func.arg_tys(db);
         for (idx, view) in func.params(db).enumerate() {
             let Some(name) = view.name(db) else {
+                // Still record a binding for unnamed params (e.g., `_`)
+                let ty = *arg_tys
+                    .get(idx)
+                    .map(|b| b.skip_binder())
+                    .unwrap_or(&TyId::invalid(db, InvalidCause::ParseError));
+                let var = LocalBinding::Param {
+                    idx,
+                    ty,
+                    is_mut: view.is_mut(db),
+                };
+                env.param_bindings.push(var);
                 continue;
             };
 
@@ -104,6 +122,7 @@ impl<'db> TyCheckEnv<'db> {
                 is_mut: view.is_mut(db),
             };
 
+            env.param_bindings.push(var);
             env.var_env.last_mut().unwrap().register_var(name, var);
         }
 
@@ -408,6 +427,10 @@ impl<'db> TyCheckEnv<'db> {
         name: IdentId<'db>,
         binding: LocalBinding<'db>,
     ) -> Option<LocalBinding<'db>> {
+        // Also store in pat_bindings for transfer to TypedBody
+        if let LocalBinding::Local { pat, .. } = binding {
+            self.pat_bindings.insert(pat, binding);
+        }
         self.pending_vars.insert(name, binding)
     }
 
@@ -479,6 +502,8 @@ impl<'db> TyCheckEnv<'db> {
             pat_ty: self.pat_ty,
             expr_ty: self.expr_ty,
             callables,
+            param_bindings: self.param_bindings,
+            pat_bindings: self.pat_bindings,
         }
     }
 
@@ -824,16 +849,6 @@ pub enum LocalBinding<'db> {
 impl<'db> LocalBinding<'db> {
     pub(super) fn local(pat: PatId, is_mut: bool) -> Self {
         Self::Local { pat, is_mut }
-    }
-
-    /// Extract the identity of this binding (what uniquely identifies it).
-    pub(crate) fn kind(&self) -> crate::core::semantic::LocalBindingKind<'db> {
-        use crate::core::semantic::LocalBindingKind;
-        match self {
-            Self::Local { pat, .. } => LocalBindingKind::Local(*pat),
-            Self::Param { idx, .. } => LocalBindingKind::Param(*idx),
-            Self::EffectParam { ident, .. } => LocalBindingKind::EffectParam(*ident),
-        }
     }
 
     pub(super) fn is_mut(&self) -> bool {

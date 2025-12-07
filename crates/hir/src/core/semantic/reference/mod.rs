@@ -21,7 +21,7 @@ use crate::{
     },
     analysis::ty::{
         trait_resolution::PredicateListId,
-        ty_check::{RecordLike, check_func_body},
+        ty_check::{LocalBinding, RecordLike, check_func_body},
         ty_def::TyId,
     },
     hir_def::HirIngot,
@@ -63,21 +63,6 @@ pub(crate) fn resolve_path_to_scopes<'db>(
     }
 }
 
-/// Identifies which local binding is being referenced.
-///
-/// This is the "identity" of a binding - enough to uniquely identify it
-/// and find all references to it. Shared between reference tracking and
-/// type checking.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LocalBindingKind<'db> {
-    /// Function parameter at the given index
-    Param(usize),
-    /// Local variable binding at the given pattern
-    Local(crate::hir_def::PatId),
-    /// Effect parameter with its identifier
-    EffectParam(crate::hir_def::IdentId<'db>),
-}
-
 /// The resolved target of a reference.
 ///
 /// References can resolve to either module-level items (scopes) or
@@ -86,14 +71,14 @@ pub enum LocalBindingKind<'db> {
 pub enum Target<'db> {
     /// A module-level item (function, struct, enum, etc.)
     Scope(ScopeId<'db>),
-    /// A local binding - has definition span, inferred type, and context for finding other references
+    /// A local binding - has definition span, inferred type, and binding info
     Local {
         span: DynLazySpan<'db>,
         ty: TyId<'db>,
         /// The containing function (needed to find other references to this local)
         func: crate::hir_def::Func<'db>,
-        /// What kind of binding this is (param, local variable, or effect param)
-        binding: LocalBindingKind<'db>,
+        /// The binding itself (param, local variable, or effect param)
+        binding: LocalBinding<'db>,
     },
 }
 
@@ -239,7 +224,7 @@ impl<'db> PathView<'db> {
                 // Expression reference (e.g., `p` in `p.foo()` or `x + 1`)
                 let def_span = typed_body.expr_binding_def_span(func, expr_id)?;
                 let ty = typed_body.expr_ty(db, expr_id);
-                let binding = typed_body.expr_binding_kind(expr_id)?;
+                let binding = typed_body.expr_binding(expr_id)?;
 
                 Some(Target::Local {
                     span: def_span,
@@ -249,37 +234,18 @@ impl<'db> PathView<'db> {
                 })
             }
             BodyPathContext::PatBinding(pat_id) => {
-                // Pattern path - need to check if it's actually a local binding
-                // (not an enum variant like `Color::Red` in a match arm)
-                if !self.path.is_bare_ident(db) {
-                    return None; // Qualified paths aren't local bindings
-                }
-
-                // Check if path resolves to a type/enum variant - those aren't local bindings
-                let scopes = resolve_path_to_scopes(db, self.path, self.scope);
-                let is_type_or_variant = scopes.iter().any(|s| {
-                    matches!(
-                        s,
-                        ScopeId::Item(ItemKind::Struct(_))
-                            | ScopeId::Item(ItemKind::Enum(_))
-                            | ScopeId::Item(ItemKind::Contract(_))
-                            | ScopeId::Item(ItemKind::TypeAlias(_))
-                            | ScopeId::Variant(_)
-                    )
-                });
-
-                if is_type_or_variant {
-                    return None; // Enum variant/type reference, not a local binding
-                }
-
-                // This is a local binding definition (may shadow a param/other local)
+                // Pattern binding definition site (e.g., `x` in `let x = ...`)
+                // If the type checker recorded this as a binding, it's a local variable.
+                // Otherwise it's something else (enum variant, etc.) - return None.
+                let binding = typed_body.pat_binding(pat_id)?;
                 let ty = typed_body.pat_ty(db, pat_id);
                 let def_span = pat_id.span(body).into();
+
                 Some(Target::Local {
                     span: def_span,
                     ty,
                     func,
-                    binding: LocalBindingKind::Local(pat_id),
+                    binding,
                 })
             }
             BodyPathContext::PatReference(_) => {

@@ -14,8 +14,13 @@ use crate::{
     visitor::{Visitor, VisitorCtxt, walk_expr, walk_pat},
 };
 pub use callable::Callable;
+<<<<<<< HEAD
 use env::TyCheckEnv;
 pub use env::{ExprProp, LocalBinding};
+=======
+pub use env::{ExprProp, LocalBinding};
+use env::TyCheckEnv;
+>>>>>>> 79547b686 (further consolidate binding logic)
 pub(super) use expr::TraitOps;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -305,6 +310,10 @@ pub struct TypedBody<'db> {
     pat_ty: FxHashMap<PatId, TyId<'db>>,
     expr_ty: FxHashMap<ExprId, ExprProp<'db>>,
     callables: FxHashMap<ExprId, Callable<'db>>,
+    /// Bindings for function parameters (indexed by param position)
+    param_bindings: Vec<LocalBinding<'db>>,
+    /// Bindings for local variables (keyed by the pattern that introduces them)
+    pat_bindings: FxHashMap<PatId, LocalBinding<'db>>,
 }
 
 impl<'db> TypedBody<'db> {
@@ -334,6 +343,16 @@ impl<'db> TypedBody<'db> {
         self.callables.get(&expr)
     }
 
+    /// Get the binding for a function parameter by index.
+    pub fn param_binding(&self, idx: usize) -> Option<LocalBinding<'db>> {
+        self.param_bindings.get(idx).copied()
+    }
+
+    /// Get the binding for a local variable by its pattern.
+    pub fn pat_binding(&self, pat: PatId) -> Option<LocalBinding<'db>> {
+        self.pat_bindings.get(&pat).copied()
+    }
+
     /// Get the definition span for an expression that references a local binding.
     ///
     /// Returns `Some(span)` if the expression references a local variable, parameter,
@@ -350,14 +369,7 @@ impl<'db> TypedBody<'db> {
     /// Get the binding kind for an expression that references a local binding.
     ///
     /// Returns the identity of the binding (param index, pattern id, or effect param ident).
-    pub(crate) fn expr_binding_kind(
-        &self,
-        expr: ExprId,
-    ) -> Option<crate::core::semantic::LocalBindingKind<'db>> {
-        self.expr_binding(expr).map(|b| b.kind())
-    }
-
-    fn expr_binding(&self, expr: ExprId) -> Option<LocalBinding<'db>> {
+    pub fn expr_binding(&self, expr: ExprId) -> Option<LocalBinding<'db>> {
         self.expr_ty.get(&expr)?.binding
     }
 
@@ -388,14 +400,11 @@ impl<'db> TypedBody<'db> {
     ///
     /// This is the general method for finding all references to any kind of binding
     /// (param, local, or effect param).
-    pub fn references_by_binding_kind(
-        &self,
-        kind: crate::core::semantic::LocalBindingKind<'db>,
-    ) -> Vec<ExprId> {
+    pub fn references_by_binding(&self, binding: LocalBinding<'db>) -> Vec<ExprId> {
         self.expr_ty
             .iter()
             .filter_map(|(id, p)| {
-                if p.binding.map(|b| b.kind()) == Some(kind) {
+                if p.binding == Some(binding) {
                     Some(*id)
                 } else {
                     None
@@ -410,6 +419,8 @@ impl<'db> TypedBody<'db> {
             pat_ty: FxHashMap::default(),
             expr_ty: FxHashMap::default(),
             callables: FxHashMap::default(),
+            param_bindings: Vec::new(),
+            pat_bindings: FxHashMap::default(),
         }
     }
 }

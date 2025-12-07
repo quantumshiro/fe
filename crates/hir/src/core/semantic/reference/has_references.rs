@@ -5,7 +5,7 @@ use parser::TextSize;
 use crate::{
     HirDb, SpannedHirDb,
     analysis::HirAnalysisDb,
-    analysis::ty::ty_check::check_func_body,
+    analysis::ty::ty_check::{LocalBinding, check_func_body},
     hir_def::scope_graph::ScopeId,
     hir_def::{Body, Func, ItemKind, TopLevelMod},
     span::{DynLazySpan, LazySpan},
@@ -151,23 +151,27 @@ impl<'db> TopLevelMod<'db> {
     where
         DB: HirAnalysisDb + SpannedHirDb,
     {
+        let (_, typed_body) = check_func_body(db, func);
+
         // Check each param's name span
-        for (idx, _param) in func.params(db).enumerate() {
-            let param_span = func.span().params().param(idx);
+        for (idx, param_view) in func.params(db).enumerate() {
+            let param_span = param_view.span();
             let name_span = param_span.name();
 
             if let Some(resolved) = name_span.resolve(db)
                 && resolved.range.contains(cursor)
             {
-                // Found cursor on param name - create Target::Local
-                let def_span: DynLazySpan = name_span.into();
-                let ty = func.arg_tys(db).get(idx).map(|b| *b.skip_binder())?;
+                // Found cursor on param name - get binding from type checker
+                let binding = typed_body.param_binding(idx)?;
+                let LocalBinding::Param { ty, .. } = binding else {
+                    return None;
+                };
 
                 return Some(Target::Local {
-                    span: def_span,
+                    span: name_span.into(),
                     ty,
                     func,
-                    binding: super::LocalBindingKind::Param(idx),
+                    binding,
                 });
             }
         }
@@ -226,7 +230,7 @@ impl<'db> TopLevelMod<'db> {
                 };
 
                 typed_body
-                    .references_by_binding_kind(*binding)
+                    .references_by_binding(*binding)
                     .into_iter()
                     .map(|expr_id| expr_id.span(body).into())
                     .collect()
@@ -338,17 +342,19 @@ impl<'db> TopLevelMod<'db> {
                     return vec![];
                 };
 
-                // Filter body references where the target matches the same binding
+                // Get the set of expression IDs that reference this binding
+                let expr_ids: rustc_hash::FxHashSet<_> =
+                    typed_body.references_by_binding(*binding).into_iter().collect();
+
+                // Filter body references by their expression ID context
+                // This avoids calling target() which triggers expensive path resolution
                 body.references(db)
                     .iter()
                     .filter(|r| {
-                        if let Some(Target::Local {
-                            func: ref_func,
-                            binding: ref_binding,
-                            ..
-                        }) = r.target(db).first()
+                        if let ReferenceView::Path(path_view) = r
+                            && let Some(super::BodyPathContext::Expr(expr_id)) = path_view.body_ctx
                         {
-                            *ref_func == *func && ref_binding == binding
+                            expr_ids.contains(&expr_id)
                         } else {
                             false
                         }
