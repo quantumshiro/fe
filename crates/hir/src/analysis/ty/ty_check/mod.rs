@@ -14,13 +14,8 @@ use crate::{
     visitor::{Visitor, VisitorCtxt, walk_expr, walk_pat},
 };
 pub use callable::Callable;
-<<<<<<< HEAD
 use env::TyCheckEnv;
 pub use env::{ExprProp, LocalBinding};
-=======
-pub use env::{ExprProp, LocalBinding};
-use env::TyCheckEnv;
->>>>>>> 79547b686 (further consolidate binding logic)
 pub(super) use expr::TraitOps;
 
 use rustc_hash::{FxHashMap, FxHashSet};

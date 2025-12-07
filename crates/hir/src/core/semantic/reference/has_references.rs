@@ -197,47 +197,6 @@ impl<'db> TopLevelMod<'db> {
         None
     }
 
-    /// Find all reference spans to a target in this module (find-all-references).
-    pub fn find_references<DB>(self, db: &'db DB, target: &Target<'db>) -> Vec<DynLazySpan<'db>>
-    where
-        DB: HirAnalysisDb + SpannedHirDb,
-    {
-        match target {
-            Target::Scope(scope) => {
-                let items = self.scope_graph(db).items_dfs(db);
-                let mut results = Vec::new();
-
-                for item in items {
-                    let item_scope = ScopeId::from_item(item);
-                    for reference in item_scope.references(db) {
-                        for t in reference.target(db).as_slice() {
-                            if let Target::Scope(s) = t
-                                && *s == *scope
-                            {
-                                results.push(reference.span());
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                results
-            }
-            Target::Local { func, binding, .. } => {
-                let (_, typed_body) = check_func_body(db, *func);
-                let Some(body) = typed_body.body() else {
-                    return vec![];
-                };
-
-                typed_body
-                    .references_by_binding(*binding)
-                    .into_iter()
-                    .map(|expr_id| expr_id.span(body).into())
-                    .collect()
-            }
-        }
-    }
-
     /// Find the reference at a cursor position anywhere in this module.
     pub fn reference_at(
         self,
@@ -343,8 +302,10 @@ impl<'db> TopLevelMod<'db> {
                 };
 
                 // Get the set of expression IDs that reference this binding
-                let expr_ids: rustc_hash::FxHashSet<_> =
-                    typed_body.references_by_binding(*binding).into_iter().collect();
+                let expr_ids: rustc_hash::FxHashSet<_> = typed_body
+                    .references_by_binding(*binding)
+                    .into_iter()
+                    .collect();
 
                 // Filter body references by their expression ID context
                 // This avoids calling target() which triggers expensive path resolution

@@ -34,9 +34,9 @@ fn find_references_at_cursor<'db>(
                     continue;
                 }
                 let mod_ = map_file_to_mod(db, file);
-                for span in mod_.find_references(db, &target) {
-                    if span.resolve(db).is_some()
-                        && let Ok(location) = to_lsp_location_from_lazy_span(db, span)
+                for ref_view in mod_.references_to_target(db, &target) {
+                    if ref_view.span().resolve(db).is_some()
+                        && let Ok(location) = to_lsp_location_from_lazy_span(db, ref_view.span())
                     {
                         locations.push(location);
                     }
@@ -49,10 +49,10 @@ fn find_references_at_cursor<'db>(
             }
         }
         Target::Local { span, .. } => {
-            // For locals, find_references searches within the function body
-            for ref_span in top_mod.find_references(db, &target) {
-                if ref_span.resolve(db).is_some()
-                    && let Ok(location) = to_lsp_location_from_lazy_span(db, ref_span)
+            // For locals, search within the function body
+            for ref_view in top_mod.references_to_target(db, &target) {
+                if ref_view.span().resolve(db).is_some()
+                    && let Ok(location) = to_lsp_location_from_lazy_span(db, ref_view.span())
                 {
                     locations.push(location);
                 }
