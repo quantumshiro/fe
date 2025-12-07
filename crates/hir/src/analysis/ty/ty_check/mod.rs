@@ -347,20 +347,14 @@ impl<'db> TypedBody<'db> {
         Some(binding.def_span_with(body, func))
     }
 
-    /// Get the parameter index if this expression refers to a function parameter.
-    pub(crate) fn expr_param_idx(&self, expr: ExprId) -> Option<usize> {
-        match self.expr_binding(expr)? {
-            LocalBinding::Param { idx, .. } => Some(idx),
-            _ => None,
-        }
-    }
-
-    /// Get the pattern ID if this expression refers to a local variable binding.
-    pub(crate) fn expr_pat_id(&self, expr: ExprId) -> Option<PatId> {
-        match self.expr_binding(expr)? {
-            LocalBinding::Local { pat, .. } => Some(pat),
-            _ => None,
-        }
+    /// Get the binding kind for an expression that references a local binding.
+    ///
+    /// Returns the identity of the binding (param index, pattern id, or effect param ident).
+    pub(crate) fn expr_binding_kind(
+        &self,
+        expr: ExprId,
+    ) -> Option<crate::core::semantic::LocalBindingKind<'db>> {
+        self.expr_binding(expr).map(|b| b.kind())
     }
 
     fn expr_binding(&self, expr: ExprId) -> Option<LocalBinding<'db>> {
@@ -390,36 +384,18 @@ impl<'db> TypedBody<'db> {
             .collect()
     }
 
-    /// Find all expressions that reference a parameter by index.
+    /// Find all expressions that reference a binding by its kind.
     ///
-    /// Returns a list of ExprIds that reference the parameter at the given index.
-    /// This is used for find-all-references when the cursor is on a param definition.
-    pub fn param_references(&self, param_idx: usize) -> Vec<ExprId> {
+    /// This is the general method for finding all references to any kind of binding
+    /// (param, local, or effect param).
+    pub fn references_by_binding_kind(
+        &self,
+        kind: crate::core::semantic::LocalBindingKind<'db>,
+    ) -> Vec<ExprId> {
         self.expr_ty
             .iter()
             .filter_map(|(id, p)| {
-                if let Some(LocalBinding::Param { idx, .. }) = p.binding
-                    && idx == param_idx
-                {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    /// Find all expressions that reference a local binding by its pattern ID.
-    ///
-    /// Returns a list of ExprIds that reference the local bound by the given pattern.
-    /// This is used for find-all-references when the cursor is on a local binding site.
-    pub fn local_references_by_pat(&self, pat_id: PatId) -> Vec<ExprId> {
-        self.expr_ty
-            .iter()
-            .filter_map(|(id, p)| {
-                if let Some(LocalBinding::Local { pat, .. }) = p.binding
-                    && pat == pat_id
-                {
+                if p.binding.map(|b| b.kind()) == Some(kind) {
                     Some(*id)
                 } else {
                     None

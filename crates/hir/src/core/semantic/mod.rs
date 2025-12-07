@@ -22,7 +22,8 @@
 
 pub mod reference;
 pub use reference::{
-    FieldAccessView, HasReferences, MethodCallView, PathView, ReferenceView, Target, UsePathView,
+    FieldAccessView, HasReferences, LocalBindingKind, MethodCallView, PathView, ReferenceView,
+    Target, UsePathView,
 };
 
 use crate::HirDb;

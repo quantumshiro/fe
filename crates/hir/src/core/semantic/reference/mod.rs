@@ -63,6 +63,21 @@ pub(crate) fn resolve_path_to_scopes<'db>(
     }
 }
 
+/// Identifies which local binding is being referenced.
+///
+/// This is the "identity" of a binding - enough to uniquely identify it
+/// and find all references to it. Shared between reference tracking and
+/// type checking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LocalBindingKind<'db> {
+    /// Function parameter at the given index
+    Param(usize),
+    /// Local variable binding at the given pattern
+    Local(crate::hir_def::PatId),
+    /// Effect parameter with its identifier
+    EffectParam(crate::hir_def::IdentId<'db>),
+}
+
 /// The resolved target of a reference.
 ///
 /// References can resolve to either module-level items (scopes) or
@@ -77,12 +92,8 @@ pub enum Target<'db> {
         ty: TyId<'db>,
         /// The containing function (needed to find other references to this local)
         func: crate::hir_def::Func<'db>,
-        /// The expression referencing this local (needed to identify the binding)
-        expr: ExprId,
-        /// For params, the parameter index (used when cursor is on param definition)
-        param_idx: Option<usize>,
-        /// For local bindings, the pattern ID (used when cursor is on let binding)
-        pat_id: Option<crate::hir_def::PatId>,
+        /// What kind of binding this is (param, local variable, or effect param)
+        binding: LocalBindingKind<'db>,
     },
 }
 
@@ -123,17 +134,41 @@ impl<'db> TargetResolution<'db> {
     }
 }
 
+/// Context for where a path appears in a function body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub enum BodyPathContext {
+    /// Path in an expression (e.g., `x` in `x + 1` or `foo()`)
+    Expr(ExprId),
+    /// Path in a pattern that defines a local binding (e.g., `x` in `let x = ...`)
+    PatBinding(crate::hir_def::PatId),
+    /// Path in a pattern that references an item (e.g., `Red` in `Color::Red => ...`)
+    PatReference(crate::hir_def::PatId),
+}
+
 /// A view of a path reference in the HIR.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct PathView<'db> {
     pub path: PathId<'db>,
     pub scope: ScopeId<'db>,
     pub span: LazyPathSpan<'db>,
+    /// Context when this path is inside a function body.
+    /// None for paths in signatures, type annotations, etc.
+    pub body_ctx: Option<BodyPathContext>,
 }
 
 impl<'db> PathView<'db> {
     pub fn new(path: PathId<'db>, scope: ScopeId<'db>, span: LazyPathSpan<'db>) -> Self {
-        Self { path, scope, span }
+        Self {
+            path,
+            scope,
+            span,
+            body_ctx: None,
+        }
+    }
+
+    pub fn with_body_ctx(mut self, ctx: BodyPathContext) -> Self {
+        self.body_ctx = Some(ctx);
+        self
     }
 
     /// Resolve this path to its target definition(s).
@@ -190,26 +225,68 @@ impl<'db> PathView<'db> {
         self.target(db)
     }
 
-    fn local_target(&self, db: &'db dyn HirAnalysisDb) -> Option<Target<'db>> {
+    fn local_target<DB>(&self, db: &'db DB) -> Option<Target<'db>>
+    where
+        DB: HirAnalysisDb + SpannedHirDb,
+    {
+        let body_ctx = self.body_ctx?;
         let body = self.scope.body()?;
         let func = body.containing_func(db)?;
-        let expr_id = body.find_expr_for_path(db, self.path)?;
-
         let (_, typed_body) = check_func_body(db, func);
 
-        // Check if this expression has a local binding (param or local var)
-        let def_span = typed_body.expr_binding_def_span(func, expr_id)?;
-        let ty = typed_body.expr_ty(db, expr_id);
-        let param_idx = typed_body.expr_param_idx(expr_id);
-        let pat_id = typed_body.expr_pat_id(expr_id);
-        Some(Target::Local {
-            span: def_span,
-            ty,
-            func,
-            expr: expr_id,
-            param_idx,
-            pat_id,
-        })
+        match body_ctx {
+            BodyPathContext::Expr(expr_id) => {
+                // Expression reference (e.g., `p` in `p.foo()` or `x + 1`)
+                let def_span = typed_body.expr_binding_def_span(func, expr_id)?;
+                let ty = typed_body.expr_ty(db, expr_id);
+                let binding = typed_body.expr_binding_kind(expr_id)?;
+
+                Some(Target::Local {
+                    span: def_span,
+                    ty,
+                    func,
+                    binding,
+                })
+            }
+            BodyPathContext::PatBinding(pat_id) => {
+                // Pattern path - need to check if it's actually a local binding
+                // (not an enum variant like `Color::Red` in a match arm)
+                if !self.path.is_bare_ident(db) {
+                    return None; // Qualified paths aren't local bindings
+                }
+
+                // Check if path resolves to a type/enum variant - those aren't local bindings
+                let scopes = resolve_path_to_scopes(db, self.path, self.scope);
+                let is_type_or_variant = scopes.iter().any(|s| {
+                    matches!(
+                        s,
+                        ScopeId::Item(ItemKind::Struct(_))
+                            | ScopeId::Item(ItemKind::Enum(_))
+                            | ScopeId::Item(ItemKind::Contract(_))
+                            | ScopeId::Item(ItemKind::TypeAlias(_))
+                            | ScopeId::Variant(_)
+                    )
+                });
+
+                if is_type_or_variant {
+                    return None; // Enum variant/type reference, not a local binding
+                }
+
+                // This is a local binding definition (may shadow a param/other local)
+                let ty = typed_body.pat_ty(db, pat_id);
+                let def_span = pat_id.span(body).into();
+                Some(Target::Local {
+                    span: def_span,
+                    ty,
+                    func,
+                    binding: LocalBindingKind::Local(pat_id),
+                })
+            }
+            BodyPathContext::PatReference(_) => {
+                // Explicit pattern reference (e.g., enum variant in match) - not a local binding
+                None
+            }
+        }
     }
 
     /// Get the source span of this path reference.

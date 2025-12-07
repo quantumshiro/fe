@@ -826,6 +826,16 @@ impl<'db> LocalBinding<'db> {
         Self::Local { pat, is_mut }
     }
 
+    /// Extract the identity of this binding (what uniquely identifies it).
+    pub(crate) fn kind(&self) -> crate::core::semantic::LocalBindingKind<'db> {
+        use crate::core::semantic::LocalBindingKind;
+        match self {
+            Self::Local { pat, .. } => LocalBindingKind::Local(*pat),
+            Self::Param { idx, .. } => LocalBindingKind::Param(*idx),
+            Self::EffectParam { ident, .. } => LocalBindingKind::EffectParam(*ident),
+        }
+    }
+
     pub(super) fn is_mut(&self) -> bool {
         match self {
             LocalBinding::Local { is_mut, .. }

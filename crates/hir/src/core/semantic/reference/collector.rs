@@ -6,13 +6,27 @@
 use crate::{
     HirDb,
     hir_def::{
-        Body, Enum, Expr, ExprId, Func, Impl, ImplTrait, Struct, Trait, TypeAlias, Use, UsePathId,
+        Body, Enum, Expr, ExprId, Func, Impl, ImplTrait, Pat, PatId, Struct, Trait, TypeAlias, Use,
+        UsePathId,
     },
-    span::lazy_spans::{LazyBodySpan, LazyExprSpan, LazyPathSpan, LazyUsePathSpan},
-    visitor::{Visitor, VisitorCtxt, walk_expr, walk_path, walk_use_path},
+    span::lazy_spans::{LazyBodySpan, LazyExprSpan, LazyPatSpan, LazyPathSpan, LazyUsePathSpan},
+    visitor::{Visitor, VisitorCtxt, walk_expr, walk_pat, walk_path, walk_use_path},
 };
 
-use super::{FieldAccessView, MethodCallView, PathId, PathView, ReferenceView, UsePathView};
+use super::{
+    BodyPathContext, FieldAccessView, MethodCallView, PathId, PathView, ReferenceView, UsePathView,
+};
+
+/// Tracks context for path references during body traversal.
+#[derive(Clone, Copy)]
+enum PathContext {
+    /// Path is in an expression
+    Expr(ExprId),
+    /// Path is in a pattern (could be binding or reference, determined later)
+    Pat(PatId),
+    /// No body context (signatures, types, etc.)
+    None,
+}
 
 /// Single unified collector for all reference types.
 pub(super) struct ReferenceCollector<'db> {
@@ -20,6 +34,9 @@ pub(super) struct ReferenceCollector<'db> {
     pub refs: Vec<ReferenceView<'db>>,
     current_body: Option<Body<'db>>,
     current_use: Option<Use<'db>>,
+    /// Tracks the current context when visiting paths inside a body.
+    /// Set before walking expressions/patterns that contain paths.
+    path_context: PathContext,
     skip_body: bool,
 }
 
@@ -30,6 +47,7 @@ impl<'db> ReferenceCollector<'db> {
             refs: Vec::new(),
             current_body: None,
             current_use: None,
+            path_context: PathContext::None,
             skip_body,
         }
     }
@@ -40,6 +58,7 @@ impl<'db> ReferenceCollector<'db> {
             refs: Vec::new(),
             current_body: Some(body),
             current_use: None,
+            path_context: PathContext::None,
             skip_body: false,
         }
     }
@@ -48,8 +67,22 @@ impl<'db> ReferenceCollector<'db> {
 impl<'db> Visitor<'db> for ReferenceCollector<'db> {
     fn visit_path(&mut self, ctxt: &mut VisitorCtxt<'db, LazyPathSpan<'db>>, path: PathId<'db>) {
         if let Some(span) = ctxt.span() {
-            self.refs
-                .push(ReferenceView::Path(PathView::new(path, ctxt.scope(), span)));
+            let mut path_view = PathView::new(path, ctxt.scope(), span);
+
+            // Attach body context if we're inside a body expression/pattern
+            match self.path_context {
+                PathContext::Expr(expr_id) => {
+                    path_view = path_view.with_body_ctx(BodyPathContext::Expr(expr_id));
+                }
+                PathContext::Pat(pat_id) => {
+                    // For patterns, we store PatBinding initially.
+                    // local_target() will determine if it's actually a binding or reference.
+                    path_view = path_view.with_body_ctx(BodyPathContext::PatBinding(pat_id));
+                }
+                PathContext::None => {}
+            }
+
+            self.refs.push(ReferenceView::Path(path_view));
         }
         walk_path(self, ctxt, path);
     }
@@ -89,10 +122,35 @@ impl<'db> Visitor<'db> for ReferenceCollector<'db> {
                         }));
                     }
                 }
+                Expr::Path(_) => {
+                    // Set context for path expressions before walking
+                    let old_ctx = self.path_context;
+                    self.path_context = PathContext::Expr(expr);
+                    walk_expr(self, ctxt, expr);
+                    self.path_context = old_ctx;
+                    return;
+                }
                 _ => {}
             }
         }
         walk_expr(self, ctxt, expr);
+    }
+
+    fn visit_pat(
+        &mut self,
+        ctxt: &mut VisitorCtxt<'db, LazyPatSpan<'db>>,
+        pat: PatId,
+        pat_data: &Pat<'db>,
+    ) {
+        // Set context for pattern paths before walking
+        if matches!(pat_data, Pat::Path(_, _)) {
+            let old_ctx = self.path_context;
+            self.path_context = PathContext::Pat(pat);
+            walk_pat(self, ctxt, pat);
+            self.path_context = old_ctx;
+            return;
+        }
+        walk_pat(self, ctxt, pat);
     }
 
     fn visit_use(
