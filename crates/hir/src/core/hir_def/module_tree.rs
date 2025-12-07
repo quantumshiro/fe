@@ -188,11 +188,31 @@ pub(crate) fn module_tree_impl<'db>(db: &'db dyn HirDb, ingot: Ingot<'db>) -> Mo
         }
     }
 
-    // Find root
-    let ingot_base = ingot.base(db);
-    let root_file = ingot
-        .root_file(db)
-        .unwrap_or_else(|err| panic!("module needs a root file for ingot {}: {err:?}", ingot_base));
+    // Find root - if there's no root file, use the first source file as fallback
+    let root_file = match ingot.root_file(db) {
+        Ok(file) => file,
+        Err(_) => {
+            // No root file found - use first source file as fallback root
+            // This handles non-conformant ingots (e.g., directories without src/lib.fe)
+            let first_source = files.iter().find_map(|(_, file)| {
+                if matches!(file.kind(db), Some(IngotFileKind::Source)) {
+                    Some(file)
+                } else {
+                    None
+                }
+            });
+            match first_source {
+                Some(file) => file,
+                None => {
+                    // No source files at all - this is a bug, ingots should have source files
+                    panic!(
+                        "Ingot {:?} has no source files. This indicates a bug in ingot construction.",
+                        ingot
+                    );
+                }
+            }
+        }
+    };
     let root_mod = map_file_to_mod_impl(db, root_file);
     let root = mod_map[&root_mod];
 
