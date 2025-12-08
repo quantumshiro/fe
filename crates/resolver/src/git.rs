@@ -144,12 +144,23 @@ impl GitResolver {
                 error,
             }
         })?;
-        let object =
-            repo.find_object(oid, None)
-                .map_err(|error| GitResolutionError::RevisionLookup {
+        let object = match repo.find_object(oid, None) {
+            Ok(object) => object,
+            Err(error) if description.source.scheme() == "file" => {
+                return Err(GitResolutionError::RevisionLookup {
                     rev: description.rev.clone(),
                     error,
-                })?;
+                });
+            }
+            Err(_) => {
+                self.fetch_default_remote(repo, description)?;
+                repo.find_object(oid, None)
+                    .map_err(|error| GitResolutionError::RevisionLookup {
+                        rev: description.rev.clone(),
+                        error,
+                    })?
+            }
+        };
         let mut builder = CheckoutBuilder::new();
         builder.force();
         repo.checkout_tree(&object, Some(&mut builder))
@@ -162,6 +173,26 @@ impl GitResolver {
                 rev: description.rev.clone(),
                 error,
             })?;
+        Ok(())
+    }
+
+    fn fetch_default_remote(
+        &self,
+        repo: &Repository,
+        description: &GitDescription,
+    ) -> Result<(), GitResolutionError> {
+        let mut remote =
+            repo.find_remote("origin")
+                .map_err(|error| GitResolutionError::FetchRepository {
+                    source: description.source.clone(),
+                    error,
+                })?;
+        remote.fetch::<&str>(&[], None, None).map_err(|error| {
+            GitResolutionError::FetchRepository {
+                source: description.source.clone(),
+                error,
+            }
+        })?;
         Ok(())
     }
 
@@ -237,6 +268,10 @@ pub enum GitResolutionError {
         rev: String,
         error: git2::Error,
     },
+    FetchRepository {
+        source: Url,
+        error: git2::Error,
+    },
     MissingSubdirectory {
         repo_path: Utf8PathBuf,
         subdirectory: Utf8PathBuf,
@@ -271,6 +306,12 @@ impl fmt::Display for GitResolutionError {
             GitResolutionError::Checkout { rev, error } => {
                 write!(f, "Failed to checkout revision '{rev}': {error}")
             }
+            GitResolutionError::FetchRepository { source, error } => {
+                write!(
+                    f,
+                    "Failed to fetch updates for repository {source}: {error}"
+                )
+            }
             GitResolutionError::MissingSubdirectory {
                 repo_path,
                 subdirectory,
@@ -297,6 +338,7 @@ impl std::error::Error for GitResolutionError {
             GitResolutionError::InvalidRevision { error, .. } => Some(error),
             GitResolutionError::RevisionLookup { error, .. } => Some(error),
             GitResolutionError::Checkout { error, .. } => Some(error),
+            GitResolutionError::FetchRepository { error, .. } => Some(error),
             GitResolutionError::MissingSubdirectory { .. } => None,
             GitResolutionError::SourcePathConversion { .. } => None,
         }
