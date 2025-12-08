@@ -168,13 +168,23 @@ impl<'db> FunctionEmitter<'db> {
     ///
     /// Refrains from re-emitting expressions consumed elsewhere and returns
     /// `Ok(())` after optionally pushing a doc.
+    ///
+    /// However, unit-returning calls are always emitted here because the return
+    /// terminator won't emit them (it skips unit values).
     fn emit_eval_inst(
         &mut self,
         docs: &mut Vec<YulDoc>,
         value: ValueId,
         state: &mut BlockState,
     ) -> Result<(), YulError> {
-        if self.value_use_counts[value.index()] == 1
+        let value_data = self.mir_func.body.value(value);
+        let is_unit_call = matches!(&value_data.origin, ValueOrigin::Call(..))
+            && value_data.ty.is_tuple(self.db)
+            && value_data.ty.field_count(self.db) == 0;
+
+        // Unit-returning calls must always be emitted here since the return
+        // terminator won't render them.
+        if (self.value_use_counts[value.index()] == 1 || is_unit_call)
             && let Some(doc) = self.render_eval(value, state)?
         {
             docs.push(doc);
