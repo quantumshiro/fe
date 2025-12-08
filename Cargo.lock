@@ -1905,6 +1905,7 @@ dependencies = [
  "dir-test",
  "fe-common",
  "fe-driver",
+ "fe-fmt",
  "fe-hir",
  "fe-parser",
  "fe-test-utils",

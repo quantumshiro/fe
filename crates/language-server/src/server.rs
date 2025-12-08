@@ -10,9 +10,10 @@ use async_lsp::lsp_types::notification::{
     self, DidChangeTextDocument, DidChangeWatchedFiles, DidOpenTextDocument, DidSaveTextDocument,
     Initialized,
 };
+
 use async_lsp::lsp_types::request::{
-    DocumentHighlightRequest, GotoDefinition, GotoTypeDefinition, HoverRequest, References, Rename,
-    SemanticTokensFullRequest, Shutdown,
+    DocumentHighlightRequest, Formatting, GotoDefinition, GotoTypeDefinition, HoverRequest,
+    References, Rename, SemanticTokensFullRequest, Shutdown,
 };
 use async_std::stream::StreamExt;
 use futures_batch::ChunksTimeoutStreamExt;
@@ -57,6 +58,7 @@ pub(crate) fn setup(
         .handle_request::<GotoTypeDefinition>(type_definition::handle_goto_type_definition)
         .handle_request::<Rename>(rename::handle_rename)
         .handle_request::<SemanticTokensFullRequest>(semantic_tokens::handle_semantic_tokens_full)
+        .handle_request::<Formatting>(handlers::handle_formatting)
         .handle_notification::<DidOpenTextDocument>(handlers::handle_did_open_text_document)
         .handle_notification::<DidChangeTextDocument>(handlers::handle_did_change_text_document)
         .handle_notification::<DidChangeWatchedFiles>(handlers::handle_did_change_watched_files)

@@ -1,4 +1,4 @@
-use async_lsp::lsp_types::{HoverProviderCapability, ServerCapabilities};
+use async_lsp::lsp_types::{HoverProviderCapability, OneOf, ServerCapabilities};
 
 use super::semantic_tokens::semantic_tokens_options;
 
@@ -26,6 +26,8 @@ pub(crate) fn server_capabilities() -> ServerCapabilities {
         rename_provider: Some(async_lsp::lsp_types::OneOf::Left(true)),
         // semantic tokens
         semantic_tokens_provider: Some(semantic_tokens_options()),
+        // formatting
+        document_formatting_provider: Some(OneOf::Left(true)),
         // support for workspace add/remove changes
         workspace: Some(async_lsp::lsp_types::WorkspaceServerCapabilities {
             workspace_folders: Some(async_lsp::lsp_types::WorkspaceFoldersServerCapabilities {

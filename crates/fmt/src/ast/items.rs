@@ -952,7 +952,11 @@ impl ToDoc for ast::Mod {
 
         let items_doc = self
             .items()
-            .map(|items| alloc.text(" ").append(block_items_doc(items.syntax(), ast::Item::cast, ctx)))
+            .map(|items| {
+                alloc
+                    .text(" ")
+                    .append(block_items_doc(items.syntax(), ast::Item::cast, ctx))
+            })
             .unwrap_or_else(|| alloc.nil());
 
         attrs
