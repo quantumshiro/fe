@@ -14,15 +14,15 @@ use driver::DriverDataBase;
 pub type Cursor = parser::TextSize;
 
 /// Get goto target resolution for the cursor position.
+///
+/// Uses the unified target_at which handles references, definitions,
+/// and bindings, preserving ambiguity information.
 pub fn goto_target_at_cursor<'db>(
     db: &'db DriverDataBase,
     top_mod: TopLevelMod<'db>,
     cursor: Cursor,
 ) -> TargetResolution<'db> {
-    top_mod
-        .reference_at(db, cursor)
-        .map(|r| r.target_at(db, cursor))
-        .unwrap_or(TargetResolution::None)
+    top_mod.target_at(db, cursor)
 }
 
 pub async fn handle_goto_definition(
@@ -82,6 +82,14 @@ pub async fn handle_goto_definition(
 // }
 #[cfg(test)]
 mod tests {
+    use codespan_reporting::{
+        diagnostic::{Diagnostic, Label},
+        files::SimpleFiles,
+        term::{
+            self,
+            termcolor::{BufferWriter, ColorChoice},
+        },
+    };
     use common::ingot::IngotKind;
     use dir_test::{Fixture, dir_test};
     use hir::{
@@ -95,7 +103,6 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use test_utils::snap_test;
-    use tracing::error;
     use url::Url;
 
     use super::*;
@@ -155,24 +162,6 @@ mod tests {
         None
     }
 
-    // given a cursor position and a string, convert to cursor line and column
-    fn line_col_from_cursor(cursor: Cursor, s: &str) -> (usize, usize) {
-        let mut line = 0;
-        let mut col = 0;
-        for (i, c) in s.chars().enumerate() {
-            if i == Into::<usize>::into(cursor) {
-                return (line, col);
-            }
-            if c == '\n' {
-                line += 1;
-                col = 0;
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
-    }
-
     fn extract_multiple_cursor_positions_from_spans(
         db: &DriverDataBase,
         top_mod: TopLevelMod,
@@ -184,16 +173,56 @@ mod tests {
         let mut cursors = Vec::new();
         for (path, _, lazy_span) in path_collector.paths {
             for idx in 0..=path.segment_index(db) {
-                let seg_span = lazy_span.clone().segment(idx).resolve(db).unwrap();
-                cursors.push(seg_span.range.start());
+                if let Some(seg_span) = lazy_span.clone().segment(idx).resolve(db) {
+                    cursors.push(seg_span.range.start());
+                }
             }
         }
 
         cursors.sort();
         cursors.dedup();
-
-        error!("Found cursors: {:?}", cursors);
         cursors
+    }
+
+    /// Collect all path segment spans with their goto targets.
+    fn collect_goto_annotations<'db>(
+        db: &'db DriverDataBase,
+        top_mod: TopLevelMod<'db>,
+    ) -> Vec<(parser::TextRange, String)> {
+        let mut visitor_ctxt = VisitorCtxt::with_top_mod(db, top_mod);
+        let mut path_collector = PathSpanCollector::default();
+        path_collector.visit_top_mod(&mut visitor_ctxt, top_mod);
+
+        let mut annotations = Vec::new();
+
+        for (path, _, lazy_span) in path_collector.paths {
+            // For each segment of the path
+            for idx in 0..=path.segment_index(db) {
+                let Some(seg_span) = lazy_span.clone().segment(idx).resolve(db) else {
+                    continue;
+                };
+
+                // Get cursor at start of segment and resolve target
+                let cursor = seg_span.range.start();
+                let resolution = goto_target_at_cursor(db, top_mod, cursor);
+
+                if let Some(target) = resolution.first() {
+                    let label = match target {
+                        Target::Scope(scope) => {
+                            scope.pretty_path(db).unwrap_or_else(|| "?".to_string())
+                        }
+                        Target::Local { ty, .. } => {
+                            format!("local: {}", ty.pretty_print(db))
+                        }
+                    };
+                    annotations.push((seg_span.range, format!("-> {}", label)));
+                }
+            }
+        }
+
+        // Sort by span start position for consistent output
+        annotations.sort_by_key(|(range, _)| range.start());
+        annotations
     }
 
     fn make_goto_cursors_snapshot(
@@ -201,39 +230,37 @@ mod tests {
         fixture: &Fixture<&str>,
         top_mod: TopLevelMod,
     ) -> String {
-        let cursors = extract_multiple_cursor_positions_from_spans(db, top_mod);
-        let mut cursor_path_map: BTreeMap<Cursor, String> = BTreeMap::default();
+        let annotations = collect_goto_annotations(db, top_mod);
 
-        for cursor in &cursors {
-            // Get target and filter for scopes only (for snapshot compatibility)
-            let resolution = goto_target_at_cursor(db, top_mod, *cursor);
-            if let Some(target) = resolution.first()
-                && let Target::Scope(scope) = target
-                && let Some(path) = scope.pretty_path(db)
-            {
-                cursor_path_map.insert(*cursor, path);
-            }
+        // Set up codespan files
+        let mut files = SimpleFiles::new();
+        // Use just the filename for cleaner output
+        let filename = std::path::Path::new(fixture.path())
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| fixture.path().to_string());
+        let file_id = files.add(filename, fixture.content().to_string());
+
+        // Create diagnostics for each annotation
+        let diags: BTreeMap<_, _> = annotations
+            .into_iter()
+            .map(|(range, label)| {
+                let diag = Diagnostic::note()
+                    .with_labels(vec![Label::primary(file_id, range).with_message(&label)]);
+                ((range.start(), range.end()), diag)
+            })
+            .collect();
+
+        // Render with codespan
+        let writer = BufferWriter::stderr(ColorChoice::Never);
+        let mut buffer = writer.buffer();
+        let config = term::Config::default();
+
+        for diag in diags.values() {
+            term::emit(&mut buffer, &config, &files, diag).unwrap();
         }
 
-        let cursor_lines = cursor_path_map
-            .iter()
-            .map(|(cursor, path)| {
-                let (cursor_line, cursor_col) = line_col_from_cursor(*cursor, fixture.content());
-                format!("cursor position ({cursor_line:?}, {cursor_col:?}), path: {path}")
-            })
-            .collect::<Vec<_>>();
-
-        format!(
-            "{}\n---\n{}",
-            fixture
-                .content()
-                .lines()
-                .enumerate()
-                .map(|(i, line)| format!("{i:?}: {line}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            cursor_lines.join("\n")
-        )
+        std::str::from_utf8(buffer.as_slice()).unwrap().to_string()
     }
 
     #[dir_test(

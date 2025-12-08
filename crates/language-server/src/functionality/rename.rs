@@ -36,12 +36,8 @@ pub async fn handle_rename(
 
     let top_mod = map_file_to_mod(&backend.db, file);
 
-    // Get the reference at cursor and resolve its target
-    let Some(reference) = top_mod.reference_at(&backend.db, cursor) else {
-        return Ok(None);
-    };
-
-    let resolution = reference.target_at(&backend.db, cursor);
+    // Get the target at cursor (handles references, definitions, and bindings)
+    let resolution = top_mod.target_at(&backend.db, cursor);
     let Some(target) = resolution.first() else {
         return Ok(None);
     };
@@ -50,7 +46,7 @@ pub async fn handle_rename(
 
     let mut changes: FxHashMap<url::Url, Vec<TextEdit>> = FxHashMap::default();
 
-    match target {
+    match &target {
         Target::Scope(target_scope) => {
             // Skip module renames - they require file operations
             if is_module_scope(*target_scope) {

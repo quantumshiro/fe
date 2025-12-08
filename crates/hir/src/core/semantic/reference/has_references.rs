@@ -88,7 +88,7 @@ impl<'db> HasReferences<'db> for ItemKind<'db> {
 }
 
 impl<'db> TopLevelMod<'db> {
-    /// Resolve what's at a cursor position to its definition target.
+    /// Resolve what's at a cursor position to its definition target(s).
     ///
     /// This is the unified entry point for goto-definition and find-all-references.
     /// It checks (in order):
@@ -96,8 +96,8 @@ impl<'db> TopLevelMod<'db> {
     ///    (checked first because `self` params have a fallback `Self` type path
     ///    that overlaps with the param name span)
     /// 2. If cursor is on an item definition name, return that item's scope
-    /// 3. If cursor is on a reference, resolve it to its target
-    pub fn target_at<DB>(self, db: &'db DB, cursor: TextSize) -> Option<Target<'db>>
+    /// 3. If cursor is on a reference, resolve it to its target(s) - may be ambiguous
+    pub fn target_at<DB>(self, db: &'db DB, cursor: TextSize) -> super::TargetResolution<'db>
     where
         DB: HirAnalysisDb + SpannedHirDb,
     {
@@ -105,22 +105,20 @@ impl<'db> TopLevelMod<'db> {
         // (must be checked before references because `self` params have a fallback
         // `Self` type that overlaps with the param name position)
         if let Some(target) = self.binding_at(db, cursor) {
-            return Some(target);
+            return super::TargetResolution::Single(target);
         }
 
         // 2. Check if cursor is on an item definition name
         if let Some(scope) = self.definition_at(db, cursor) {
-            return Some(Target::Scope(scope));
+            return super::TargetResolution::Single(Target::Scope(scope));
         }
 
-        // 3. Check if cursor is on a reference
-        if let Some(reference) = self.reference_at(db, cursor)
-            && let Some(target) = reference.target_at(db, cursor).first()
-        {
-            return Some(target.clone());
+        // 3. Check if cursor is on a reference - preserve ambiguity
+        if let Some(reference) = self.reference_at(db, cursor) {
+            return reference.target_at(db, cursor);
         }
 
-        None
+        super::TargetResolution::None
     }
 
     /// Check if cursor is on a function parameter name.

@@ -18,7 +18,8 @@ fn find_references_at_cursor<'db>(
     cursor: Cursor,
 ) -> Vec<async_lsp::lsp_types::Location> {
     // Use the simplified API to get the target at cursor
-    let Some(target) = top_mod.target_at(db, cursor) else {
+    let resolution = top_mod.target_at(db, cursor);
+    let Some(target) = resolution.first() else {
         return vec![];
     };
 
@@ -34,7 +35,7 @@ fn find_references_at_cursor<'db>(
                     continue;
                 }
                 let mod_ = map_file_to_mod(db, file);
-                for ref_view in mod_.references_to_target(db, &target) {
+                for ref_view in mod_.references_to_target(db, target) {
                     if ref_view.span().resolve(db).is_some()
                         && let Ok(location) = to_lsp_location_from_lazy_span(db, ref_view.span())
                     {
@@ -50,7 +51,7 @@ fn find_references_at_cursor<'db>(
         }
         Target::Local { span, .. } => {
             // For locals, search within the function body
-            for ref_view in top_mod.references_to_target(db, &target) {
+            for ref_view in top_mod.references_to_target(db, target) {
                 if ref_view.span().resolve(db).is_some()
                     && let Ok(location) = to_lsp_location_from_lazy_span(db, ref_view.span())
                 {
@@ -335,7 +336,7 @@ mod tests {
                     if idx == 0 {
                         // First location is the definition - use target_at to handle both
                         // item definitions and local/param bindings
-                        if let Some(target) = ref_top_mod.target_at(&db, ref_offset) {
+                        if let Some(target) = ref_top_mod.target_at(&db, ref_offset).first() {
                             let annotation = format!(
                                 "def: defined here @ {}:{} ({} refs)",
                                 loc.range.start.line + 1,
@@ -349,7 +350,7 @@ mod tests {
                                     }
                                 }
                                 Target::Local { span, .. } => {
-                                    formatter.push_prop(ref_top_mod, span, annotation);
+                                    formatter.push_prop(ref_top_mod, span.clone(), annotation);
                                 }
                             }
                         }

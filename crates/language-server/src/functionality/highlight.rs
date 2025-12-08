@@ -18,12 +18,8 @@ fn find_highlights_at_cursor<'db>(
     top_mod: TopLevelMod<'db>,
     cursor: Cursor,
 ) -> Vec<DocumentHighlight> {
-    // Get the reference at cursor and resolve its target
-    let Some(reference) = top_mod.reference_at(db, cursor) else {
-        return vec![];
-    };
-
-    let resolution = reference.target_at(db, cursor);
+    // Get the target at cursor (handles references, definitions, and bindings)
+    let resolution = top_mod.target_at(db, cursor);
     let Some(target) = resolution.first() else {
         return vec![];
     };
