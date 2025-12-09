@@ -444,15 +444,16 @@ pub async fn handle_formatting(
 
     match fmt::format_str(source, &fmt::Config::default()) {
         Ok(formatted) => {
-            let lines: Vec<_> = source.lines().collect();
+            let end_line = source.split('\n').count().saturating_sub(1) as u32;
+            let end_character = source.rsplit('\n').next().map_or(0, |l| l.len()) as u32;
             let range = Range {
                 start: Position {
                     line: 0,
                     character: 0,
                 },
                 end: Position {
-                    line: lines.len() as u32,
-                    character: lines.last().map_or(0, |l| l.len()) as u32,
+                    line: end_line,
+                    character: end_character,
                 },
             };
             Ok(Some(vec![TextEdit {
