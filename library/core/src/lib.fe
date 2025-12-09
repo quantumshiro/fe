@@ -5,6 +5,7 @@ pub use dispatcher::Dispatcher
 pub use ops::*
 pub use ptr::*
 pub use enum_repr::*
+pub use storage_map::{StorageKey, StorageMap}
 pub use intrinsic::{
     calldatacopy,
     calldataload,
