@@ -14,6 +14,8 @@ extern {
     pub fn return_data(_: u256, _: u256) -> !
     /// Store the low byte of the second argument at the memory address.
     pub fn mstore8(_: u256, _: u8)
+    /// Return the address of a pointer value as `u256`.
+    pub fn addr_of<T>(_: T) -> u256
     /// Load a 32-byte word from storage.
     pub fn sload(_: u256) -> u256
     /// Store a 32-byte word to storage.

@@ -397,6 +397,8 @@ pub enum IntrinsicOp {
     Mload,
     /// `calldataload(offset)`
     Calldataload,
+    /// `addr_of(ptr)` - returns the address of a pointer value as `u256`.
+    AddrOf,
     /// `mstore(address, value)`
     Mstore,
     /// `mstore8(address, byte)`
@@ -425,6 +427,7 @@ impl IntrinsicOp {
             IntrinsicOp::Mload
                 | IntrinsicOp::Sload
                 | IntrinsicOp::Calldataload
+                | IntrinsicOp::AddrOf
                 | IntrinsicOp::CodeRegionOffset
                 | IntrinsicOp::CodeRegionLen
                 | IntrinsicOp::Keccak

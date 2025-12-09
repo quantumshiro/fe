@@ -337,6 +337,14 @@ impl<'db> FunctionEmitter<'db> {
                 "intrinsic does not yield a value".into(),
             ));
         }
+        if matches!(intr.op, IntrinsicOp::AddrOf) {
+            let args = self.lower_intrinsic_args(intr, state)?;
+            self.expect_intrinsic_arity(intr.op, &args, 1)?;
+            return Ok(args
+                .into_iter()
+                .next()
+                .expect("addr_of arity already checked"));
+        }
         if matches!(
             intr.op,
             IntrinsicOp::CodeRegionOffset | IntrinsicOp::CodeRegionLen
@@ -458,6 +466,7 @@ impl<'db> FunctionEmitter<'db> {
         match op {
             IntrinsicOp::Mload => "mload",
             IntrinsicOp::Calldataload => "calldataload",
+            IntrinsicOp::AddrOf => "addr_of",
             IntrinsicOp::Mstore => "mstore",
             IntrinsicOp::Mstore8 => "mstore8",
             IntrinsicOp::Sload => "sload",
