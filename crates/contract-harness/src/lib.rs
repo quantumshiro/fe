@@ -13,7 +13,7 @@ use revm::{
     },
     database::InMemoryDB,
     handler::{ExecuteCommitEvm, MainBuilder, MainContext, MainnetContext, MainnetEvm},
-    primitives::{Address, Bytes as EvmBytes},
+    primitives::{Address, Bytes as EvmBytes, TxKind},
     state::AccountInfo,
 };
 use solc_runner::{ContractBytecode, YulcError, compile_single_contract};
@@ -193,6 +193,66 @@ impl RuntimeInstance {
         })
     }
 
+    /// Deploys a contract by executing its init bytecode and using the returned runtime code.
+    /// This properly runs any initialization logic in the constructor.
+    pub fn deploy(init_bytecode_hex: &str) -> Result<Self, HarnessError> {
+        let init_code = hex_to_bytes(init_bytecode_hex)?;
+        let caller = Address::ZERO;
+
+        let mut db = InMemoryDB::default();
+        // Give the caller some balance for deployment
+        db.insert_account_info(
+            caller,
+            AccountInfo::new(
+                U256::from(1_000_000_000u64),
+                0,
+                Default::default(),
+                Bytecode::default(),
+            ),
+        );
+
+        let ctx = Context::mainnet().with_db(db);
+        let mut evm = ctx.build_mainnet();
+
+        // Create deployment transaction (TxKind::Create means contract creation)
+        let tx = TxEnv::builder()
+            .caller(caller)
+            .gas_limit(10_000_000)
+            .gas_price(0)
+            .kind(TxKind::Create)
+            .data(EvmBytes::from(init_code))
+            .nonce(0)
+            .build()
+            .map_err(|err| HarnessError::Execution(format!("{err:?}")))?;
+
+        let result = evm
+            .transact_commit(tx)
+            .map_err(|err| HarnessError::Execution(err.to_string()))?;
+
+        match result {
+            ExecutionResult::Success {
+                output: Output::Create(_, Some(deployed_address)),
+                ..
+            } => {
+                // The contract was deployed successfully; revm has already inserted the account
+                Ok(Self {
+                    evm,
+                    address: deployed_address,
+                    next_nonce: 1,
+                })
+            }
+            ExecutionResult::Success { output, .. } => Err(HarnessError::Execution(format!(
+                "deployment returned unexpected output: {output:?}"
+            ))),
+            ExecutionResult::Revert { output, .. } => {
+                Err(HarnessError::Revert(RevertData(output.to_vec())))
+            }
+            ExecutionResult::Halt { reason, gas_used } => {
+                Err(HarnessError::Halted { reason, gas_used })
+            }
+        }
+    }
+
     /// Executes the runtime with arbitrary calldata.
     pub fn call_raw(
         &mut self,
@@ -302,6 +362,17 @@ impl FeContractHarness {
     /// Creates a persistent runtime instance that can serve multiple calls.
     pub fn deploy_instance(&self) -> Result<RuntimeInstance, HarnessError> {
         RuntimeInstance::new(&self.contract.runtime_bytecode)
+    }
+
+    /// Deploys a contract by running the init bytecode, initializing storage.
+    /// Use this when your contract has initialization logic (e.g., storage setup).
+    pub fn deploy_with_init(&self) -> Result<RuntimeInstance, HarnessError> {
+        RuntimeInstance::deploy(&self.contract.bytecode)
+    }
+
+    /// Returns the raw init bytecode emitted by `solc`.
+    pub fn init_bytecode(&self) -> &str {
+        &self.contract.bytecode
     }
 }
 
