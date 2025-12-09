@@ -413,6 +413,8 @@ pub enum IntrinsicOp {
     CodeRegionOffset,
     /// `datasize` of the code region rooted at a function.
     CodeRegionLen,
+    /// `keccak256(ptr, len)`
+    Keccak,
 }
 
 impl IntrinsicOp {
@@ -425,6 +427,7 @@ impl IntrinsicOp {
                 | IntrinsicOp::Calldataload
                 | IntrinsicOp::CodeRegionOffset
                 | IntrinsicOp::CodeRegionLen
+                | IntrinsicOp::Keccak
         )
     }
 }

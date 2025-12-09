@@ -12,6 +12,7 @@ pub use intrinsic::{
     code_region_offset,
     codecopy,
     create2,
+    keccak,
     mload,
     mstore,
     mstore8,

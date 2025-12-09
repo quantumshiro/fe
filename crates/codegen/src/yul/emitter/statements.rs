@@ -344,8 +344,16 @@ impl<'db> FunctionEmitter<'db> {
             return self.lower_code_region_query(intr);
         }
         let args = self.lower_intrinsic_args(intr, state)?;
-        self.expect_intrinsic_arity(intr.op, &args, 1)?;
-        Ok(format!("{}({})", self.intrinsic_name(intr.op), args[0]))
+        let expected = match intr.op {
+            IntrinsicOp::Keccak => 2,
+            _ => 1,
+        };
+        self.expect_intrinsic_arity(intr.op, &args, expected)?;
+        Ok(format!(
+            "{}({})",
+            self.intrinsic_name(intr.op),
+            args.join(", ")
+        ))
     }
 
     /// Lowers `code_region_offset/len` into `dataoffset/datasize`.
@@ -458,6 +466,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::Codecopy => "codecopy",
             IntrinsicOp::CodeRegionOffset => "code_region_offset",
             IntrinsicOp::CodeRegionLen => "code_region_len",
+            IntrinsicOp::Keccak => "keccak256",
         }
     }
 }
