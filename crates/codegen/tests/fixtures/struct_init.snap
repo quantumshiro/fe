@@ -6,8 +6,8 @@ input_file: tests/fixtures/struct_init.fe
 ---
 function make_dummy() -> ret {
   let v0 := alloc(40)
-  store_field__deduped(v0, 0, 0, 42)
-  store_field__deduped(v0, 0, 8, 99)
+  store_field__deduped(v0, 0, 42)
+  store_field__deduped(v0, 8, 99)
   let v1 := v0
   ret := v1
 }
@@ -24,18 +24,13 @@ function alloc(size) -> ret {
     ret := v0
   }
 }
-function store_field__deduped(addr, space, offset, value) {
-  let v0 := add(addr, offset)
-  switch space
-    case 0 {
-      mstore(v0, to_word__deduped(value))
-    }
-    case 1 {
-      sstore(v0, to_word__deduped(value))
-    }
-    default {
-    }
+function store_field__deduped(ptr, offset, value) {
+  let v0 := add(ptr, offset)
+  store__MemPtr__d0292394fccae3e4(v0, to_word__deduped(value))
 }
 function to_word__deduped(self) -> ret {
   ret := self
+}
+function store__MemPtr__d0292394fccae3e4(addr, value) {
+  mstore(addr, value)
 }

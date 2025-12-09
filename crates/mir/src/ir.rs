@@ -37,6 +37,8 @@ pub struct MirFunction<'db> {
     pub contract_function: Option<ContractFunction>,
     /// Symbol name used for codegen (includes monomorphization suffix when present).
     pub symbol_name: String,
+    /// For methods, the address space variant of the receiver for this instance.
+    pub receiver_space: Option<AddressSpaceKind>,
 }
 
 /// A function body expressed as basic blocks.
@@ -349,6 +351,13 @@ pub enum MatchArmPattern {
     },
 }
 
+/// Address space where a value lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AddressSpaceKind {
+    Memory,
+    Storage,
+}
+
 #[derive(Debug, Clone)]
 pub struct CallOrigin<'db> {
     pub expr: ExprId,
@@ -356,6 +365,8 @@ pub struct CallOrigin<'db> {
     pub args: Vec<ValueId>,
     /// Final lowered symbol name of the callee after monomorphization.
     pub resolved_name: Option<String>,
+    /// For methods on struct types, the statically known address space of the receiver.
+    pub receiver_space: Option<AddressSpaceKind>,
 }
 
 #[derive(Debug, Clone)]

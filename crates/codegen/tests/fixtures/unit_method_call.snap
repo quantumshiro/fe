@@ -7,5 +7,7 @@ input_file: tests/fixtures/unit_method_call.fe
 function counter_increment(self) {
 }
 function call_unit_method(c) {
-  counter_increment(c)
+  counter_increment_mem(c)
+}
+function counter_increment_mem(self) {
 }

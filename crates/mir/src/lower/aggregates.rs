@@ -29,6 +29,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: alloc_callable,
                 args: vec![size_value],
+                receiver_space: None,
                 resolved_name: None,
             }),
         });
@@ -60,10 +61,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         base_value: ValueId,
         variant_index: u64,
     ) {
-        let space_value = self.address_space_literal(self.value_address_space(base_value));
+        let ptr_ty = match self.value_address_space(base_value) {
+            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+        };
         let store_discr_callable =
             self.core
-                .make_callable(expr, CoreHelper::StoreDiscriminant, &[]);
+                .make_callable(expr, CoreHelper::StoreDiscriminant, &[ptr_ty]);
         let discr_value = self.synthetic_u256(BigUint::from(variant_index));
         let store_ret_ty = store_discr_callable.ret_ty(self.db);
         let store_discr_call = self.mir_body.alloc_value(ValueData {
@@ -71,7 +75,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             origin: ValueOrigin::Call(CallOrigin {
                 expr,
                 callable: store_discr_callable,
-                args: vec![base_value, space_value, discr_value],
+                args: vec![base_value, discr_value],
+                receiver_space: None,
                 resolved_name: None,
             }),
         });
@@ -102,14 +107,22 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         block: BasicBlockId,
         base_value: ValueId,
         stores: &[(u64, TyId<'db>, ValueId)],
-        helper: CoreHelper,
     ) {
         if stores.is_empty() {
             return;
         }
-        let space_value = self.address_space_literal(self.value_address_space(base_value));
+        let (ptr_ty, helper) = match self.value_address_space(base_value) {
+            AddressSpaceKind::Memory => (
+                self.core.helper_ty(CoreHelperTy::MemPtr),
+                CoreHelper::StoreField,
+            ),
+            AddressSpaceKind::Storage => (
+                self.core.helper_ty(CoreHelperTy::StorPtr),
+                CoreHelper::StoreField,
+            ),
+        };
         for (offset_bytes, field_ty, field_value) in stores {
-            let callable = self.core.make_callable(expr, helper, &[*field_ty]);
+            let callable = self.core.make_callable(expr, helper, &[ptr_ty, *field_ty]);
             let offset_value = self.synthetic_u256(BigUint::from(*offset_bytes));
             let store_ret_ty = callable.ret_ty(self.db);
             let store_call = self.mir_body.alloc_value(ValueData {
@@ -117,7 +130,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 origin: ValueOrigin::Call(CallOrigin {
                     expr,
                     callable,
-                    args: vec![base_value, space_value, offset_value, *field_value],
+                    args: vec![base_value, offset_value, *field_value],
+                    receiver_space: None,
                     resolved_name: None,
                 }),
             });
@@ -184,7 +198,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             };
             stores.push((info.offset_bytes, info.field_ty, field_value));
         }
-        self.emit_store_fields(expr, curr_block, value_id, &stores, CoreHelper::StoreField);
+        self.emit_store_fields(expr, curr_block, value_id, &stores);
 
         (Some(curr_block), value_id)
     }
@@ -355,11 +369,20 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let info = self.field_access_info(lhs_ty, field_index)?;
 
         let addr_value = self.ensure_value(*lhs);
-        let space_value = self.address_space_literal(self.value_address_space(addr_value));
+        let (ptr_ty, helper) = match self.value_address_space(addr_value) {
+            AddressSpaceKind::Memory => (
+                self.core.helper_ty(CoreHelperTy::MemPtr),
+                CoreHelper::StoreField,
+            ),
+            AddressSpaceKind::Storage => (
+                self.core.helper_ty(CoreHelperTy::StorPtr),
+                CoreHelper::StoreField,
+            ),
+        };
         let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
         let callable = self
             .core
-            .make_callable(expr, CoreHelper::StoreField, &[info.field_ty]);
+            .make_callable(expr, helper, &[ptr_ty, info.field_ty]);
 
         let store_ret_ty = callable.ret_ty(self.db);
         let store_call = self.mir_body.alloc_value(ValueData {
@@ -367,7 +390,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             origin: ValueOrigin::Call(CallOrigin {
                 expr,
                 callable,
-                args: vec![addr_value, space_value, offset_value, value],
+                args: vec![addr_value, offset_value, value],
+                receiver_space: None,
                 resolved_name: None,
             }),
         });
@@ -395,30 +419,6 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         self.mir_body.alloc_value(ValueData {
             ty,
             origin: ValueOrigin::Synthetic(SyntheticValue::Int(value)),
-        })
-    }
-
-    /// Emits a synthetic `AddressSpace::Memory` literal.
-    ///
-    /// # Returns
-    /// The allocated synthetic address space value.
-    pub(super) fn synthetic_address_space_memory(&mut self) -> ValueId {
-        let ty = self.core.helper_ty(CoreHelperTy::AddressSpace);
-        self.mir_body.alloc_value(ValueData {
-            ty,
-            origin: ValueOrigin::Synthetic(SyntheticValue::Int(BigUint::from(0u8))),
-        })
-    }
-
-    /// Emits a synthetic `AddressSpace::Storage` literal.
-    ///
-    /// # Returns
-    /// The allocated synthetic storage address space value.
-    pub(super) fn synthetic_address_space_storage(&mut self) -> ValueId {
-        let ty = self.core.helper_ty(CoreHelperTy::AddressSpace);
-        self.mir_body.alloc_value(ValueData {
-            ty,
-            origin: ValueOrigin::Synthetic(SyntheticValue::Int(BigUint::from(1u8))),
         })
     }
 }

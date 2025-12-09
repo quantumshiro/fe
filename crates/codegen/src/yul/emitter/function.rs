@@ -315,15 +315,14 @@ impl<'db> FunctionEmitter<'db> {
             }
             return Some(size);
         }
-        match ty.data(self.db) {
-            TyData::TyBase(TyBase::Prim(prim)) => {
-                if *prim == PrimTy::Bool {
-                    Some(1)
-                } else {
-                    prim_int_bits(*prim).map(|bits| (bits / 8) as u64)
-                }
+        if let TyData::TyBase(TyBase::Prim(prim)) = ty.data(self.db) {
+            if *prim == PrimTy::Bool {
+                return Some(1);
             }
-            TyData::TyBase(TyBase::Adt(adt_def)) => match adt_def.adt_ref(self.db) {
+            return prim_int_bits(*prim).map(|bits| (bits / 8) as u64);
+        }
+        if let Some(adt_def) = ty.adt_def(self.db) {
+            return match adt_def.adt_ref(self.db) {
                 AdtRef::Struct(_) => {
                     let mut size = 0u64;
                     for field_ty in ty.field_types(self.db) {
@@ -332,8 +331,8 @@ impl<'db> FunctionEmitter<'db> {
                     Some(size)
                 }
                 _ => None,
-            },
-            _ => None,
+            };
         }
+        None
     }
 }

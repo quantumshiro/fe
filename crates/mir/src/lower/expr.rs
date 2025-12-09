@@ -124,6 +124,21 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     pub(super) fn try_lower_call(&mut self, expr: ExprId) -> Option<ValueId> {
         let callable = self.typed_body.callable_expr(expr)?;
         let (mut args, arg_exprs) = self.collect_call_args(expr)?;
+        let mut receiver_space = None;
+        if self.is_method_call(expr) && !args.is_empty() {
+            let needs_space = callable
+                .callable_def
+                .receiver_ty(self.db)
+                .is_some_and(|binder| {
+                    let ty = binder.instantiate_identity();
+                    ty.adt_ref(self.db)
+                        .is_some_and(|adt| matches!(adt, AdtRef::Struct(_)))
+                });
+            if needs_space {
+                let receiver_value = args[0];
+                receiver_space = Some(self.value_address_space(receiver_value));
+            }
+        }
 
         let ty = self.typed_body.expr_ty(self.db, expr);
         if let Some(kind) = self.intrinsic_kind(callable.callable_def) {
@@ -155,9 +170,16 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: callable.clone(),
                 args,
+                receiver_space,
                 resolved_name: None,
             }),
         }))
+    }
+
+    /// Returns true if the expression is a method call (as opposed to a regular function call).
+    fn is_method_call(&self, expr: ExprId) -> bool {
+        let exprs = self.body.exprs(self.db);
+        matches!(&exprs[expr], Partial::Present(Expr::MethodCall(..)))
     }
 
     /// Rewrites a field access expression into a `get_field` call.
@@ -176,18 +198,28 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let info = self.field_access_info(lhs_ty, field_index)?;
 
         let addr_value = self.ensure_value(*lhs);
-        let space_value = self.address_space_literal(self.value_address_space(addr_value));
+        let (ptr_ty, helper) = match self.value_address_space(addr_value) {
+            AddressSpaceKind::Memory => (
+                self.core.helper_ty(CoreHelperTy::MemPtr),
+                CoreHelper::GetField,
+            ),
+            AddressSpaceKind::Storage => (
+                self.core.helper_ty(CoreHelperTy::StorPtr),
+                CoreHelper::GetField,
+            ),
+        };
         let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
-        let callable =
-            self.core
-                .make_callable(expr, CoreHelper::GetField, &[lhs_ty, info.field_ty]);
+        let callable = self
+            .core
+            .make_callable(expr, helper, &[ptr_ty, info.field_ty]);
 
         Some(self.mir_body.alloc_value(ValueData {
             ty: info.field_ty,
             origin: ValueOrigin::Call(CallOrigin {
                 expr,
                 callable,
-                args: vec![addr_value, space_value, offset_value],
+                args: vec![addr_value, offset_value],
+                receiver_space: None,
                 resolved_name: None,
             }),
         }))

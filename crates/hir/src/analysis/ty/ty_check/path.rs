@@ -18,11 +18,11 @@ use crate::analysis::{
 };
 
 impl<'db> TyId<'db> {
-    pub(crate) fn adt_ref(&self, db: &'db dyn HirAnalysisDb) -> Option<AdtRef<'db>> {
+    pub fn adt_ref(&self, db: &'db dyn HirAnalysisDb) -> Option<AdtRef<'db>> {
         self.adt_def(db).map(|def| def.adt_ref(db))
     }
 
-    pub(crate) fn adt_def(&self, db: &'db dyn HirAnalysisDb) -> Option<AdtDef<'db>> {
+    pub fn adt_def(&self, db: &'db dyn HirAnalysisDb) -> Option<AdtDef<'db>> {
         let base = self.decompose_ty_app(db).0;
         match base.data(db) {
             TyData::TyBase(base) => base.adt(),
