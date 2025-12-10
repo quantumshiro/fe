@@ -90,6 +90,10 @@ impl<'db> FunctionEmitter<'db> {
                     counts[offset.index()] += 1;
                     counts[size.index()] += 1;
                 }
+                mir::Terminator::Revert { offset, size } => {
+                    counts[offset.index()] += 1;
+                    counts[size.index()] += 1;
+                }
                 mir::Terminator::Branch { cond, .. } => counts[cond.index()] += 1,
                 mir::Terminator::Switch { discr, .. } => counts[discr.index()] += 1,
                 mir::Terminator::Return(None)

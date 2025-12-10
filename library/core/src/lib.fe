@@ -18,6 +18,7 @@ pub use intrinsic::{
     mstore8,
     addr_of,
     return_data,
+    revert,
     sload,
     sstore,
 }

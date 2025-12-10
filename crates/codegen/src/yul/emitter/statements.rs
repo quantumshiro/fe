@@ -401,7 +401,7 @@ impl<'db> FunctionEmitter<'db> {
         let expected = match intr.op {
             IntrinsicOp::Codecopy => 3,
             IntrinsicOp::Mstore | IntrinsicOp::Mstore8 | IntrinsicOp::Sstore => 2,
-            IntrinsicOp::ReturnData => 2,
+            IntrinsicOp::ReturnData | IntrinsicOp::Revert => 2,
             _ => unreachable!(),
         };
         self.expect_intrinsic_arity(intr.op, &args, expected)?;
@@ -410,6 +410,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::Mstore8 => format!("mstore8({}, {})", args[0], args[1]),
             IntrinsicOp::Sstore => format!("sstore({}, {})", args[0], args[1]),
             IntrinsicOp::ReturnData => format!("return({}, {})", args[0], args[1]),
+            IntrinsicOp::Revert => format!("revert({}, {})", args[0], args[1]),
             IntrinsicOp::Codecopy => format!("codecopy({}, {}, {})", args[0], args[1], args[2]),
             _ => unreachable!(),
         };
@@ -472,6 +473,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::Sload => "sload",
             IntrinsicOp::Sstore => "sstore",
             IntrinsicOp::ReturnData => "return",
+            IntrinsicOp::Revert => "revert",
             IntrinsicOp::Codecopy => "codecopy",
             IntrinsicOp::CodeRegionOffset => "code_region_offset",
             IntrinsicOp::CodeRegionLen => "code_region_len",

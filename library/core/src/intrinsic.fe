@@ -12,6 +12,8 @@ extern {
     pub fn mstore(_: u256, _: u256)
     /// Return `size` bytes starting at `offset` to the caller.
     pub fn return_data(_: u256, _: u256) -> !
+    /// Revert with `size` bytes starting at `offset`.
+    pub fn revert(_: u256, _: u256) -> !
     /// Store the low byte of the second argument at the memory address.
     pub fn mstore8(_: u256, _: u8)
     /// Return the address of a pointer value as `u256`.

@@ -196,6 +196,8 @@ pub enum Terminator {
     Return(Option<ValueId>),
     /// Return from the function using raw memory pointer/size (core::return_data).
     ReturnData { offset: ValueId, size: ValueId },
+    /// Abort execution and revert with memory region at `offset`/`size`.
+    Revert { offset: ValueId, size: ValueId },
     /// Unconditional jump to another block.
     Goto { target: BasicBlockId },
     /// Conditional branch based on a boolean value.
@@ -428,6 +430,8 @@ pub enum IntrinsicOp {
     CodeRegionLen,
     /// `keccak256(ptr, len)`
     Keccak,
+    /// `revert(offset, size)`
+    Revert,
 }
 
 impl IntrinsicOp {
