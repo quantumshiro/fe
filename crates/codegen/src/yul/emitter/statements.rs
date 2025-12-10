@@ -354,6 +354,7 @@ impl<'db> FunctionEmitter<'db> {
         let args = self.lower_intrinsic_args(intr, state)?;
         let expected = match intr.op {
             IntrinsicOp::Keccak => 2,
+            IntrinsicOp::Caller => 0,
             _ => 1,
         };
         self.expect_intrinsic_arity(intr.op, &args, expected)?;
@@ -402,6 +403,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::Codecopy => 3,
             IntrinsicOp::Mstore | IntrinsicOp::Mstore8 | IntrinsicOp::Sstore => 2,
             IntrinsicOp::ReturnData | IntrinsicOp::Revert => 2,
+            IntrinsicOp::Caller => 0,
             _ => unreachable!(),
         };
         self.expect_intrinsic_arity(intr.op, &args, expected)?;
@@ -412,6 +414,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::ReturnData => format!("return({}, {})", args[0], args[1]),
             IntrinsicOp::Revert => format!("revert({}, {})", args[0], args[1]),
             IntrinsicOp::Codecopy => format!("codecopy({}, {}, {})", args[0], args[1], args[2]),
+            IntrinsicOp::Caller => String::from("caller()"),
             _ => unreachable!(),
         };
         Ok(Some(YulDoc::line(line)))
@@ -478,6 +481,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::CodeRegionOffset => "code_region_offset",
             IntrinsicOp::CodeRegionLen => "code_region_len",
             IntrinsicOp::Keccak => "keccak256",
+            IntrinsicOp::Caller => "caller",
         }
     }
 }

@@ -85,6 +85,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             "code_region_offset" => Some(IntrinsicOp::CodeRegionOffset),
             "code_region_len" => Some(IntrinsicOp::CodeRegionLen),
             "keccak" => Some(IntrinsicOp::Keccak),
+            "caller" => Some(IntrinsicOp::Caller),
             _ => None,
         }
     }

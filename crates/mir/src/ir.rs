@@ -432,6 +432,8 @@ pub enum IntrinsicOp {
     Keccak,
     /// `revert(offset, size)`
     Revert,
+    /// `caller()`
+    Caller,
 }
 
 impl IntrinsicOp {
@@ -446,6 +448,7 @@ impl IntrinsicOp {
                 | IntrinsicOp::CodeRegionOffset
                 | IntrinsicOp::CodeRegionLen
                 | IntrinsicOp::Keccak
+                | IntrinsicOp::Caller
         )
     }
 }

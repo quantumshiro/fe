@@ -19,6 +19,7 @@ pub use intrinsic::{
     addr_of,
     return_data,
     revert,
+    caller,
     sload,
     sstore,
 }

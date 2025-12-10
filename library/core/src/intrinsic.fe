@@ -27,6 +27,8 @@ extern {
     pub fn create2(value: u256, offset: u256, len: u256, salt: u256)
     /// Compute `keccak256` over a memory region.
     pub fn keccak(_: u256, _: u256) -> u256
+    /// Return the address of the caller.
+    pub fn caller() -> u256
     /// Return the code offset/size for the call graph rooted at `func`.
     ///
     /// This is resolved at compile time and is intended for low-level contract
