@@ -7,7 +7,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{TypedBody, check_body_owner, owner::BodyOwner};
 
 use crate::{
-    HirDb,
     analysis::{
         HirAnalysisDb,
         name_resolution::{ExpectedPathKind, PathRes, diagnostics::PathResDiag, resolve_path},
@@ -22,7 +21,7 @@ use crate::{
         },
     },
     hir_def::{Contract, IdentId, ItemKind, Mod, PathId, Struct, scope_graph::ScopeId},
-    span::{DesugaredOrigin, DynLazySpan, HirOrigin, path::LazyPathSpan},
+    span::{DynLazySpan, path::LazyPathSpan},
 };
 
 /// Result of resolving a variant path in a recv arm.
@@ -37,18 +36,6 @@ pub enum VariantResolution<'db> {
     /// Path resolves to a type that implements MsgVariant but is not a variant
     /// of the specified msg module.
     NotVariantOfMsg(TyId<'db>),
-}
-
-/// Returns true if a module was desugared from a `msg` block.
-fn is_msg_mod<'db>(scope: ScopeId<'db>, db: &'db dyn HirDb) -> bool {
-    if let ScopeId::Item(ItemKind::Mod(mod_)) = scope {
-        matches!(
-            mod_.origin(db),
-            HirOrigin::Desugared(DesugaredOrigin::Msg(_))
-        )
-    } else {
-        false
-    }
 }
 
 /// Returns true if a struct implements the core MsgVariant trait.
@@ -650,7 +637,8 @@ pub(super) fn resolve_recv_msg_mod<'db>(
             }
             None
         }
-        Ok(PathRes::Mod(scope)) if is_msg_mod(scope, db) => {
+        Ok(PathRes::Mod(scope)) => {
+            // Accept any module as a recv root (both msg-desugared and manually defined)
             if let ScopeId::Item(ItemKind::Mod(mod_)) = scope {
                 return Some(mod_);
             }
