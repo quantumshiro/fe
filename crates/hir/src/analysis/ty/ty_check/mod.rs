@@ -134,30 +134,42 @@ impl<'db> TyChecker<'db> {
     ) -> (TyId<'db>, TyId<'db>) {
         let invalid_ty = TyId::invalid(self.db, InvalidCause::Other);
 
-        // Resolve the msg definition (Msg type or msg module)
-        let Some(msg_mod) = contract::resolve_recv_msg_mod(
+        // Get variant path from arm pattern
+        let Some(variant_path) = arm.variant_path(self.db) else {
+            return (invalid_ty, invalid_ty);
+        };
+
+        let assumptions = self.env.assumptions();
+
+        // Resolve based on whether this is a named or bare recv block
+        let resolved = if let Some(msg_mod) = contract::resolve_recv_msg_mod(
             self.db,
             contract,
             msg_path,
             path_span,
             &mut self.diags,
             false,
-        ) else {
-            return (invalid_ty, invalid_ty);
-        };
-
-        // Get variant path from arm pattern
-        let Some(variant_path) = arm.variant_path(self.db) else {
-            return (invalid_ty, invalid_ty);
-        };
-
-        // Resolve the variant within the msg definition
-        let assumptions = self.env.assumptions();
-        let Some(resolved) =
-            contract::resolve_variant_in_msg(self.db, msg_mod, variant_path, assumptions)
-        else {
-            // Return invalid types to suppress spurious type mismatch errors
-            // when the pattern doesn't resolve to a valid msg variant
+        ) {
+            // Named recv block - resolve within the msg module
+            match contract::resolve_variant_in_msg(self.db, contract, msg_mod, variant_path, assumptions) {
+                contract::VariantResolution::Ok(resolved) => resolved,
+                _ => {
+                    // Return invalid types to suppress spurious type mismatch errors
+                    // when the pattern doesn't resolve to a valid msg variant
+                    return (invalid_ty, invalid_ty);
+                }
+            }
+        } else if msg_path.is_none() {
+            // Bare recv block - resolve from contract scope
+            match contract::resolve_variant_bare(self.db, contract, variant_path, assumptions) {
+                contract::VariantResolution::Ok(resolved) => resolved,
+                _ => {
+                    // Return invalid types to suppress spurious type mismatch errors
+                    return (invalid_ty, invalid_ty);
+                }
+            }
+        } else {
+            // msg_path was Some but didn't resolve - diagnostics already emitted
             return (invalid_ty, invalid_ty);
         };
 

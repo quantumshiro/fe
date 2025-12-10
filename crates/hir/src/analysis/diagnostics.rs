@@ -2669,6 +2669,77 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     error_code,
                 }
             }
+            BodyDiag::RecvArmNotVariantOfMsg {
+                primary,
+                variant_ty,
+                msg_name,
+            } => {
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "`{}` is not a variant of `{}`",
+                        variant_ty.pretty_print(db),
+                        msg_name.data(db)
+                    ),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "type is not a variant of the specified msg".to_string(),
+                    sub_diagnostics,
+                    notes: vec![
+                        "in a named recv block, only variants defined in that msg module are allowed".to_string(),
+                    ],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvArmNotMsgVariantTrait { primary, given_ty } => {
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "`{}` does not implement `MsgVariant`",
+                        given_ty.pretty_print(db)
+                    ),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "type does not implement MsgVariant trait".to_string(),
+                    sub_diagnostics,
+                    notes: vec![
+                        "recv handlers must use types that implement the MsgVariant trait".to_string(),
+                    ],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvDuplicateHandler {
+                primary,
+                first_use,
+                handler_ty,
+            } => {
+                let ty_str = handler_ty.pretty_print(db).to_string();
+                let sub_diagnostics = vec![
+                    SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!("`{}` is already handled", ty_str),
+                        span: primary.resolve(db),
+                    },
+                    SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format!("`{}` first handled here", ty_str),
+                        span: first_use.resolve(db),
+                    },
+                ];
+                CompleteDiagnostic {
+                    severity,
+                    message: "duplicate message handler".to_string(),
+                    sub_diagnostics,
+                    notes: vec![
+                        "each message type can only be handled once in a contract".to_string(),
+                    ],
+                    error_code,
+                }
+            }
         }
     }
 }

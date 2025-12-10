@@ -427,6 +427,27 @@ pub enum BodyDiag<'db> {
         first_variant: IdentId<'db>,
         second_variant: IdentId<'db>,
     },
+
+    /// A recv arm pattern resolves to a type that implements MsgVariant,
+    /// but is not a variant of the specified msg module
+    RecvArmNotVariantOfMsg {
+        primary: DynLazySpan<'db>,
+        variant_ty: TyId<'db>,
+        msg_name: IdentId<'db>,
+    },
+
+    /// A recv arm pattern resolves to a type that does not implement MsgVariant
+    RecvArmNotMsgVariantTrait {
+        primary: DynLazySpan<'db>,
+        given_ty: TyId<'db>,
+    },
+
+    /// The same message handler type is handled multiple times across recv blocks
+    RecvDuplicateHandler {
+        primary: DynLazySpan<'db>,
+        first_use: DynLazySpan<'db>,
+        handler_ty: TyId<'db>,
+    },
 }
 
 impl<'db> BodyDiag<'db> {
@@ -553,6 +574,9 @@ impl<'db> BodyDiag<'db> {
             Self::RecvMissingMsgVariants { .. } => 45,
             Self::RecvDuplicateMsgBlock { .. } => 46,
             Self::RecvDuplicateSelector { .. } => 47,
+            Self::RecvArmNotVariantOfMsg { .. } => 48,
+            Self::RecvArmNotMsgVariantTrait { .. } => 49,
+            Self::RecvDuplicateHandler { .. } => 50,
         }
     }
 }
