@@ -2534,10 +2534,7 @@ impl DiagnosticVoucher for BodyDiag<'_> {
             BodyDiag::RecvArmNotMsgVariant { primary, msg_name } => {
                 let sub_diagnostics = vec![SubDiagnostic {
                     style: LabelStyle::Primary,
-                    message: format!(
-                        "expected variant of `{}`, but pattern doesn't match any variant",
-                        msg_name.data(db)
-                    ),
+                    message: format!("expected variant of `{}`", msg_name.data(db)),
                     span: primary.resolve(db),
                 }];
                 CompleteDiagnostic {
@@ -2706,9 +2703,7 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     severity,
                     message: "type does not implement MsgVariant trait".to_string(),
                     sub_diagnostics,
-                    notes: vec![
-                        "recv handlers must use types that implement the MsgVariant trait".to_string(),
-                    ],
+                    notes: vec![],
                     error_code,
                 }
             }

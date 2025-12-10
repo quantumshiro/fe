@@ -13,19 +13,19 @@ error[8-0042]: recv arm pattern is not a variant of the msg type
    ┌─ recv_arm_not_msg_variant.fe:29:9
    │
 29 │         NotAVariant { foo } -> u64 {
-   │         ^^^^^^^^^^^^^^^^^^^ expected variant of `BankMsg`, but pattern doesn't match any variant
+   │         ^^^^^^^^^^^^^^^^^^^ expected variant of `BankMsg`
 
 error[8-0042]: recv arm pattern is not a variant of the msg type
    ┌─ recv_arm_not_msg_variant.fe:40:9
    │
 40 │         Ping -> bool {
-   │         ^^^^ expected variant of `BankMsg`, but pattern doesn't match any variant
+   │         ^^^^ expected variant of `BankMsg`
 
 error[8-0042]: recv arm pattern is not a variant of the msg type
    ┌─ recv_arm_not_msg_variant.fe:51:9
    │
 51 │         random_identifier -> bool {
-   │         ^^^^^^^^^^^^^^^^^ expected variant of `BankMsg`, but pattern doesn't match any variant
+   │         ^^^^^^^^^^^^^^^^^ expected variant of `BankMsg`
 
 error[8-0045]: recv block missing msg variants
    ┌─ recv_arm_not_msg_variant.fe:22:10

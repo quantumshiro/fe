@@ -151,7 +151,7 @@ impl<'db> TyChecker<'db> {
             false,
         ) {
             // Named recv block - resolve within the msg module
-            match contract::resolve_variant_in_msg(self.db, contract, msg_mod, variant_path, assumptions) {
+            match contract::resolve_variant_in_msg(self.db, msg_mod, variant_path, assumptions) {
                 contract::VariantResolution::Ok(resolved) => resolved,
                 _ => {
                     // Return invalid types to suppress spurious type mismatch errors

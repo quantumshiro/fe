@@ -66,22 +66,6 @@ fn msg_variants<'db>(
         .filter(move |s| implements_msg_variant(db, *s))
 }
 
-/// Checks if a struct is a variant of a msg module (child of module AND implements MsgVariant).
-fn is_variant_of_msg<'db>(
-    db: &'db dyn HirAnalysisDb,
-    msg_mod: Mod<'db>,
-    struct_: Struct<'db>,
-) -> bool {
-    let struct_scope = struct_.scope();
-    if let Some(parent_scope) = struct_scope.parent(db)
-        && let ScopeId::Item(ItemKind::Mod(parent_mod)) = parent_scope
-        && parent_mod == msg_mod
-    {
-        return implements_msg_variant(db, struct_);
-    }
-    false
-}
-
 /// Resolved msg variant in a recv arm.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolvedRecvVariant<'db> {
@@ -95,42 +79,28 @@ pub struct ResolvedRecvVariant<'db> {
 /// Returns a `VariantResolution` indicating success or the specific failure reason.
 pub fn resolve_variant_in_msg<'db>(
     db: &'db dyn HirAnalysisDb,
-    contract: Contract<'db>,
     msg_mod: Mod<'db>,
     variant_path: PathId<'db>,
     assumptions: PredicateListId<'db>,
 ) -> VariantResolution<'db> {
-    // First try resolving from the msg module's scope (for short names like `Transfer`)
-    let resolved_ty = match resolve_path(db, variant_path, msg_mod.scope(), assumptions, false) {
-        Ok(PathRes::Ty(ty)) => Some(ty),
-        _ => None,
-    };
-
-    // If not found in msg scope, try from contract scope (for qualified paths like `OtherMsg::Foo`)
-    let resolved_ty = resolved_ty.or_else(|| {
-        match resolve_path(db, variant_path, contract.scope(), assumptions, false) {
-            Ok(PathRes::Ty(ty)) => Some(ty),
-            _ => None,
-        }
-    });
-
-    let Some(ty) = resolved_ty else {
+    let Ok(PathRes::Ty(ty)) = resolve_path(db, variant_path, msg_mod.scope(), assumptions, false)
+    else {
         return VariantResolution::NotFound;
     };
 
     if let Some(adt_def) = ty.adt_def(db)
-        && let AdtRef::Struct(s) = adt_def.adt_ref(db)
+        && let AdtRef::Struct(struct_) = adt_def.adt_ref(db)
+        && implements_msg_variant(db, struct_)
     {
-        if is_variant_of_msg(db, msg_mod, s) {
+        if let Some(parent) = struct_.scope().parent(db)
+            && parent == ScopeId::Item(ItemKind::Mod(msg_mod))
+        {
             return VariantResolution::Ok(ResolvedRecvVariant {
-                variant_struct: s,
+                variant_struct: struct_,
                 ty,
             });
         }
-        // The struct exists and implements MsgVariant, but isn't a child of this msg module
-        if implements_msg_variant(db, s) {
-            return VariantResolution::NotVariantOfMsg(ty);
-        }
+        return VariantResolution::NotVariantOfMsg(ty);
     }
     // Resolved to a type but it doesn't implement MsgVariant
     VariantResolution::NotMsgVariant(ty)
@@ -148,13 +118,12 @@ pub fn resolve_variant_bare<'db>(
         Ok(PathRes::Ty(ty)) => {
             if let Some(adt_def) = ty.adt_def(db)
                 && let AdtRef::Struct(s) = adt_def.adt_ref(db)
+                && implements_msg_variant(db, s)
             {
-                if implements_msg_variant(db, s) {
-                    return VariantResolution::Ok(ResolvedRecvVariant {
-                        variant_struct: s,
-                        ty,
-                    });
-                }
+                return VariantResolution::Ok(ResolvedRecvVariant {
+                    variant_struct: s,
+                    ty,
+                });
             }
             // Resolved to a type but it doesn't implement MsgVariant
             VariantResolution::NotMsgVariant(ty)
@@ -219,7 +188,9 @@ fn check_named_recv_block<'db>(
     let recv_span = contract.span().recv(recv_idx as usize);
     let assumptions = PredicateListId::empty_list(db);
 
-    let mut seen = FxHashMap::<Struct<'db>, DynLazySpan<'db>>::default();
+    // Use TyId for duplicate detection to correctly handle generic types
+    let mut seen = FxHashMap::<TyId<'db>, DynLazySpan<'db>>::default();
+    // Use Struct for exhaustiveness checking (tracks which base structs are covered)
     let mut covered = FxHashSet::<Struct<'db>>::default();
 
     // Get msg name for diagnostics
@@ -234,13 +205,13 @@ fn check_named_recv_block<'db>(
             continue;
         };
 
-        match resolve_variant_in_msg(db, contract, msg_mod, path, assumptions) {
+        match resolve_variant_in_msg(db, msg_mod, path, assumptions) {
             VariantResolution::Ok(resolved) => {
                 let Some(ident) = resolved.variant_struct.name(db).to_opt() else {
                     continue;
                 };
 
-                if let Some(first_span) = seen.get(&resolved.variant_struct) {
+                if let Some(first_span) = seen.get(&resolved.ty) {
                     diags.push(
                         BodyDiag::RecvArmDuplicateVariant {
                             primary: pat_span.clone(),
@@ -250,7 +221,7 @@ fn check_named_recv_block<'db>(
                         .into(),
                     );
                 } else {
-                    seen.insert(resolved.variant_struct, pat_span.clone());
+                    seen.insert(resolved.ty, pat_span.clone());
                 }
 
                 covered.insert(resolved.variant_struct);
@@ -323,7 +294,8 @@ fn check_bare_recv_block<'db>(
     let recv_span = contract.span().recv(recv_idx as usize);
     let assumptions = PredicateListId::empty_list(db);
 
-    let mut seen = FxHashMap::<Struct<'db>, DynLazySpan<'db>>::default();
+    // Use TyId as key to correctly handle generic types like GenericMsg<u8> vs GenericMsg<u16>
+    let mut seen = FxHashMap::<TyId<'db>, DynLazySpan<'db>>::default();
 
     for (arm_idx, arm) in recv.arms.data(db).iter().enumerate() {
         let pat_span: DynLazySpan<'db> = recv_span.clone().arms().arm(arm_idx).pat().into();
@@ -338,7 +310,7 @@ fn check_bare_recv_block<'db>(
                     continue;
                 };
 
-                if let Some(first_span) = seen.get(&resolved.variant_struct) {
+                if let Some(first_span) = seen.get(&resolved.ty) {
                     diags.push(
                         BodyDiag::RecvArmDuplicateVariant {
                             primary: pat_span.clone(),
@@ -348,7 +320,7 @@ fn check_bare_recv_block<'db>(
                         .into(),
                     );
                 } else {
-                    seen.insert(resolved.variant_struct, pat_span.clone());
+                    seen.insert(resolved.ty, pat_span.clone());
                 }
             }
             VariantResolution::NotMsgVariant(ty) => {
@@ -454,12 +426,7 @@ pub fn check_contract_recv_blocks<'db>(
                 // Check handler type conflicts
                 let adt_def = AdtRef::from(variant).as_adt(db);
                 let ty = TyId::adt(db, adt_def);
-                check_handler_conflict(
-                    ty,
-                    variant_span,
-                    &mut seen_handlers,
-                    &mut diags,
-                );
+                check_handler_conflict(ty, variant_span, &mut seen_handlers, &mut diags);
             }
         } else if recv.msg_path.is_none() {
             // Bare recv block - check each arm individually
@@ -470,7 +437,9 @@ pub fn check_contract_recv_blocks<'db>(
                     continue;
                 };
 
-                if let VariantResolution::Ok(resolved) = resolve_variant_bare(db, contract, path, assumptions) {
+                if let VariantResolution::Ok(resolved) =
+                    resolve_variant_bare(db, contract, path, assumptions)
+                {
                     let Some(variant_name) = resolved.variant_struct.name(db).to_opt() else {
                         continue;
                     };
@@ -488,12 +457,7 @@ pub fn check_contract_recv_blocks<'db>(
                     }
 
                     // Check handler type conflicts
-                    check_handler_conflict(
-                        resolved.ty,
-                        pat_span,
-                        &mut seen_handlers,
-                        &mut diags,
-                    );
+                    check_handler_conflict(resolved.ty, pat_span, &mut seen_handlers, &mut diags);
                 }
             }
         }
