@@ -1,6 +1,6 @@
 ---
 source: crates/language-server/src/functionality/completion.rs
-assertion_line: 1731
+assertion_line: 1728
 expression: snapshot
 input_file: test_files/completion.fe
 ---
@@ -14,18 +14,22 @@ completions:
   - Default (Interface)
   - Drawable (Interface)
   - Err (EnumMember)
-  - Helpable (Interface) [use utils::Helpable [Helpable]]
-  - Helper (Struct) [use utils::Helper [Helper]]
-  - Helper (Struct) [use shadow_test::Helper [Helper]]
+  - Helpable (Interface) [use utils::Helpable [Helpable]] {+0:use utils::Helpable}
+  - Helper (Struct) [use utils::Helper [Helper]] {+0:use utils::Helper}
+  - Helper (Struct) [use shadow_test::Helper [Helper]] {+0:use shadow_test::Helper}
   - None (EnumMember)
   - Ok (EnumMember)
   - Option (Enum)
+  - OtherThing (Struct) [use other_stuff::OtherThing [OtherThing]] {+0:use other_stuff::OtherThing}
   - Point (Struct)
   - Result (Enum)
   - Some (EnumMember)
   - another_func_with_args (Function) -> "another_func_with_args(${1:x}, ${2:y})$0" [fn another_func_with_args(x: i32, y: i32) -> i32]
-  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]]
-  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]]
+  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]] {+0:use utils::func_with_args}
+  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]] {+0:use utils::helper_func}
+  - import_test (Module) -> "import_test::"
+  - needs_import (Function) -> "needs_import()$0" [use import_test::needs_import [fn needs_import()]] {+0:use import_test::needs_import}
+  - other_stuff (Module) -> "other_stuff::"
   - panic (Function) -> "panic()$0" [fn panic() -> !]
   - self (Variable) [self: Point]
   - shadow_test (Module) -> "shadow_test::"
@@ -34,7 +38,7 @@ completions:
   - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
   - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
   - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
-  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]]
+  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]] {+0:use shadow_test::test_shadowing}
   - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
   - todo (Function) -> "todo()$0" [fn todo() -> !]
   - utils (Module) -> "utils::"
@@ -59,10 +63,11 @@ note:
    │            ^ cursor 3
 
 completions:
-  - Helpable (Interface) [use utils::Helpable [Helpable]]
-  - Helper (Struct) [use utils::Helper [Helper]]
-  - Helper (Struct) [use shadow_test::Helper [Helper]]
+  - Helpable (Interface) [use utils::Helpable [Helpable]] {+0:use utils::Helpable}
+  - Helper (Struct) [use utils::Helper [Helper]] {+0:use utils::Helper}
+  - Helper (Struct) [use shadow_test::Helper [Helper]] {+0:use shadow_test::Helper}
   - Option (Enum)
+  - OtherThing (Struct) [use other_stuff::OtherThing [OtherThing]] {+0:use other_stuff::OtherThing}
   - Point (Struct)
   - Result (Enum)
 
@@ -78,8 +83,9 @@ completions:
   - Ok (EnumMember)
   - Some (EnumMember)
   - another_func_with_args (Function) -> "another_func_with_args(${1:x}, ${2:y})$0" [fn another_func_with_args(x: i32, y: i32) -> i32]
-  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]]
-  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]]
+  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]] {+0:use utils::func_with_args}
+  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]] {+0:use utils::helper_func}
+  - needs_import (Function) -> "needs_import()$0" [use import_test::needs_import [fn needs_import()]] {+0:use import_test::needs_import}
   - panic (Function) -> "panic()$0" [fn panic() -> !]
   - result (Variable) [result: _]
   - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
@@ -87,7 +93,7 @@ completions:
   - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
   - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
   - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
-  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]]
+  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]] {+0:use shadow_test::test_shadowing}
   - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
   - todo (Function) -> "todo()$0" [fn todo() -> !]
 
@@ -110,10 +116,11 @@ note:
    │                          ^ cursor 6
 
 completions:
-  - Helpable (Interface) [use utils::Helpable [Helpable]]
-  - Helper (Struct) [use utils::Helper [Helper]]
-  - Helper (Struct) [use shadow_test::Helper [Helper]]
+  - Helpable (Interface) [use utils::Helpable [Helpable]] {+0:use utils::Helpable}
+  - Helper (Struct) [use utils::Helper [Helper]] {+0:use utils::Helper}
+  - Helper (Struct) [use shadow_test::Helper [Helper]] {+0:use shadow_test::Helper}
   - Option (Enum)
+  - OtherThing (Struct) [use other_stuff::OtherThing [OtherThing]] {+0:use other_stuff::OtherThing}
   - Point (Struct)
   - Result (Enum)
 
@@ -129,9 +136,10 @@ completions:
   - Ok (EnumMember)
   - Some (EnumMember)
   - another_func_with_args (Function) -> "another_func_with_args(${1:x}, ${2:y})$0" [fn another_func_with_args(x: i32, y: i32) -> i32]
-  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]]
-  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]]
+  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]] {+0:use utils::func_with_args}
+  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]] {+0:use utils::helper_func}
   - local_var (Variable) [local_var: {integer}]
+  - needs_import (Function) -> "needs_import()$0" [use import_test::needs_import [fn needs_import()]] {+0:use import_test::needs_import}
   - panic (Function) -> "panic()$0" [fn panic() -> !]
   - param (Variable) [param: i32]
   - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
@@ -139,7 +147,7 @@ completions:
   - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
   - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
   - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
-  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]]
+  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]] {+0:use shadow_test::test_shadowing}
   - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
   - todo (Function) -> "todo()$0" [fn todo() -> !]
   - x (Variable) [x: _]
@@ -153,5 +161,21 @@ note:
 completions:
   - Helper (Struct)
   - Option (Enum)
+  - OtherThing (Struct) [use other_stuff::OtherThing [OtherThing]] {+82:use other_stuff::OtherThing}
+  - Point (Struct)
+  - Result (Enum)
+
+note: 
+    ┌─ completion.fe:107:16
+    │
+107 │         let x: 
+    │                ^ cursor 9
+
+completions:
+  - Helpable (Interface) [use utils::Helpable [Helpable]] {+104:use utils::Helpable}
+  - Helper (Struct) [use utils::Helper [Helper]] {+104:use utils::Helper}
+  - Helper (Struct) [use shadow_test::Helper [Helper]] {+104:use shadow_test::Helper}
+  - Option (Enum)
+  - OtherThing (Struct) [use other_stuff::OtherThing [OtherThing]] {+104:use other_stuff::OtherThing}
   - Point (Struct)
   - Result (Enum)

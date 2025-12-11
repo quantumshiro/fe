@@ -592,25 +592,13 @@ fn compute_item_import_path<'db>(db: &'db DriverDataBase, item: ItemKind<'db>) -
     Some(path_parts.join("::"))
 }
 
-/// Find the position to insert new import statements.
-/// Returns the position after existing `use` statements, or at the start of the file.
-fn find_import_insertion_position(file_text: &str) -> Position {
-    let mut last_use_end_line = 0;
-    let mut in_use = false;
-
-    for (line_num, line) in file_text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("use ") {
-            in_use = true;
-            last_use_end_line = line_num + 1;
-        } else if in_use && !trimmed.is_empty() && !trimmed.starts_with("//") {
-            // Found non-use, non-empty, non-comment line after use statements
-            break;
-        }
-    }
-
+/// Find the position to insert new import statements at the top level.
+/// For top-level modules, we simply insert at the start of the file (line 0).
+/// The user can organize imports as they prefer.
+fn find_import_insertion_position(_file_text: &str) -> Position {
+    // Insert at the very start of the file for top-level modules
     Position {
-        line: last_use_end_line as u32,
+        line: 0,
         character: 0,
     }
 }
@@ -1557,11 +1545,9 @@ mod tests {
         }
 
         // Test import insertion position detection
+        // For top-level modules, we insert at line 0
         let position = find_import_insertion_position(file_text);
-        assert!(
-            position.line > 0,
-            "Expected insertion after existing imports"
-        );
+        assert_eq!(position.line, 0, "Expected insertion at start of file");
     }
 
     /// Extract cursor markers (<|>) and their positions from source text.
@@ -1608,6 +1594,17 @@ mod tests {
 
         if let Some(ref detail) = item.detail {
             result.push_str(&format!(" [{}]", detail));
+        }
+
+        // Show additional text edits (auto-imports)
+        if let Some(ref edits) = item.additional_text_edits {
+            for edit in edits {
+                result.push_str(&format!(
+                    " {{+{}:{}}}",
+                    edit.range.start.line,
+                    edit.new_text.trim()
+                ));
+            }
         }
 
         result

@@ -92,3 +92,18 @@ mod shadow_test {
         let h: <|>
     }
 }
+
+// Another module for testing auto-import insertion position
+mod other_stuff {
+    pub struct OtherThing {
+        pub data: i32
+    }
+}
+
+// Test auto-import inside an inline module
+mod import_test {
+    // Auto-import of OtherThing should insert use statement here (after opening brace)
+    pub fn needs_import() {
+        let x: <|>
+    }
+}
