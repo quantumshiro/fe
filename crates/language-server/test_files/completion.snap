@@ -1,25 +1,29 @@
 ---
 source: crates/language-server/src/functionality/completion.rs
-assertion_line: 1549
 expression: snapshot
 input_file: test_files/completion.fe
 ---
 note: 
-   ┌─ completion.fe:28:9
+   ┌─ completion.fe:32:9
    │
-28 │         
+32 │         
    │         ^ cursor 1
 
 completions:
   - Default (Interface)
   - Drawable (Interface)
   - Err (EnumMember)
+  - Helpable (Interface) [use utils::Helpable [Helpable]]
+  - Helper (Struct) [use utils::Helper [Helper]]
   - None (EnumMember)
   - Ok (EnumMember)
   - Option (Enum)
   - Point (Struct)
   - Result (Enum)
   - Some (EnumMember)
+  - another_func_with_args (Function) -> "another_func_with_args(${1:x}, ${2:y})$0" [fn another_func_with_args(x: i32, y: i32) -> i32]
+  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]]
+  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]]
   - panic (Function) -> "panic()$0" [fn panic() -> !]
   - self (Variable) [self: Point]
   - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
@@ -32,9 +36,9 @@ completions:
   - utils (Module) -> "utils::"
 
 note: 
-   ┌─ completion.fe:49:7
+   ┌─ completion.fe:53:7
    │
-49 │     p.
+53 │     p.
    │       ^ cursor 2
 
 completions:
@@ -45,20 +49,22 @@ completions:
   - y (Field) [y: i32]
 
 note: 
-   ┌─ completion.fe:54:12
+   ┌─ completion.fe:58:12
    │
-54 │     let x: 
+58 │     let x: 
    │            ^ cursor 3
 
 completions:
+  - Helpable (Interface) [use utils::Helpable [Helpable]]
+  - Helper (Struct) [use utils::Helper [Helper]]
   - Option (Enum)
   - Point (Struct)
   - Result (Enum)
 
 note: 
-   ┌─ completion.fe:59:18
+   ┌─ completion.fe:63:18
    │
-59 │     let result = 
+63 │     let result = 
    │                  ^ cursor 4
 
 completions:
@@ -66,6 +72,9 @@ completions:
   - None (EnumMember)
   - Ok (EnumMember)
   - Some (EnumMember)
+  - another_func_with_args (Function) -> "another_func_with_args(${1:x}, ${2:y})$0" [fn another_func_with_args(x: i32, y: i32) -> i32]
+  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]]
+  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]]
   - panic (Function) -> "panic()$0" [fn panic() -> !]
   - result (Variable) [result: _]
   - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
@@ -77,9 +86,9 @@ completions:
   - todo (Function) -> "todo()$0" [fn todo() -> !]
 
 note: 
-   ┌─ completion.fe:64:20
+   ┌─ completion.fe:68:20
    │
-64 │     let h = utils::
+68 │     let h = utils::
    │                    ^ cursor 5
 
 completions:
@@ -89,20 +98,22 @@ completions:
   - helper_func (Function) -> "helper_func()$0" [fn helper_func() -> i32]
 
 note: 
-   ┌─ completion.fe:67:26
+   ┌─ completion.fe:71:26
    │
-67 │ fn test_return_type() ->  {
+71 │ fn test_return_type() ->  {
    │                          ^ cursor 6
 
 completions:
+  - Helpable (Interface) [use utils::Helpable [Helpable]]
+  - Helper (Struct) [use utils::Helper [Helper]]
   - Option (Enum)
   - Point (Struct)
   - Result (Enum)
 
 note: 
-   ┌─ completion.fe:74:13
+   ┌─ completion.fe:78:13
    │
-74 │     let x = 
+78 │     let x = 
    │             ^ cursor 7
 
 completions:
@@ -110,6 +121,9 @@ completions:
   - None (EnumMember)
   - Ok (EnumMember)
   - Some (EnumMember)
+  - another_func_with_args (Function) -> "another_func_with_args(${1:x}, ${2:y})$0" [fn another_func_with_args(x: i32, y: i32) -> i32]
+  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [use utils::func_with_args [fn func_with_args(x: i32, y: i32) -> i32]]
+  - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]]
   - local_var (Variable) [local_var: {integer}]
   - panic (Function) -> "panic()$0" [fn panic() -> !]
   - param (Variable) [param: i32]

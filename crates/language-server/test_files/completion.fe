@@ -18,6 +18,10 @@ mod utils {
     }
 }
 
+pub fn another_func_with_args(x: i32, y: i32) -> i32 {
+    x + y
+}
+
 struct Point {
     x: i32,
     y: i32,

@@ -267,6 +267,9 @@ fn collect_items_from_scope<'db>(
 }
 
 /// Collect auto-import completion suggestions for public symbols not currently in scope.
+///
+/// This iterates all items in the ingot (including nested inline modules) and suggests
+/// auto-imports for public items that aren't already visible in the current scope.
 fn collect_auto_import_completions<'db>(
     db: &'db DriverDataBase,
     current_mod: TopLevelMod<'db>,
@@ -276,140 +279,317 @@ fn collect_auto_import_completions<'db>(
     items: &mut Vec<CompletionItem>,
 ) {
     let ingot = current_mod.ingot(db);
-    let module_tree = ingot.module_tree(db);
     let domain = context.to_name_domain();
 
     // Get names already visible in the current scope
     let visible_items = current_scope.items_in_scope(db, domain);
     let visible_names: std::collections::HashSet<_> = visible_items.keys().collect();
 
-    // Find where to insert the import (after existing use statements or at the top)
-    let import_position = find_import_insertion_position(file_text);
+    // Find where to insert the import (in the containing module)
+    let import_position = find_module_import_position(db, current_scope, file_text);
 
-    // Iterate over all modules in the ingot
-    for module in module_tree.all_modules() {
-        // Skip the current module (its items are already in scope)
-        if module == current_mod {
+    // Iterate all items in the ingot (includes nested inline modules)
+    for item in ingot.all_items(db).iter().copied() {
+        // Only include public items
+        if item.vis(db) != Visibility::Public {
             continue;
         }
 
-        // Compute the import path for this module
-        let Some(module_path) = compute_module_path(db, module, module_tree) else {
+        // Skip if already visible in current scope
+        let Some(name) = item.name(db) else {
+            continue;
+        };
+        let name_str = name.data(db).to_string();
+        if visible_names.contains(&name_str) {
+            continue;
+        }
+
+        // Compute the import path for this item
+        let Some(import_path) = compute_item_import_path(db, item) else {
             continue;
         };
 
-        // Get public items from this module
-        for item in module.scope_graph(db).items_dfs(db) {
-            // Only include public items
-            if item.vis(db) != Visibility::Public {
-                continue;
-            }
-
-            let Some(name) = item.name(db) else {
-                continue;
-            };
-            let name_str = name.data(db);
-
-            // Skip if already visible in current scope
-            if visible_names.contains(&name_str.to_string()) {
-                continue;
-            }
-
-            // Skip internal items (modules, impls, etc. that shouldn't be imported directly)
-            // Also filter based on completion context
-            let kind = match item {
-                ItemKind::Func(_) | ItemKind::Const(_) => {
-                    // Values - only in expression or mixed context
-                    if matches!(context, CompletionContext::Type) {
-                        continue;
-                    }
-                    match item {
-                        ItemKind::Func(_) => CompletionItemKind::FUNCTION,
-                        ItemKind::Const(_) => CompletionItemKind::CONSTANT,
-                        _ => unreachable!(),
-                    }
-                }
-                ItemKind::Struct(_)
-                | ItemKind::Enum(_)
-                | ItemKind::Trait(_)
-                | ItemKind::TypeAlias(_)
-                | ItemKind::Contract(_) => {
-                    // Types - only in type or mixed context
-                    if matches!(context, CompletionContext::Expression) {
-                        continue;
-                    }
-                    match item {
-                        ItemKind::Struct(_) => CompletionItemKind::STRUCT,
-                        ItemKind::Enum(_) => CompletionItemKind::ENUM,
-                        ItemKind::Trait(_) => CompletionItemKind::INTERFACE,
-                        ItemKind::TypeAlias(_) => CompletionItemKind::CLASS,
-                        ItemKind::Contract(_) => CompletionItemKind::CLASS,
-                        _ => unreachable!(),
-                    }
-                }
-                // Skip modules, impls, etc. - they're not typically imported directly
-                _ => continue,
-            };
-
-            // Build the full import path
-            let import_path = format!("{}::{}", module_path, name_str);
-
-            // Create the import text edit
-            let import_text = format!("use {}\n", import_path);
-            let import_edit = TextEdit {
-                range: Range {
-                    start: import_position,
-                    end: import_position,
-                },
-                new_text: import_text,
-            };
-
-            items.push(CompletionItem {
-                label: name_str.to_string(),
-                kind: Some(kind),
-                detail: Some(format!("use {}", import_path)),
-                label_details: Some(async_lsp::lsp_types::CompletionItemLabelDetails {
-                    detail: Some(format!(" ({})", module_path)),
-                    description: None,
-                }),
-                additional_text_edits: Some(vec![import_edit]),
-                ..Default::default()
-            });
+        // Build auto-import completion with proper snippets
+        if let Some(completion) =
+            build_auto_import_completion(db, item, &import_path, context, import_position)
+        {
+            items.push(completion);
         }
     }
 }
 
-/// Compute the import path for a module (e.g., "stuff::calculations")
-fn compute_module_path<'db>(
+/// Build an auto-import completion item for an item from another module.
+fn build_auto_import_completion<'db>(
     db: &'db DriverDataBase,
-    module: TopLevelMod<'db>,
-    module_tree: &hir::hir_def::ModuleTree<'db>,
-) -> Option<String> {
-    let mut path_parts = Vec::new();
+    item: ItemKind<'db>,
+    module_path: &str,
+    context: CompletionContext,
+    import_position: Position,
+) -> Option<CompletionItem> {
+    let name = item.name(db)?;
+    let name_str = name.data(db).to_string();
 
-    // Build path from module up to root
-    let mut current = module;
-    loop {
-        let name = current.name(db).data(db).to_string();
-        // Skip "lib" or root module names - they're implicit
-        if name != "lib" && name != "main" {
-            path_parts.push(name);
+    // Filter and get completion kind based on item type and context
+    let (kind, snippet, detail) = match item {
+        ItemKind::Func(func) => {
+            if matches!(context, CompletionContext::Type) {
+                return None;
+            }
+            // Build callable snippet
+            let (snippet, detail) = build_func_snippet_and_detail(db, func, &name_str);
+            (CompletionItemKind::FUNCTION, snippet, detail)
         }
+        ItemKind::Const(_) => {
+            if matches!(context, CompletionContext::Type) {
+                return None;
+            }
+            (
+                CompletionItemKind::CONSTANT,
+                name_str.clone(),
+                name_str.clone(),
+            )
+        }
+        ItemKind::Struct(_) => {
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            (
+                CompletionItemKind::STRUCT,
+                name_str.clone(),
+                name_str.clone(),
+            )
+        }
+        ItemKind::Enum(_) => {
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            (CompletionItemKind::ENUM, name_str.clone(), name_str.clone())
+        }
+        ItemKind::Trait(_) => {
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            (
+                CompletionItemKind::INTERFACE,
+                name_str.clone(),
+                name_str.clone(),
+            )
+        }
+        ItemKind::TypeAlias(_) | ItemKind::Contract(_) => {
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            (
+                CompletionItemKind::CLASS,
+                name_str.clone(),
+                name_str.clone(),
+            )
+        }
+        // Skip modules, impls, etc.
+        _ => return None,
+    };
 
-        match module_tree.parent(current) {
-            Some(parent) => current = parent,
-            None => break,
+    // module_path is already the full import path (e.g., "utils::func_with_args")
+    // Create the import text edit
+    let import_text = format!("use {}\n", module_path);
+    let import_edit = TextEdit {
+        range: Range {
+            start: import_position,
+            end: import_position,
+        },
+        new_text: import_text,
+    };
+
+    // Extract just the module portion for display (everything before the last ::)
+    let module_only = module_path
+        .rsplit_once("::")
+        .map(|(m, _)| m)
+        .unwrap_or(module_path);
+
+    Some(CompletionItem {
+        label: name_str,
+        kind: Some(kind),
+        detail: Some(format!("use {} [{}]", module_path, detail)),
+        label_details: Some(async_lsp::lsp_types::CompletionItemLabelDetails {
+            detail: Some(format!(" ({})", module_only)),
+            description: None,
+        }),
+        insert_text: Some(snippet),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
+        additional_text_edits: Some(vec![import_edit]),
+        ..Default::default()
+    })
+}
+
+/// Build snippet and detail for a function (shared logic for auto-import).
+fn build_func_snippet_and_detail<'db>(
+    db: &'db DriverDataBase,
+    func: Func<'db>,
+    name_str: &str,
+) -> (String, String) {
+    let mut param_names = Vec::new();
+    let mut param_details = Vec::new();
+
+    for param in func.params(db) {
+        if param.is_self_param(db) {
+            continue;
+        }
+        let param_name = param
+            .name(db)
+            .map(|n| n.data(db).to_string())
+            .unwrap_or_else(|| format!("arg{}", param_names.len()));
+        let param_ty = param.ty(db);
+        param_details.push(format!("{}: {}", param_name, param_ty.pretty_print(db)));
+        param_names.push(param_name);
+    }
+
+    let ret_ty = func.return_ty(db);
+    let ret_str = {
+        let ret_pretty = ret_ty.pretty_print(db);
+        if ret_pretty == "()" {
+            String::new()
+        } else {
+            format!(" -> {}", ret_pretty)
+        }
+    };
+    let detail = format!("fn {}({}){}", name_str, param_details.join(", "), ret_str);
+
+    let snippet = if param_names.is_empty() {
+        format!("{}()$0", name_str)
+    } else {
+        let tabstops: Vec<String> = param_names
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("${{{}:{}}}", i + 1, p))
+            .collect();
+        format!("{}({})$0", name_str, tabstops.join(", "))
+    };
+
+    (snippet, detail)
+}
+
+/// Find the position to insert imports in the containing module.
+fn find_module_import_position<'db>(
+    db: &'db DriverDataBase,
+    scope: ScopeId<'db>,
+    file_text: &str,
+) -> Position {
+    use hir::span::LazySpan;
+
+    // Find the containing module
+    if let Some(parent_mod) = scope.parent_module(db) {
+        match parent_mod.item() {
+            ItemKind::Mod(m) => {
+                // For inline modules, find position after the opening brace
+                if let Some(span) = m.span().resolve(db) {
+                    let mod_start = usize::from(span.range.start());
+                    let mod_text = &file_text[mod_start..];
+
+                    // Find the opening brace
+                    if let Some(brace_offset) = mod_text.find('{') {
+                        let abs_brace_pos = mod_start + brace_offset;
+                        // Find position after the opening brace
+                        return find_import_position_after_brace(file_text, abs_brace_pos);
+                    }
+                }
+            }
+            ItemKind::TopMod(_) => {
+                // For top-level modules, use the file-level position
+                return find_import_insertion_position(file_text);
+            }
+            _ => {}
         }
     }
 
-    // Reverse to get root-to-leaf order
+    // Fallback to file-level position
+    find_import_insertion_position(file_text)
+}
+
+/// Find import position within a module body (after opening brace).
+/// `full_file_text` is the complete file content, `brace_offset` is the byte offset of the `{`.
+fn find_import_position_after_brace(full_file_text: &str, brace_offset: usize) -> Position {
+    // Find the line after the opening brace
+    // The use statement should go on the next line after '{'
+    let mut line = 0u32;
+    let mut last_newline_offset = 0;
+
+    for (i, ch) in full_file_text.char_indices() {
+        if i >= brace_offset {
+            // Found the brace, now find the next newline
+            let rest = &full_file_text[brace_offset..];
+            if rest.find('\n').is_some() {
+                // Position at start of the line after the brace
+                return Position {
+                    line: line + 1,
+                    character: 0,
+                };
+            } else {
+                // No newline after brace, insert right after brace
+                return Position {
+                    line,
+                    character: (brace_offset - last_newline_offset + 1) as u32,
+                };
+            }
+        }
+        if ch == '\n' {
+            line += 1;
+            last_newline_offset = i + 1;
+        }
+    }
+
+    // Fallback
+    Position {
+        line: 0,
+        character: 0,
+    }
+}
+
+/// Compute the import path for any item, including those in nested inline modules.
+///
+/// Returns the path like "utils::helper_func" or "outer::inner::SomeStruct".
+/// For use in auto-import, this returns only the path needed within the current ingot,
+/// excluding the top-level module name (file name) but including the item name.
+fn compute_item_import_path<'db>(db: &'db DriverDataBase, item: ItemKind<'db>) -> Option<String> {
+    let item_name = item.name(db)?.data(db).to_string();
+
+    // Build the path by walking up from the item's scope to find containing modules
+    let scope = ScopeId::from_item(item);
+    let mut path_parts = vec![item_name];
+
+    // Walk up the parent chain looking for Mod items (inline modules)
+    // Start from parent (not the item's own scope) to avoid duplicating the name
+    let mut current = scope.parent(db);
+    while let Some(parent_scope) = current {
+        match parent_scope.item() {
+            ItemKind::Mod(m) => {
+                // This is an inline module - add its name to the path
+                if let Partial::Present(name) = m.name(db) {
+                    path_parts.push(name.data(db).to_string());
+                }
+            }
+            ItemKind::TopMod(_) => {
+                // Reached the top-level file module - stop here
+                // We don't include the file name in the import path for single-file scenarios
+                break;
+            }
+            _ => {
+                // Other items (functions, impls, structs, etc.) - skip them
+                // These don't contribute to the import path
+            }
+        }
+        current = parent_scope.parent(db);
+    }
+
+    // Reverse to get the path in correct order (outer to inner)
     path_parts.reverse();
 
-    if path_parts.is_empty() {
-        None
-    } else {
-        Some(path_parts.join("::"))
+    // If there's only the item name (no module path), it means the item is at
+    // the top level - don't suggest auto-import for top-level items in same file
+    if path_parts.len() <= 1 {
+        return None;
     }
+
+    Some(path_parts.join("::"))
 }
 
 /// Find the position to insert new import statements.
@@ -1465,6 +1645,8 @@ mod tests {
             if let Some(scope) = scope {
                 let context = detect_completion_context(file_text, cursor);
                 collect_items_from_scope(db, scope, context, &mut items);
+                // Also collect auto-import suggestions
+                collect_auto_import_completions(db, top_mod, scope, context, file_text, &mut items);
             }
         }
 
