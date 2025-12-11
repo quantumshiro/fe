@@ -5,10 +5,37 @@ expression: snapshot
 input_file: test_files/completion.fe
 ---
 note: 
-   ┌─ completion.fe:45:7
+   ┌─ completion.fe:28:9
    │
-45 │     p.
-   │       ^ cursor 1
+28 │         
+   │         ^ cursor 1
+
+completions:
+  - Default (Interface)
+  - Drawable (Interface)
+  - Err (EnumMember)
+  - None (EnumMember)
+  - Ok (EnumMember)
+  - Option (Enum)
+  - Point (Struct)
+  - Result (Enum)
+  - Some (EnumMember)
+  - panic (Function) -> "panic()$0" [fn panic() -> !]
+  - self (Variable) [self: Point]
+  - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
+  - test_locals (Function) -> "test_locals(${1:param})$0" [fn test_locals(param: i32)]
+  - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
+  - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
+  - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
+  - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
+  - todo (Function) -> "todo()$0" [fn todo() -> !]
+  - utils (Module) -> "utils::"
+
+note: 
+   ┌─ completion.fe:49:7
+   │
+49 │     p.
+   │       ^ cursor 2
 
 completions:
   - distance (Method) -> "distance()$0" [fn distance() -> i32]
@@ -18,10 +45,10 @@ completions:
   - y (Field) [y: i32]
 
 note: 
-   ┌─ completion.fe:50:12
+   ┌─ completion.fe:54:12
    │
-50 │     let x: 
-   │            ^ cursor 2
+54 │     let x: 
+   │            ^ cursor 3
 
 completions:
   - Option (Enum)
@@ -29,10 +56,10 @@ completions:
   - Result (Enum)
 
 note: 
-   ┌─ completion.fe:55:18
+   ┌─ completion.fe:59:18
    │
-55 │     let result = 
-   │                  ^ cursor 3
+59 │     let result = 
+   │                  ^ cursor 4
 
 completions:
   - Err (EnumMember)
@@ -50,21 +77,22 @@ completions:
   - todo (Function) -> "todo()$0" [fn todo() -> !]
 
 note: 
-   ┌─ completion.fe:60:20
+   ┌─ completion.fe:64:20
    │
-60 │     let h = utils::
-   │                    ^ cursor 4
+64 │     let h = utils::
+   │                    ^ cursor 5
 
 completions:
   - Helpable (Interface)
   - Helper (Struct)
+  - func_with_args (Function) -> "func_with_args(${1:x}, ${2:y})$0" [fn func_with_args(x: i32, y: i32) -> i32]
   - helper_func (Function) -> "helper_func()$0" [fn helper_func() -> i32]
 
 note: 
-   ┌─ completion.fe:63:26
+   ┌─ completion.fe:67:26
    │
-63 │ fn test_return_type() ->  {
-   │                          ^ cursor 5
+67 │ fn test_return_type() ->  {
+   │                          ^ cursor 6
 
 completions:
   - Option (Enum)
@@ -72,10 +100,10 @@ completions:
   - Result (Enum)
 
 note: 
-   ┌─ completion.fe:70:13
+   ┌─ completion.fe:74:13
    │
-70 │     let x = 
-   │             ^ cursor 6
+74 │     let x = 
+   │             ^ cursor 7
 
 completions:
   - Err (EnumMember)
