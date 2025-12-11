@@ -111,38 +111,160 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         if stores.is_empty() {
             return;
         }
-        let (ptr_ty, helper) = match self.value_address_space(base_value) {
-            AddressSpaceKind::Memory => (
-                self.core.helper_ty(CoreHelperTy::MemPtr),
-                CoreHelper::StoreField,
-            ),
-            AddressSpaceKind::Storage => (
-                self.core.helper_ty(CoreHelperTy::StorPtr),
-                CoreHelper::StoreField,
-            ),
+        let addr_space = self.value_address_space(base_value);
+        let ptr_ty = match addr_space {
+            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
         for (offset_bytes, field_ty, field_value) in stores {
-            let callable = self.core.make_callable(expr, helper, &[ptr_ty, *field_ty]);
-            let offset_value = self.synthetic_u256(BigUint::from(*offset_bytes));
-            let store_ret_ty = callable.ret_ty(self.db);
-            let store_call = self.mir_body.alloc_value(ValueData {
-                ty: store_ret_ty,
-                origin: ValueOrigin::Call(CallOrigin {
+            let is_aggregate = field_ty.field_count(self.db) > 0;
+
+            if is_aggregate {
+                // For aggregate fields, recursively copy each nested field
+                self.emit_aggregate_copy(
                     expr,
-                    callable,
-                    args: vec![base_value, offset_value, *field_value],
-                    receiver_space: None,
-                    resolved_name: None,
-                }),
-            });
-            self.push_inst(
-                block,
-                MirInst::EvalExpr {
+                    block,
+                    base_value,
+                    *offset_bytes,
+                    *field_ty,
+                    *field_value,
+                    addr_space,
+                );
+            } else {
+                // For primitive fields, emit a store_field call
+                let callable =
+                    self.core
+                        .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, *field_ty]);
+                let offset_value = self.synthetic_u256(BigUint::from(*offset_bytes));
+                let store_ret_ty = callable.ret_ty(self.db);
+                let store_call = self.mir_body.alloc_value(ValueData {
+                    ty: store_ret_ty,
+                    origin: ValueOrigin::Call(CallOrigin {
+                        expr,
+                        callable,
+                        args: vec![base_value, offset_value, *field_value],
+                        receiver_space: None,
+                        resolved_name: None,
+                    }),
+                });
+                self.push_inst(
+                    block,
+                    MirInst::EvalExpr {
+                        expr,
+                        value: store_call,
+                        bind_value: false,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Recursively copies an aggregate (struct) from source to destination at the given offset.
+    ///
+    /// # Parameters
+    /// - `expr`: Expression id for context.
+    /// - `block`: Block to emit stores in.
+    /// - `dst_base`: Destination base pointer.
+    /// - `dst_offset`: Byte offset within destination for this aggregate.
+    /// - `ty`: Type of the aggregate being copied.
+    /// - `src_ptr`: Source pointer to the aggregate.
+    /// - `addr_space`: Address space of the destination.
+    fn emit_aggregate_copy(
+        &mut self,
+        expr: ExprId,
+        block: BasicBlockId,
+        dst_base: ValueId,
+        dst_offset: u64,
+        ty: TyId<'db>,
+        src_ptr: ValueId,
+        addr_space: AddressSpaceKind,
+    ) {
+        let field_types = ty.field_types(self.db);
+        let ptr_ty = match addr_space {
+            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+        };
+        // Determine source address space for loading
+        let src_space = self.value_address_space(src_ptr);
+        let src_ptr_ty = match src_space {
+            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+        };
+
+        let mut field_offset = 0u64;
+        for field_ty in field_types {
+            let is_nested_aggregate = field_ty.field_count(self.db) > 0;
+            let field_size = self.ty_size_bytes(field_ty).unwrap_or(32);
+
+            if is_nested_aggregate {
+                // Recursively handle nested aggregates
+                // Create a FieldPtr for the source field
+                let src_field_ptr = if field_offset == 0 {
+                    src_ptr
+                } else {
+                    let ptr = self.mir_body.alloc_value(ValueData {
+                        ty: field_ty,
+                        origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
+                            base: src_ptr,
+                            offset_bytes: field_offset,
+                        }),
+                    });
+                    self.value_address_space.insert(ptr, src_space);
+                    ptr
+                };
+                self.emit_aggregate_copy(
                     expr,
-                    value: store_call,
-                    bind_value: false,
-                },
-            );
+                    block,
+                    dst_base,
+                    dst_offset + field_offset,
+                    field_ty,
+                    src_field_ptr,
+                    addr_space,
+                );
+            } else {
+                // Load from source and store to destination
+                let src_offset_value = self.synthetic_u256(BigUint::from(field_offset));
+                let get_callable =
+                    self.core
+                        .make_callable(expr, CoreHelper::GetField, &[src_ptr_ty, field_ty]);
+                let loaded_value = self.mir_body.alloc_value(ValueData {
+                    ty: field_ty,
+                    origin: ValueOrigin::Call(CallOrigin {
+                        expr,
+                        callable: get_callable,
+                        args: vec![src_ptr, src_offset_value],
+                        receiver_space: None,
+                        resolved_name: None,
+                    }),
+                });
+
+                // Store to destination
+                let dst_offset_value =
+                    self.synthetic_u256(BigUint::from(dst_offset + field_offset));
+                let store_callable =
+                    self.core
+                        .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, field_ty]);
+                let store_ret_ty = store_callable.ret_ty(self.db);
+                let store_call = self.mir_body.alloc_value(ValueData {
+                    ty: store_ret_ty,
+                    origin: ValueOrigin::Call(CallOrigin {
+                        expr,
+                        callable: store_callable,
+                        args: vec![dst_base, dst_offset_value, loaded_value],
+                        receiver_space: None,
+                        resolved_name: None,
+                    }),
+                });
+                self.push_inst(
+                    block,
+                    MirInst::EvalExpr {
+                        expr,
+                        value: store_call,
+                        bind_value: false,
+                    },
+                );
+            }
+            field_offset += field_size;
         }
     }
 
@@ -331,19 +453,38 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// # Returns
     /// Size in bytes when known.
     pub(super) fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
-        match ty.data(self.db) {
-            TyData::TyBase(TyBase::Prim(prim)) => {
-                if *prim == PrimTy::Bool {
-                    Some(1)
-                } else {
-                    prim_int_bits(*prim).map(|bits| (bits / 8) as u64)
-                }
+        // Handle tuples first (check base type for TyApp cases)
+        if ty.is_tuple(self.db) {
+            let mut size = 0u64;
+            for field_ty in ty.field_types(self.db) {
+                size += self.ty_size_bytes(field_ty)?;
             }
-            _ => None,
+            return Some(size);
         }
+
+        // Handle primitives
+        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db) {
+            if *prim == PrimTy::Bool {
+                return Some(1);
+            }
+            if let Some(bits) = prim_int_bits(*prim) {
+                return Some((bits / 8) as u64);
+            }
+        }
+
+        // Handle ADT types (structs) - use adt_def() which handles TyApp
+        if let Some(adt_def) = ty.adt_def(self.db)
+            && matches!(adt_def.adt_ref(self.db), AdtRef::Struct(_))
+        {
+            let record_like = RecordLike::from_ty(ty);
+            return self.record_size_bytes(&record_like);
+        }
+
+        None
     }
 
-    /// Lowers an assignment to a field target into a `store_field` helper call.
+    /// Lowers an assignment to a field target into a `store_field` helper call
+    /// (for primitives) or a recursive field-by-field copy (for aggregates).
     ///
     /// # Parameters
     /// - `block`: Basic block where the assignment occurs.
@@ -369,20 +510,32 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let info = self.field_access_info(lhs_ty, field_index)?;
 
         let addr_value = self.ensure_value(*lhs);
-        let (ptr_ty, helper) = match self.value_address_space(addr_value) {
-            AddressSpaceKind::Memory => (
-                self.core.helper_ty(CoreHelperTy::MemPtr),
-                CoreHelper::StoreField,
-            ),
-            AddressSpaceKind::Storage => (
-                self.core.helper_ty(CoreHelperTy::StorPtr),
-                CoreHelper::StoreField,
-            ),
+        let addr_space = self.value_address_space(addr_value);
+        let is_aggregate = info.field_ty.field_count(self.db) > 0;
+
+        if is_aggregate {
+            // For aggregate fields, recursively copy each nested field
+            self.emit_aggregate_copy(
+                expr,
+                block,
+                addr_value,
+                info.offset_bytes,
+                info.field_ty,
+                value,
+                addr_space,
+            );
+            return Some(block);
+        }
+
+        // For primitive fields, emit a store_field call
+        let ptr_ty = match addr_space {
+            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
         let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
-        let callable = self
-            .core
-            .make_callable(expr, helper, &[ptr_ty, info.field_ty]);
+        let callable =
+            self.core
+                .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, info.field_ty]);
 
         let store_ret_ty = callable.ret_ty(self.db);
         let store_call = self.mir_body.alloc_value(ValueData {

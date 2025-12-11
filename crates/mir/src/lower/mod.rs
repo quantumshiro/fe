@@ -28,10 +28,10 @@ use crate::{
     core_lib::{CoreHelper, CoreHelperTy, CoreLib, CoreLibError},
     ir::{
         AddressSpaceKind, BasicBlock, BasicBlockId, CallOrigin, CodeRegionRoot, ContractFunction,
-        ContractFunctionKind, IntrinsicOp, IntrinsicValue, LoopInfo, MatchArmLowering,
-        MatchArmPattern, MatchLoweringInfo, MirBody, MirFunction, MirInst, MirModule,
-        PatternBinding, SwitchOrigin, SwitchTarget, SwitchValue, SyntheticValue, Terminator,
-        ValueData, ValueId, ValueOrigin,
+        ContractFunctionKind, FieldPtrOrigin, IntrinsicOp, IntrinsicValue, LoopInfo,
+        MatchArmLowering, MatchArmPattern, MatchLoweringInfo, MirBody, MirFunction, MirInst,
+        MirModule, PatternBinding, SwitchOrigin, SwitchTarget, SwitchValue, SyntheticValue,
+        Terminator, ValueData, ValueId, ValueOrigin,
     },
     monomorphize::monomorphize_functions,
 };
@@ -131,7 +131,6 @@ pub fn lower_module<'db>(
         if func.body(db).is_none() {
             continue;
         }
-
         let (_diags, typed_body) = check_func_body(db, func);
         let lowered = lower_function(db, func, typed_body.clone(), None)?;
         templates.push(lowered);
@@ -317,6 +316,16 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// # Returns
     /// The address space kind for the expression.
     pub(super) fn expr_address_space(&self, expr: ExprId) -> AddressSpaceKind {
+        // Propagate storage space through field projections so nested storage fields
+        // continue to be treated as storage pointers.
+        let exprs = self.body.exprs(self.db);
+        if let Partial::Present(Expr::Field(base, _)) = &exprs[expr] {
+            let base_space = self.expr_address_space(*base);
+            if matches!(base_space, AddressSpaceKind::Storage) {
+                return AddressSpaceKind::Storage;
+            }
+        }
+
         let prop = self.typed_body.expr_prop(self.db, expr);
         if let Some(binding) = prop.binding() {
             self.address_space_for_binding(&binding)

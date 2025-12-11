@@ -284,6 +284,8 @@ pub enum ValueOrigin<'db> {
     Call(CallOrigin<'db>),
     /// Call to a compiler intrinsic that should lower to a raw opcode, not a function call.
     Intrinsic(IntrinsicValue<'db>),
+    /// Pointer arithmetic for accessing a nested struct field (no load, just offset).
+    FieldPtr(FieldPtrOrigin),
 }
 
 impl<'db> ValueOrigin<'db> {
@@ -369,6 +371,16 @@ pub struct CallOrigin<'db> {
     pub resolved_name: Option<String>,
     /// For methods on struct types, the statically known address space of the receiver.
     pub receiver_space: Option<AddressSpaceKind>,
+}
+
+/// Pointer offset for accessing a nested aggregate field (struct within struct).
+/// This represents pure pointer arithmetic with no load/store.
+#[derive(Debug, Clone)]
+pub struct FieldPtrOrigin {
+    /// Base pointer value being offset.
+    pub base: ValueId,
+    /// Byte offset to add to the base pointer.
+    pub offset_bytes: u64,
 }
 
 #[derive(Debug, Clone)]

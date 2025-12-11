@@ -312,6 +312,7 @@ impl<'db> FunctionEmitter<'db> {
 
     /// Best-effort byte size computation for types used as storage effects.
     fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
+        // Handle tuples first (check base type for TyApp cases)
         if ty.is_tuple(self.db) {
             let mut size = 0u64;
             for field_ty in ty.field_types(self.db) {
@@ -319,24 +320,28 @@ impl<'db> FunctionEmitter<'db> {
             }
             return Some(size);
         }
-        if let TyData::TyBase(TyBase::Prim(prim)) = ty.data(self.db) {
+
+        // Handle primitives
+        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db) {
             if *prim == PrimTy::Bool {
                 return Some(1);
             }
-            return prim_int_bits(*prim).map(|bits| (bits / 8) as u64);
+            if let Some(bits) = prim_int_bits(*prim) {
+                return Some((bits / 8) as u64);
+            }
         }
-        if let Some(adt_def) = ty.adt_def(self.db) {
-            return match adt_def.adt_ref(self.db) {
-                AdtRef::Struct(_) => {
-                    let mut size = 0u64;
-                    for field_ty in ty.field_types(self.db) {
-                        size += self.ty_size_bytes(field_ty)?;
-                    }
-                    Some(size)
-                }
-                _ => None,
-            };
+
+        // Handle ADT types (structs) - use adt_def() which handles TyApp
+        if let Some(adt_def) = ty.adt_def(self.db)
+            && matches!(adt_def.adt_ref(self.db), AdtRef::Struct(_))
+        {
+            let mut size = 0u64;
+            for field_ty in ty.field_types(self.db) {
+                size += self.ty_size_bytes(field_ty)?;
+            }
+            return Some(size);
         }
+
         None
     }
 }

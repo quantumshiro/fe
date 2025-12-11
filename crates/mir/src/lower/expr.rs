@@ -182,7 +182,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         matches!(&exprs[expr], Partial::Present(Expr::MethodCall(..)))
     }
 
-    /// Rewrites a field access expression into a `get_field` call.
+    /// Rewrites a field access expression into either a `get_field` call (for primitives)
+    /// or a `FieldPtr` offset computation (for nested structs).
     ///
     /// # Parameters
     /// - `expr`: Field access expression id.
@@ -198,20 +199,39 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let info = self.field_access_info(lhs_ty, field_index)?;
 
         let addr_value = self.ensure_value(*lhs);
-        let (ptr_ty, helper) = match self.value_address_space(addr_value) {
-            AddressSpaceKind::Memory => (
-                self.core.helper_ty(CoreHelperTy::MemPtr),
-                CoreHelper::GetField,
-            ),
-            AddressSpaceKind::Storage => (
-                self.core.helper_ty(CoreHelperTy::StorPtr),
-                CoreHelper::GetField,
-            ),
+        let addr_space = self.value_address_space(addr_value);
+        let is_aggregate = info.field_ty.field_count(self.db) > 0;
+
+        // For aggregate (struct) fields, emit pointer arithmetic instead of a load
+        if is_aggregate {
+            // Optimization: if offset is 0, reuse the base pointer directly
+            if info.offset_bytes == 0 {
+                // Ensure address space is propagated even when reusing the base pointer
+                self.value_address_space.insert(addr_value, addr_space);
+                return Some(addr_value);
+            }
+            // Emit FieldPtr for non-zero offsets
+            let result = self.mir_body.alloc_value(ValueData {
+                ty: info.field_ty,
+                origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
+                    base: addr_value,
+                    offset_bytes: info.offset_bytes,
+                }),
+            });
+            // Propagate address space to the result
+            self.value_address_space.insert(result, addr_space);
+            return Some(result);
+        }
+
+        // For primitive fields, emit a get_field call to load the value
+        let ptr_ty = match addr_space {
+            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
         let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
-        let callable = self
-            .core
-            .make_callable(expr, helper, &[ptr_ty, info.field_ty]);
+        let callable =
+            self.core
+                .make_callable(expr, CoreHelper::GetField, &[ptr_ty, info.field_ty]);
 
         Some(self.mir_body.alloc_value(ValueData {
             ty: info.field_ty,
