@@ -4,6 +4,24 @@
 use super::*;
 use hir::analysis::ty::ty_def::prim_int_bits;
 
+#[derive(Copy, Clone)]
+struct AggregateCopyCtx {
+    expr: ExprId,
+    block: BasicBlockId,
+    dst_base: ValueId,
+    dst_offset: u64,
+    addr_space: AddressSpaceKind,
+}
+
+impl AggregateCopyCtx {
+    fn with_offset(self, offset: u64) -> Self {
+        Self {
+            dst_offset: self.dst_offset + offset,
+            ..self
+        }
+    }
+}
+
 impl<'db, 'a> MirBuilder<'db, 'a> {
     /// Emits an `alloc` call for the requested size and binds it to the expression.
     ///
@@ -121,15 +139,14 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
             if is_aggregate {
                 // For aggregate fields, recursively copy each nested field
-                self.emit_aggregate_copy(
+                let ctx = AggregateCopyCtx {
                     expr,
                     block,
-                    base_value,
-                    *offset_bytes,
-                    *field_ty,
-                    *field_value,
+                    dst_base: base_value,
+                    dst_offset: *offset_bytes,
                     addr_space,
-                );
+                };
+                self.emit_aggregate_copy(*field_ty, *field_value, ctx);
             } else {
                 // For primitive fields, emit a store_field call
                 let callable =
@@ -169,18 +186,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// - `ty`: Type of the aggregate being copied.
     /// - `src_ptr`: Source pointer to the aggregate.
     /// - `addr_space`: Address space of the destination.
-    fn emit_aggregate_copy(
-        &mut self,
-        expr: ExprId,
-        block: BasicBlockId,
-        dst_base: ValueId,
-        dst_offset: u64,
-        ty: TyId<'db>,
-        src_ptr: ValueId,
-        addr_space: AddressSpaceKind,
-    ) {
+    fn emit_aggregate_copy(&mut self, ty: TyId<'db>, src_ptr: ValueId, ctx: AggregateCopyCtx) {
         let field_types = ty.field_types(self.db);
-        let ptr_ty = match addr_space {
+        let ptr_ty = match ctx.addr_space {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
             AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
@@ -212,25 +220,19 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     self.value_address_space.insert(ptr, src_space);
                     ptr
                 };
-                self.emit_aggregate_copy(
-                    expr,
-                    block,
-                    dst_base,
-                    dst_offset + field_offset,
-                    field_ty,
-                    src_field_ptr,
-                    addr_space,
-                );
+                self.emit_aggregate_copy(field_ty, src_field_ptr, ctx.with_offset(field_offset));
             } else {
                 // Load from source and store to destination
                 let src_offset_value = self.synthetic_u256(BigUint::from(field_offset));
-                let get_callable =
-                    self.core
-                        .make_callable(expr, CoreHelper::GetField, &[src_ptr_ty, field_ty]);
+                let get_callable = self.core.make_callable(
+                    ctx.expr,
+                    CoreHelper::GetField,
+                    &[src_ptr_ty, field_ty],
+                );
                 let loaded_value = self.mir_body.alloc_value(ValueData {
                     ty: field_ty,
                     origin: ValueOrigin::Call(CallOrigin {
-                        expr,
+                        expr: ctx.expr,
                         callable: get_callable,
                         args: vec![src_ptr, src_offset_value],
                         receiver_space: None,
@@ -240,25 +242,25 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
                 // Store to destination
                 let dst_offset_value =
-                    self.synthetic_u256(BigUint::from(dst_offset + field_offset));
+                    self.synthetic_u256(BigUint::from(ctx.dst_offset + field_offset));
                 let store_callable =
                     self.core
-                        .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, field_ty]);
+                        .make_callable(ctx.expr, CoreHelper::StoreField, &[ptr_ty, field_ty]);
                 let store_ret_ty = store_callable.ret_ty(self.db);
                 let store_call = self.mir_body.alloc_value(ValueData {
                     ty: store_ret_ty,
                     origin: ValueOrigin::Call(CallOrigin {
-                        expr,
+                        expr: ctx.expr,
                         callable: store_callable,
-                        args: vec![dst_base, dst_offset_value, loaded_value],
+                        args: vec![ctx.dst_base, dst_offset_value, loaded_value],
                         receiver_space: None,
                         resolved_name: None,
                     }),
                 });
                 self.push_inst(
-                    block,
+                    ctx.block,
                     MirInst::EvalExpr {
-                        expr,
+                        expr: ctx.expr,
                         value: store_call,
                         bind_value: false,
                     },
@@ -515,15 +517,14 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         if is_aggregate {
             // For aggregate fields, recursively copy each nested field
-            self.emit_aggregate_copy(
+            let ctx = AggregateCopyCtx {
                 expr,
                 block,
-                addr_value,
-                info.offset_bytes,
-                info.field_ty,
-                value,
+                dst_base: addr_value,
+                dst_offset: info.offset_bytes,
                 addr_space,
-            );
+            };
+            self.emit_aggregate_copy(info.field_ty, value, ctx);
             return Some(block);
         }
 
