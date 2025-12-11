@@ -89,10 +89,20 @@ pub async fn handle_completion(
         // Regular completion: show items visible in scope
         let scope = find_scope_at_cursor(&backend.db, top_mod, cursor);
         if let Some(scope) = scope {
-            collect_items_from_scope(&backend.db, scope, &mut items);
+            // Detect whether we're in a type or expression context
+            let context = detect_completion_context(file_text, cursor);
+
+            collect_items_from_scope(&backend.db, scope, context, &mut items);
 
             // Also collect auto-import suggestions for symbols not in scope
-            collect_auto_import_completions(&backend.db, top_mod, scope, file_text, &mut items);
+            collect_auto_import_completions(
+                &backend.db,
+                top_mod,
+                scope,
+                context,
+                file_text,
+                &mut items,
+            );
         }
     }
 
@@ -101,6 +111,92 @@ pub async fn handle_completion(
     } else {
         Ok(Some(CompletionResponse::Array(items)))
     }
+}
+
+/// Completion context - determines what kind of items to suggest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionContext {
+    /// Expression context: suggest values (variables, functions, constants)
+    Expression,
+    /// Type context: suggest types (structs, enums, type aliases, traits)
+    Type,
+    /// Mixed context: suggest both types and values (e.g., top-level, unknown)
+    Mixed,
+}
+
+impl CompletionContext {
+    fn to_name_domain(self) -> NameDomain {
+        match self {
+            CompletionContext::Expression => NameDomain::VALUE,
+            CompletionContext::Type => NameDomain::TYPE,
+            CompletionContext::Mixed => NameDomain::VALUE | NameDomain::TYPE,
+        }
+    }
+}
+
+/// Detect the completion context based on surrounding text.
+fn detect_completion_context(file_text: &str, cursor: parser::TextSize) -> CompletionContext {
+    let cursor_pos = usize::from(cursor);
+
+    // Look backwards from cursor to find context clues
+    let before = &file_text[..cursor_pos];
+
+    // Skip whitespace to find the last significant character
+    let trimmed = before.trim_end();
+    if trimmed.is_empty() {
+        return CompletionContext::Mixed;
+    }
+
+    let last_char = trimmed.chars().last().unwrap();
+
+    // After ':' (but check it's not '::') → type context
+    if last_char == ':' && !trimmed.ends_with("::") {
+        return CompletionContext::Type;
+    }
+
+    // After '<' → likely generic argument, type context
+    if last_char == '<' {
+        return CompletionContext::Type;
+    }
+
+    // After ',' inside angle brackets → type context (generic args)
+    if last_char == ',' {
+        // Check if we're inside angle brackets by counting < and >
+        let open_angles = trimmed.chars().filter(|&c| c == '<').count();
+        let close_angles = trimmed.chars().filter(|&c| c == '>').count();
+        if open_angles > close_angles {
+            return CompletionContext::Type;
+        }
+    }
+
+    // After '->' → return type annotation, type context
+    if trimmed.ends_with("->") {
+        return CompletionContext::Type;
+    }
+
+    // After 'impl' or 'impl ' → type context (impl block target type)
+    let trimmed_lower = trimmed.to_lowercase();
+    if trimmed_lower.ends_with("impl") || trimmed.ends_with("impl ") {
+        return CompletionContext::Type;
+    }
+
+    // After '=' in a let or assignment → expression context
+    if last_char == '=' && !trimmed.ends_with("==") && !trimmed.ends_with("!=") {
+        return CompletionContext::Expression;
+    }
+
+    // After '(' → expression context (function arguments)
+    if last_char == '(' {
+        return CompletionContext::Expression;
+    }
+
+    // After operators → expression context
+    if matches!(last_char, '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^') {
+        return CompletionContext::Expression;
+    }
+
+    // Default to mixed for safety
+    CompletionContext::Mixed
 }
 
 /// Find the most specific scope containing the cursor position.
@@ -146,13 +242,22 @@ fn find_scope_at_cursor<'db>(
 fn collect_items_from_scope<'db>(
     db: &'db DriverDataBase,
     scope: ScopeId<'db>,
+    context: CompletionContext,
     items: &mut Vec<CompletionItem>,
 ) {
-    // First collect local bindings and parameters (shadows module-level items)
-    collect_locals_in_scope(db, scope, items);
+    let domain = context.to_name_domain();
 
-    // Then collect module-level items (both values and types)
-    let visible_items = scope.items_in_scope(db, NameDomain::VALUE | NameDomain::TYPE);
+    // First collect local bindings and parameters (shadows module-level items)
+    // Only collect locals in expression context (types can't be local bindings)
+    if matches!(
+        context,
+        CompletionContext::Expression | CompletionContext::Mixed
+    ) {
+        collect_locals_in_scope(db, scope, items);
+    }
+
+    // Then collect module-level items based on context
+    let visible_items = scope.items_in_scope(db, domain);
 
     for (name, name_res) in visible_items {
         if let Some(completion) = name_res_to_completion(db, name, name_res) {
@@ -166,14 +271,16 @@ fn collect_auto_import_completions<'db>(
     db: &'db DriverDataBase,
     current_mod: TopLevelMod<'db>,
     current_scope: ScopeId<'db>,
+    context: CompletionContext,
     file_text: &str,
     items: &mut Vec<CompletionItem>,
 ) {
     let ingot = current_mod.ingot(db);
     let module_tree = ingot.module_tree(db);
+    let domain = context.to_name_domain();
 
     // Get names already visible in the current scope
-    let visible_items = current_scope.items_in_scope(db, NameDomain::VALUE | NameDomain::TYPE);
+    let visible_items = current_scope.items_in_scope(db, domain);
     let visible_names: std::collections::HashSet<_> = visible_items.keys().collect();
 
     // Find where to insert the import (after existing use statements or at the top)
@@ -209,14 +316,37 @@ fn collect_auto_import_completions<'db>(
             }
 
             // Skip internal items (modules, impls, etc. that shouldn't be imported directly)
+            // Also filter based on completion context
             let kind = match item {
-                ItemKind::Func(_) => CompletionItemKind::FUNCTION,
-                ItemKind::Struct(_) => CompletionItemKind::STRUCT,
-                ItemKind::Enum(_) => CompletionItemKind::ENUM,
-                ItemKind::Trait(_) => CompletionItemKind::INTERFACE,
-                ItemKind::TypeAlias(_) => CompletionItemKind::CLASS,
-                ItemKind::Const(_) => CompletionItemKind::CONSTANT,
-                ItemKind::Contract(_) => CompletionItemKind::CLASS,
+                ItemKind::Func(_) | ItemKind::Const(_) => {
+                    // Values - only in expression or mixed context
+                    if matches!(context, CompletionContext::Type) {
+                        continue;
+                    }
+                    match item {
+                        ItemKind::Func(_) => CompletionItemKind::FUNCTION,
+                        ItemKind::Const(_) => CompletionItemKind::CONSTANT,
+                        _ => unreachable!(),
+                    }
+                }
+                ItemKind::Struct(_)
+                | ItemKind::Enum(_)
+                | ItemKind::Trait(_)
+                | ItemKind::TypeAlias(_)
+                | ItemKind::Contract(_) => {
+                    // Types - only in type or mixed context
+                    if matches!(context, CompletionContext::Expression) {
+                        continue;
+                    }
+                    match item {
+                        ItemKind::Struct(_) => CompletionItemKind::STRUCT,
+                        ItemKind::Enum(_) => CompletionItemKind::ENUM,
+                        ItemKind::Trait(_) => CompletionItemKind::INTERFACE,
+                        ItemKind::TypeAlias(_) => CompletionItemKind::CLASS,
+                        ItemKind::Contract(_) => CompletionItemKind::CLASS,
+                        _ => unreachable!(),
+                    }
+                }
                 // Skip modules, impls, etc. - they're not typically imported directly
                 _ => continue,
             };
@@ -611,16 +741,13 @@ fn collect_methods_for_type<'db>(
             let impl_ty_name = impl_.ty(db).pretty_print(db);
             if impl_ty_name == ty_name {
                 for func in impl_.funcs(db) {
-                    if func.is_method(db) {
-                        if let Some(name) = func.name(db).to_opt() {
-                            if seen_methods.insert(name) {
-                                if let Some(completion) =
-                                    build_callable_completion(db, func, CompletionItemKind::METHOD)
-                                {
-                                    items.push(completion);
-                                }
-                            }
-                        }
+                    if func.is_method(db)
+                        && let Some(name) = func.name(db).to_opt()
+                        && seen_methods.insert(name)
+                        && let Some(completion) =
+                            build_callable_completion(db, func, CompletionItemKind::METHOD)
+                    {
+                        items.push(completion);
                     }
                 }
             }
@@ -664,28 +791,19 @@ fn collect_trait_methods_for_type<'db>(
 
         // Add methods from this trait
         for (method_name, callable) in trait_def.method_defs(db) {
-            if seen_methods.insert(method_name) {
-                if let hir::hir_def::CallableDef::Func(func) = callable {
-                    if let Some(mut completion) =
-                        build_callable_completion(db, func, CompletionItemKind::METHOD)
-                    {
-                        // If trait is not in scope, add auto-import edit
-                        if !trait_in_scope {
-                            if let Some(trait_name) = trait_def.name(db).to_opt() {
-                                let trait_name_str = trait_name.data(db);
-                                // Add trait name to detail
-                                if let Some(ref detail) = completion.detail {
-                                    completion.detail =
-                                        Some(format!("{} (use {})", detail, trait_name_str));
-                                }
-                                // Note: full auto-import with text edit would require
-                                // file_text for import position. For now, just indicate
-                                // the trait needs to be imported.
-                            }
-                        }
-                        items.push(completion);
+            if seen_methods.insert(method_name)
+                && let hir::hir_def::CallableDef::Func(func) = callable
+                && let Some(mut completion) =
+                    build_callable_completion(db, func, CompletionItemKind::METHOD)
+            {
+                // If trait is not in scope, add hint about needing import
+                if !trait_in_scope && let Some(trait_name) = trait_def.name(db).to_opt() {
+                    let trait_name_str = trait_name.data(db);
+                    if let Some(ref detail) = completion.detail {
+                        completion.detail = Some(format!("{} (use {})", detail, trait_name_str));
                     }
                 }
+                items.push(completion);
             }
         }
     }
@@ -957,7 +1075,7 @@ mod tests {
         );
 
         let mut items = Vec::new();
-        collect_items_from_scope(&db, scope, &mut items);
+        collect_items_from_scope(&db, scope, CompletionContext::Mixed, &mut items);
 
         let module_completions: Vec<_> = items
             .iter()
@@ -1073,7 +1191,14 @@ mod tests {
 
         let scope = top_mod.scope();
         let mut items = Vec::new();
-        collect_auto_import_completions(&db, top_mod, scope, file_text, &mut items);
+        collect_auto_import_completions(
+            &db,
+            top_mod,
+            scope,
+            CompletionContext::Mixed,
+            file_text,
+            &mut items,
+        );
 
         // Verify auto-imports have proper text edits
         for item in &items {
