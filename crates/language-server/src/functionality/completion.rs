@@ -7,7 +7,7 @@ use async_lsp::lsp_types::{
 use common::InputDb;
 use driver::DriverDataBase;
 use hir::{
-    analysis::name_resolution::{NameDomain, NameResKind},
+    analysis::name_resolution::{NameDomain, NameResKind, available_traits_in_scope},
     hir_def::{
         Body, Func, HirIngot, ItemKind, Partial, Pat, Stmt, TopLevelMod, Visibility,
         scope_graph::ScopeId,
@@ -478,7 +478,7 @@ fn collect_member_completions<'db>(
                     }
 
                     collect_fields_for_type(db, ty, items);
-                    collect_methods_for_type(db, top_mod, ty, items);
+                    collect_methods_for_type(db, top_mod, ty, func.scope(), items);
                     return;
                 }
             }
@@ -495,7 +495,7 @@ fn collect_member_completions<'db>(
         {
             let ty = typed_body.expr_ty(db, expr_id);
             collect_fields_for_type(db, ty, items);
-            collect_methods_for_type(db, top_mod, ty, items);
+            collect_methods_for_type(db, top_mod, ty, func.scope(), items);
             return;
         }
     }
@@ -595,26 +595,95 @@ fn collect_methods_for_type<'db>(
     db: &'db DriverDataBase,
     top_mod: TopLevelMod<'db>,
     ty: hir::analysis::ty::ty_def::TyId<'db>,
+    scope: ScopeId<'db>,
     items: &mut Vec<CompletionItem>,
 ) {
     // Get the type name for matching impl blocks
     let ty_name = ty.pretty_print(db);
 
-    // Look for impl blocks in the module
+    // Track method names to avoid duplicates
+    let mut seen_methods = std::collections::HashSet::new();
+
+    // Look for inherent impl blocks in the module
     for item in top_mod.scope_graph(db).items_dfs(db) {
         if let ItemKind::Impl(impl_) = item {
             // Check if this impl is for our type by comparing target type name
-            // This is a simple heuristic; a more precise implementation would
-            // use proper type unification
             let impl_ty_name = impl_.ty(db).pretty_print(db);
             if impl_ty_name == ty_name {
                 for func in impl_.funcs(db) {
                     if func.is_method(db) {
-                        if let Some(completion) =
-                            build_callable_completion(db, func, CompletionItemKind::METHOD)
-                        {
-                            items.push(completion);
+                        if let Some(name) = func.name(db).to_opt() {
+                            if seen_methods.insert(name) {
+                                if let Some(completion) =
+                                    build_callable_completion(db, func, CompletionItemKind::METHOD)
+                                {
+                                    items.push(completion);
+                                }
+                            }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Collect trait methods from in-scope traits that are implemented for this type
+    collect_trait_methods_for_type(db, ty, scope, &mut seen_methods, items);
+}
+
+/// Collect methods from trait implementations for the given type.
+fn collect_trait_methods_for_type<'db>(
+    db: &'db DriverDataBase,
+    ty: hir::analysis::ty::ty_def::TyId<'db>,
+    scope: ScopeId<'db>,
+    seen_methods: &mut std::collections::HashSet<hir::hir_def::IdentId<'db>>,
+    items: &mut Vec<CompletionItem>,
+) {
+    // Get traits available in the current scope
+    let available_traits = available_traits_in_scope(db, scope);
+
+    // Get the type name for matching impl trait blocks
+    let ty_name = ty.pretty_print(db);
+
+    // Get the ingot to search for impl trait blocks
+    let ingot = scope.ingot(db);
+
+    // Iterate over all impl trait blocks in the ingot
+    for impl_trait in ingot.all_impl_traits(db) {
+        let Some(trait_def) = impl_trait.trait_def(db) else {
+            continue;
+        };
+
+        // Check if this impl is for our type
+        let impl_ty_name = impl_trait.ty(db).pretty_print(db);
+        if impl_ty_name != ty_name {
+            continue;
+        }
+
+        let trait_in_scope = available_traits.contains(&trait_def);
+
+        // Add methods from this trait
+        for (method_name, callable) in trait_def.method_defs(db) {
+            if seen_methods.insert(method_name) {
+                if let hir::hir_def::CallableDef::Func(func) = callable {
+                    if let Some(mut completion) =
+                        build_callable_completion(db, func, CompletionItemKind::METHOD)
+                    {
+                        // If trait is not in scope, add auto-import edit
+                        if !trait_in_scope {
+                            if let Some(trait_name) = trait_def.name(db).to_opt() {
+                                let trait_name_str = trait_name.data(db);
+                                // Add trait name to detail
+                                if let Some(ref detail) = completion.detail {
+                                    completion.detail =
+                                        Some(format!("{} (use {})", detail, trait_name_str));
+                                }
+                                // Note: full auto-import with text edit would require
+                                // file_text for import position. For now, just indicate
+                                // the trait needs to be imported.
+                            }
+                        }
+                        items.push(completion);
                     }
                 }
             }
