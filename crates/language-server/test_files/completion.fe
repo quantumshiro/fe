@@ -1,0 +1,71 @@
+// Test completion in various contexts
+
+mod utils {
+    pub struct Helper {
+        pub value: i32
+    }
+
+    pub fn helper_func() -> i32 {
+        42
+    }
+
+    pub trait Helpable {
+        fn help(self) -> i32
+    }
+}
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+impl Point {
+    pub fn distance(self) -> i32 {
+        self.x + self.y
+    }
+
+    pub fn scale(self, factor: i32) -> Point {
+        Point { x: self.x * factor, y: self.y * factor }
+    }
+}
+
+trait Drawable {
+    fn draw(self)
+}
+
+impl Drawable for Point {
+    fn draw(self) {
+        // draw the point
+    }
+}
+
+fn test_member_completion() {
+    let p = Point { x: 1, y: 2 }
+    // Member access: should show x, y, distance, scale, draw
+    p.<|>
+}
+
+fn test_type_annotation() {
+    // Type context: should show types only (Point, Drawable, utils::Helper)
+    let x: <|>
+}
+
+fn test_expression_context() {
+    // Expression context: should show values only
+    let result = <|>
+}
+
+fn test_path_completion() {
+    // Path completion: should show utils contents
+    let h = utils::<|>
+}
+
+fn test_return_type() -> <|> {
+    Point { x: 0, y: 0 }
+}
+
+fn test_locals(param: i32) {
+    let local_var = 10
+    // Should show param, local_var
+    let x = <|>
+}

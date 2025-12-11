@@ -1278,4 +1278,166 @@ mod tests {
             "Expected insertion after existing imports"
         );
     }
+
+    /// Extract cursor markers (<|>) and their positions from source text.
+    /// Returns the cleaned source (markers removed) and a list of positions.
+    fn extract_cursor_markers(source: &str) -> (String, Vec<usize>) {
+        const MARKER: &str = "<|>";
+        let mut positions = Vec::new();
+        let mut cleaned = String::new();
+        let mut offset_adjustment = 0;
+        let mut search_start = 0;
+
+        while let Some(start) = source[search_start..].find(MARKER) {
+            let abs_start = search_start + start;
+            let adjusted_pos = abs_start - offset_adjustment;
+
+            // Copy text before this marker
+            cleaned.push_str(&source[search_start..abs_start]);
+
+            positions.push(adjusted_pos);
+            offset_adjustment += MARKER.len();
+            search_start = abs_start + MARKER.len();
+        }
+
+        // Copy remaining text
+        cleaned.push_str(&source[search_start..]);
+
+        (cleaned, positions)
+    }
+
+    /// Format a completion item for snapshot output.
+    fn format_completion_item(item: &CompletionItem) -> String {
+        let kind_str = item
+            .kind
+            .map(|k| format!("{:?}", k))
+            .unwrap_or_else(|| "?".to_string());
+
+        let mut result = format!("{} ({})", item.label, kind_str);
+
+        if let Some(ref insert) = item.insert_text
+            && insert != &item.label
+        {
+            result.push_str(&format!(" -> \"{}\"", insert.replace('\n', "\\n")));
+        }
+
+        if let Some(ref detail) = item.detail {
+            result.push_str(&format!(" [{}]", detail));
+        }
+
+        result
+    }
+
+    /// Collect completions at a cursor position and format for snapshot.
+    fn collect_completions_at_cursor(
+        db: &DriverDataBase,
+        top_mod: TopLevelMod,
+        file_text: &str,
+        cursor: parser::TextSize,
+    ) -> Vec<String> {
+        let mut items = Vec::new();
+
+        // Check if this is member access (char before cursor is '.')
+        let is_member_access = cursor
+            .checked_sub(1.into())
+            .and_then(|pos| file_text.get(usize::from(pos)..usize::from(cursor)))
+            .map(|s| s == ".")
+            .unwrap_or(false);
+
+        // Check if this is path completion (chars before cursor are '::')
+        let is_path_completion = cursor
+            .checked_sub(2.into())
+            .and_then(|pos| file_text.get(usize::from(pos)..usize::from(cursor)))
+            .map(|s| s == "::")
+            .unwrap_or(false);
+
+        if is_member_access {
+            collect_member_completions(db, top_mod, cursor, &mut items);
+        } else if is_path_completion {
+            collect_path_completions(db, top_mod, cursor, file_text, &mut items);
+        } else {
+            let scope = find_scope_at_cursor(db, top_mod, cursor);
+            if let Some(scope) = scope {
+                let context = detect_completion_context(file_text, cursor);
+                collect_items_from_scope(db, scope, context, &mut items);
+            }
+        }
+
+        // Sort and format
+        items.sort_by(|a, b| a.label.cmp(&b.label));
+        items.iter().map(format_completion_item).collect()
+    }
+
+    /// Create a codespan-based snapshot showing completions at each cursor position.
+    fn make_completion_snapshot(
+        db: &DriverDataBase,
+        cleaned_source: &str,
+        positions: &[usize],
+        top_mod: TopLevelMod,
+    ) -> String {
+        use codespan_reporting::{
+            diagnostic::{Diagnostic, Label},
+            files::SimpleFiles,
+            term::{
+                self,
+                termcolor::{BufferWriter, ColorChoice},
+            },
+        };
+
+        let mut files = SimpleFiles::new();
+        let file_id = files.add("completion.fe", cleaned_source.to_string());
+
+        let mut output = String::new();
+
+        for (idx, pos) in positions.iter().enumerate() {
+            let cursor = parser::TextSize::from(*pos as u32);
+            let completions = collect_completions_at_cursor(db, top_mod, cleaned_source, cursor);
+
+            // Create a diagnostic showing the cursor position
+            let completion_list = if completions.is_empty() {
+                "(no completions)".to_string()
+            } else {
+                completions.join(", ")
+            };
+
+            let diag = Diagnostic::note().with_labels(vec![
+                Label::primary(file_id, *pos..*pos).with_message(format!("cursor {}", idx + 1)),
+            ]);
+
+            // Render the diagnostic
+            let writer = BufferWriter::stderr(ColorChoice::Never);
+            let mut buffer = writer.buffer();
+            let config = term::Config::default();
+            term::emit(&mut buffer, &config, &files, &diag).unwrap();
+
+            let diag_str = std::str::from_utf8(buffer.as_slice()).unwrap();
+            output.push_str(diag_str);
+            output.push_str(&format!("completions: {}\n\n", completion_list));
+        }
+
+        output
+    }
+
+    #[dir_test::dir_test(
+        dir: "$CARGO_MANIFEST_DIR/test_files",
+        glob: "completion.fe"
+    )]
+    fn test_completion_snapshot(fixture: dir_test::Fixture<&str>) {
+        use test_utils::snap_test;
+        use url::Url;
+
+        let original_source = fixture.content();
+        let (cleaned_source, positions) = extract_cursor_markers(original_source);
+
+        let mut db = DriverDataBase::default();
+        let file = db.workspace().touch(
+            &mut db,
+            Url::from_file_path(fixture.path()).unwrap(),
+            Some(cleaned_source.clone()),
+        );
+        let top_mod = map_file_to_mod(&db, file);
+
+        let snapshot = make_completion_snapshot(&db, &cleaned_source, &positions, top_mod);
+        snap_test!(snapshot, fixture.path());
+    }
 }
