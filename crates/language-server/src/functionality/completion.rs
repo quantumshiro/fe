@@ -1393,13 +1393,6 @@ mod tests {
             let cursor = parser::TextSize::from(*pos as u32);
             let completions = collect_completions_at_cursor(db, top_mod, cleaned_source, cursor);
 
-            // Create a diagnostic showing the cursor position
-            let completion_list = if completions.is_empty() {
-                "(no completions)".to_string()
-            } else {
-                completions.join(", ")
-            };
-
             let diag = Diagnostic::note().with_labels(vec![
                 Label::primary(file_id, *pos..*pos).with_message(format!("cursor {}", idx + 1)),
             ]);
@@ -1412,7 +1405,17 @@ mod tests {
 
             let diag_str = std::str::from_utf8(buffer.as_slice()).unwrap();
             output.push_str(diag_str);
-            output.push_str(&format!("completions: {}\n\n", completion_list));
+
+            // Format completions as a nice list
+            if completions.is_empty() {
+                output.push_str("completions: (none)\n");
+            } else {
+                output.push_str("completions:\n");
+                for completion in &completions {
+                    output.push_str(&format!("  - {}\n", completion));
+                }
+            }
+            output.push('\n');
         }
 
         output

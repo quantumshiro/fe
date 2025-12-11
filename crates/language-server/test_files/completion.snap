@@ -1,6 +1,6 @@
 ---
 source: crates/language-server/src/functionality/completion.rs
-assertion_line: 1441
+assertion_line: 1444
 expression: snapshot
 input_file: test_files/completion.fe
 ---
@@ -10,7 +10,12 @@ note:
 45 │     p.
    │       ^ cursor 1
 
-completions: distance (Method) -> "distance()$0" [fn distance() -> i32], draw (Method) -> "draw()$0" [fn draw()], scale (Method) -> "scale(${1:factor})$0" [fn scale(factor: i32) -> Point], x (Field) [x: i32], y (Field) [y: i32]
+completions:
+  - distance (Method) -> "distance()$0" [fn distance() -> i32]
+  - draw (Method) -> "draw()$0" [fn draw()]
+  - scale (Method) -> "scale(${1:factor})$0" [fn scale(factor: i32) -> Point]
+  - x (Field) [x: i32]
+  - y (Field) [y: i32]
 
 note: 
    ┌─ completion.fe:50:12
@@ -18,7 +23,13 @@ note:
 50 │     let x: 
    │            ^ cursor 2
 
-completions: Default (Interface), Drawable (Interface), Option (Enum), Point (Struct), Result (Enum), utils (Module) -> "utils::"
+completions:
+  - Default (Interface)
+  - Drawable (Interface)
+  - Option (Enum)
+  - Point (Struct)
+  - Result (Enum)
+  - utils (Module) -> "utils::"
 
 note: 
    ┌─ completion.fe:55:18
@@ -26,7 +37,20 @@ note:
 55 │     let result = 
    │                  ^ cursor 3
 
-completions: Err (EnumMember), None (EnumMember), Ok (EnumMember), Some (EnumMember), panic (Function) -> "panic()$0" [fn panic() -> !], result (Variable) [result: _], test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()], test_locals (Function) -> "test_locals(${1:param})$0" [fn test_locals(param: i32)], test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()], test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()], test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))], test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()], todo (Function) -> "todo()$0" [fn todo() -> !]
+completions:
+  - Err (EnumMember)
+  - None (EnumMember)
+  - Ok (EnumMember)
+  - Some (EnumMember)
+  - panic (Function) -> "panic()$0" [fn panic() -> !]
+  - result (Variable) [result: _]
+  - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
+  - test_locals (Function) -> "test_locals(${1:param})$0" [fn test_locals(param: i32)]
+  - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
+  - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
+  - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
+  - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
+  - todo (Function) -> "todo()$0" [fn todo() -> !]
 
 note: 
    ┌─ completion.fe:60:20
@@ -34,7 +58,10 @@ note:
 60 │     let h = utils::
    │                    ^ cursor 4
 
-completions: Helpable (Interface), Helper (Struct), helper_func (Function) -> "helper_func()$0" [fn helper_func() -> i32]
+completions:
+  - Helpable (Interface)
+  - Helper (Struct)
+  - helper_func (Function) -> "helper_func()$0" [fn helper_func() -> i32]
 
 note: 
    ┌─ completion.fe:63:26
@@ -42,7 +69,13 @@ note:
 63 │ fn test_return_type() ->  {
    │                          ^ cursor 5
 
-completions: Default (Interface), Drawable (Interface), Option (Enum), Point (Struct), Result (Enum), utils (Module) -> "utils::"
+completions:
+  - Default (Interface)
+  - Drawable (Interface)
+  - Option (Enum)
+  - Point (Struct)
+  - Result (Enum)
+  - utils (Module) -> "utils::"
 
 note: 
    ┌─ completion.fe:70:13
@@ -50,4 +83,19 @@ note:
 70 │     let x = 
    │             ^ cursor 6
 
-completions: Err (EnumMember), None (EnumMember), Ok (EnumMember), Some (EnumMember), local_var (Variable) [local_var: {integer}], panic (Function) -> "panic()$0" [fn panic() -> !], param (Variable) [param: i32], test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()], test_locals (Function) -> "test_locals(${1:param})$0" [fn test_locals(param: i32)], test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()], test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()], test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))], test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()], todo (Function) -> "todo()$0" [fn todo() -> !], x (Variable) [x: _]
+completions:
+  - Err (EnumMember)
+  - None (EnumMember)
+  - Ok (EnumMember)
+  - Some (EnumMember)
+  - local_var (Variable) [local_var: {integer}]
+  - panic (Function) -> "panic()$0" [fn panic() -> !]
+  - param (Variable) [param: i32]
+  - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
+  - test_locals (Function) -> "test_locals(${1:param})$0" [fn test_locals(param: i32)]
+  - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
+  - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
+  - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
+  - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
+  - todo (Function) -> "todo()$0" [fn todo() -> !]
+  - x (Variable) [x: _]
