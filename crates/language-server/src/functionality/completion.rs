@@ -491,6 +491,9 @@ fn collect_path_completions<'db>(
         }
     }
 
+    // Detect context for filtering (look at what's before the path)
+    let context = detect_completion_context(file_text, cursor);
+
     // Get direct child items of the final resolved scope
     // This gives us only items defined directly in this module, not inherited ones
     let child_items: Vec<_> = current_scope.child_items(db).collect();
@@ -501,21 +504,67 @@ fn collect_path_completions<'db>(
         };
         let name_str = name.data(db);
 
-        let kind = match item {
-            ItemKind::Func(_) => CompletionItemKind::FUNCTION,
-            ItemKind::Struct(_) => CompletionItemKind::STRUCT,
-            ItemKind::Enum(_) => CompletionItemKind::ENUM,
-            ItemKind::Trait(_) => CompletionItemKind::INTERFACE,
-            ItemKind::TypeAlias(_) => CompletionItemKind::CLASS,
-            ItemKind::Const(_) => CompletionItemKind::CONSTANT,
-            ItemKind::Mod(_) | ItemKind::TopMod(_) => CompletionItemKind::MODULE,
-            ItemKind::Contract(_) => CompletionItemKind::CLASS,
-            _ => CompletionItemKind::VALUE,
+        // Filter and determine kind based on item type and context
+        let (kind, insert_text) = match item {
+            ItemKind::Func(func) => {
+                if matches!(context, CompletionContext::Type) {
+                    continue;
+                }
+                // Use callable snippet for functions
+                if let Some(completion) =
+                    build_callable_completion(db, func, CompletionItemKind::FUNCTION)
+                {
+                    items.push(completion);
+                }
+                continue;
+            }
+            ItemKind::Const(_) => {
+                if matches!(context, CompletionContext::Type) {
+                    continue;
+                }
+                (CompletionItemKind::CONSTANT, None)
+            }
+            ItemKind::Struct(_) => {
+                if matches!(context, CompletionContext::Expression) {
+                    continue;
+                }
+                (CompletionItemKind::STRUCT, None)
+            }
+            ItemKind::Enum(_) => {
+                if matches!(context, CompletionContext::Expression) {
+                    continue;
+                }
+                (CompletionItemKind::ENUM, None)
+            }
+            ItemKind::Trait(_) => {
+                if matches!(context, CompletionContext::Expression) {
+                    continue;
+                }
+                (CompletionItemKind::INTERFACE, None)
+            }
+            ItemKind::TypeAlias(_) => {
+                if matches!(context, CompletionContext::Expression) {
+                    continue;
+                }
+                (CompletionItemKind::CLASS, None)
+            }
+            ItemKind::Contract(_) => {
+                if matches!(context, CompletionContext::Expression) {
+                    continue;
+                }
+                (CompletionItemKind::CLASS, None)
+            }
+            ItemKind::Mod(_) | ItemKind::TopMod(_) => {
+                // Modules get :: suffix
+                (CompletionItemKind::MODULE, Some(format!("{}::", name_str)))
+            }
+            _ => continue,
         };
 
         items.push(CompletionItem {
             label: name_str.to_string(),
             kind: Some(kind),
+            insert_text,
             ..Default::default()
         });
     }
@@ -979,6 +1028,19 @@ fn name_res_to_completion<'db>(
         return build_callable_completion(db, func, CompletionItemKind::FUNCTION);
     }
 
+    // For modules, add :: suffix to enable path continuation
+    if matches!(
+        scope.to_item(),
+        Some(ItemKind::Mod(_) | ItemKind::TopMod(_))
+    ) {
+        return Some(CompletionItem {
+            label: name.to_string(),
+            kind: Some(CompletionItemKind::MODULE),
+            insert_text: Some(format!("{}::", name)),
+            ..Default::default()
+        });
+    }
+
     // Determine the completion kind based on the scope
     let kind = match scope.to_item() {
         Some(ItemKind::Struct(_)) => CompletionItemKind::STRUCT,
@@ -986,7 +1048,6 @@ fn name_res_to_completion<'db>(
         Some(ItemKind::Trait(_)) => CompletionItemKind::INTERFACE,
         Some(ItemKind::TypeAlias(_)) => CompletionItemKind::CLASS,
         Some(ItemKind::Const(_)) => CompletionItemKind::CONSTANT,
-        Some(ItemKind::Mod(_) | ItemKind::TopMod(_)) => CompletionItemKind::MODULE,
         Some(ItemKind::Contract(_)) => CompletionItemKind::CLASS,
         _ => match scope {
             ScopeId::FuncParam(_, _) => CompletionItemKind::VARIABLE,
