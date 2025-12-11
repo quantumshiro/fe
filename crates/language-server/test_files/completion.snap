@@ -1,6 +1,6 @@
 ---
 source: crates/language-server/src/functionality/completion.rs
-assertion_line: 1444
+assertion_line: 1549
 expression: snapshot
 input_file: test_files/completion.fe
 ---
@@ -24,12 +24,9 @@ note:
    │            ^ cursor 2
 
 completions:
-  - Default (Interface)
-  - Drawable (Interface)
   - Option (Enum)
   - Point (Struct)
   - Result (Enum)
-  - utils (Module) -> "utils::"
 
 note: 
    ┌─ completion.fe:55:18
@@ -70,12 +67,9 @@ note:
    │                          ^ cursor 5
 
 completions:
-  - Default (Interface)
-  - Drawable (Interface)
   - Option (Enum)
   - Point (Struct)
   - Result (Enum)
-  - utils (Module) -> "utils::"
 
 note: 
    ┌─ completion.fe:70:13

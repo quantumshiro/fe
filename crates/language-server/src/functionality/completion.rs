@@ -260,7 +260,7 @@ fn collect_items_from_scope<'db>(
     let visible_items = scope.items_in_scope(db, domain);
 
     for (name, name_res) in visible_items {
-        if let Some(completion) = name_res_to_completion(db, name, name_res) {
+        if let Some(completion) = name_res_to_completion(db, name, name_res, context) {
             items.push(completion);
         }
     }
@@ -1005,16 +1005,20 @@ impl<'a, 'db> Visitor<'db> for LetBindingCollector<'a, 'db> {
     }
 }
 
-/// Convert a NameRes to a CompletionItem.
+/// Convert a NameRes to a CompletionItem, filtering based on context.
 fn name_res_to_completion<'db>(
     db: &'db DriverDataBase,
     name: &str,
     name_res: &hir::analysis::name_resolution::NameRes<'db>,
+    context: CompletionContext,
 ) -> Option<CompletionItem> {
     let scope = match &name_res.kind {
         NameResKind::Scope(scope) => *scope,
         NameResKind::Prim(_) => {
-            // Primitive types
+            // Primitive types - only in type context
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
             return Some(CompletionItem {
                 label: name.to_string(),
                 kind: Some(CompletionItemKind::KEYWORD),
@@ -1023,46 +1027,147 @@ fn name_res_to_completion<'db>(
         }
     };
 
-    // For functions, use the callable snippet builder
-    if let Some(ItemKind::Func(func)) = scope.to_item() {
-        return build_callable_completion(db, func, CompletionItemKind::FUNCTION);
+    // Determine what kind of item this is and filter based on context
+    match scope.to_item() {
+        Some(ItemKind::Func(func)) => {
+            // Functions are values - not allowed in type context
+            if matches!(context, CompletionContext::Type) {
+                return None;
+            }
+            build_callable_completion(db, func, CompletionItemKind::FUNCTION)
+        }
+
+        Some(ItemKind::Mod(_) | ItemKind::TopMod(_)) => {
+            // Modules can lead to types or values, so allow in mixed context
+            // but not in pure type context (you can't use a module as a type)
+            if matches!(context, CompletionContext::Type) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::MODULE),
+                insert_text: Some(format!("{}::", name)),
+                ..Default::default()
+            })
+        }
+
+        Some(ItemKind::Struct(_)) => {
+            // Structs are types - not allowed in expression context
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::STRUCT),
+                ..Default::default()
+            })
+        }
+
+        Some(ItemKind::Enum(_)) => {
+            // Enums are types - not allowed in expression context
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::ENUM),
+                ..Default::default()
+            })
+        }
+
+        Some(ItemKind::Trait(_)) => {
+            // Traits are not usable as standalone types in type annotations
+            // They're used in bounds (T: Trait) or impl blocks, not as `let x: Trait`
+            // For now, exclude from type context
+            if matches!(context, CompletionContext::Type) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::INTERFACE),
+                ..Default::default()
+            })
+        }
+
+        Some(ItemKind::TypeAlias(_)) => {
+            // Type aliases are types
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::CLASS),
+                ..Default::default()
+            })
+        }
+
+        Some(ItemKind::Const(_)) => {
+            // Constants are values
+            if matches!(context, CompletionContext::Type) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::CONSTANT),
+                ..Default::default()
+            })
+        }
+
+        Some(ItemKind::Contract(_)) => {
+            // Contracts are types
+            if matches!(context, CompletionContext::Expression) {
+                return None;
+            }
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::CLASS),
+                ..Default::default()
+            })
+        }
+
+        _ => {
+            // Handle other scope types
+            let kind = match scope {
+                ScopeId::FuncParam(_, _) => {
+                    if matches!(context, CompletionContext::Type) {
+                        return None;
+                    }
+                    CompletionItemKind::VARIABLE
+                }
+                ScopeId::GenericParam(_, _) => {
+                    if matches!(context, CompletionContext::Expression) {
+                        return None;
+                    }
+                    CompletionItemKind::TYPE_PARAMETER
+                }
+                ScopeId::Variant(_) => {
+                    // Enum variants are values (constructors)
+                    if matches!(context, CompletionContext::Type) {
+                        return None;
+                    }
+                    CompletionItemKind::ENUM_MEMBER
+                }
+                ScopeId::Field(_, _) => {
+                    if matches!(context, CompletionContext::Type) {
+                        return None;
+                    }
+                    CompletionItemKind::FIELD
+                }
+                _ => {
+                    if matches!(context, CompletionContext::Type) {
+                        return None;
+                    }
+                    CompletionItemKind::VALUE
+                }
+            };
+
+            Some(CompletionItem {
+                label: name.to_string(),
+                kind: Some(kind),
+                ..Default::default()
+            })
+        }
     }
-
-    // For modules, add :: suffix to enable path continuation
-    if matches!(
-        scope.to_item(),
-        Some(ItemKind::Mod(_) | ItemKind::TopMod(_))
-    ) {
-        return Some(CompletionItem {
-            label: name.to_string(),
-            kind: Some(CompletionItemKind::MODULE),
-            insert_text: Some(format!("{}::", name)),
-            ..Default::default()
-        });
-    }
-
-    // Determine the completion kind based on the scope
-    let kind = match scope.to_item() {
-        Some(ItemKind::Struct(_)) => CompletionItemKind::STRUCT,
-        Some(ItemKind::Enum(_)) => CompletionItemKind::ENUM,
-        Some(ItemKind::Trait(_)) => CompletionItemKind::INTERFACE,
-        Some(ItemKind::TypeAlias(_)) => CompletionItemKind::CLASS,
-        Some(ItemKind::Const(_)) => CompletionItemKind::CONSTANT,
-        Some(ItemKind::Contract(_)) => CompletionItemKind::CLASS,
-        _ => match scope {
-            ScopeId::FuncParam(_, _) => CompletionItemKind::VARIABLE,
-            ScopeId::GenericParam(_, _) => CompletionItemKind::TYPE_PARAMETER,
-            ScopeId::Variant(_) => CompletionItemKind::ENUM_MEMBER,
-            ScopeId::Field(_, _) => CompletionItemKind::FIELD,
-            _ => CompletionItemKind::VALUE,
-        },
-    };
-
-    Some(CompletionItem {
-        label: name.to_string(),
-        kind: Some(kind),
-        ..Default::default()
-    })
 }
 
 #[cfg(test)]
