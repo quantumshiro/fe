@@ -1,13 +1,14 @@
 use crate::{
     hir_def::{
         Body, Contract, EffectParamListId, Expr, ExprId, FieldParent, Func, IdentId, IntegerId,
-        Partial, Pat, PatId, PathId, Stmt, StmtId, TraitRefId, prim_ty::PrimTy,
+        ItemKind, Partial, Pat, PatId, PathId, Stmt, StmtId, TraitRefId, prim_ty::PrimTy,
         scope_graph::ScopeId,
     },
     span::DynLazySpan,
 };
 
 use crate::hir_def::CallableDef;
+use common::indexmap::IndexMap;
 use num_bigint::BigUint;
 use rustc_hash::FxHashMap;
 use salsa::Update;
@@ -69,8 +70,17 @@ impl<'db> TyCheckEnv<'db> {
         // Compute base assumptions (without effect-derived bounds) up-front
         let (base_preds, base_assumptions) = match owner {
             BodyOwner::Func(func) => {
-                let preds =
+                let mut preds =
                     collect_func_def_constraints(db, func.into(), true).instantiate_identity();
+                // Methods inside a trait implicitly assume `Self: Trait` in their bodies so
+                // default method calls resolve against the trait being implemented.
+                if let Some(ItemKind::Trait(trait_)) = func.scope().parent_item(db) {
+                    let self_pred =
+                        TraitInstId::new(db, trait_, trait_.params(db).to_vec(), IndexMap::new());
+                    let mut merged = preds.list(db).to_vec();
+                    merged.push(self_pred);
+                    preds = PredicateListId::new(db, merged);
+                }
                 let assumptions = preds.extend_all_bounds(db);
                 (preds, assumptions)
             }
