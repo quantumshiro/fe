@@ -1,8 +1,8 @@
 use crate::{backend::Backend, util::to_offset_from_position};
 use async_lsp::ResponseError;
 use async_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, Position, Range,
-    TextEdit,
+    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, InsertTextFormat,
+    Position, Range, TextEdit,
 };
 use common::InputDb;
 use driver::DriverDataBase;
@@ -528,6 +528,68 @@ fn collect_fields_for_type<'db>(
     }
 }
 
+/// Build a completion item for a callable (function or method) with snippet tabstops.
+fn build_callable_completion<'db>(
+    db: &'db DriverDataBase,
+    func: Func<'db>,
+    kind: CompletionItemKind,
+) -> Option<CompletionItem> {
+    let name = func.name(db).to_opt()?;
+    let name_str = name.data(db).to_string();
+
+    // Build parameter list for detail and snippet
+    let mut param_names = Vec::new();
+    let mut param_details = Vec::new();
+
+    for param in func.params(db) {
+        if param.is_self_param(db) {
+            continue; // Skip self parameter in completion
+        }
+
+        let param_name = param
+            .name(db)
+            .map(|n| n.data(db).to_string())
+            .unwrap_or_else(|| format!("arg{}", param_names.len()));
+
+        let param_ty = param.ty(db);
+        param_details.push(format!("{}: {}", param_name, param_ty.pretty_print(db)));
+        param_names.push(param_name);
+    }
+
+    // Build detail string: fn name(param1: Type1, param2: Type2) -> ReturnType
+    let ret_ty = func.return_ty(db);
+    let ret_str = {
+        let ret_pretty = ret_ty.pretty_print(db);
+        if ret_pretty == "()" {
+            String::new()
+        } else {
+            format!(" -> {}", ret_pretty)
+        }
+    };
+    let detail = format!("fn {}({}){}", name_str, param_details.join(", "), ret_str);
+
+    // Build snippet with tabstops: name(${1:param1}, ${2:param2})
+    let snippet = if param_names.is_empty() {
+        format!("{}()$0", name_str)
+    } else {
+        let tabstops: Vec<String> = param_names
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("${{{}:{}}}", i + 1, p))
+            .collect();
+        format!("{}({})$0", name_str, tabstops.join(", "))
+    };
+
+    Some(CompletionItem {
+        label: name_str,
+        kind: Some(kind),
+        detail: Some(detail),
+        insert_text: Some(snippet),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
+        ..Default::default()
+    })
+}
+
 /// Collect methods from impls as completion items.
 fn collect_methods_for_type<'db>(
     db: &'db DriverDataBase,
@@ -547,16 +609,12 @@ fn collect_methods_for_type<'db>(
             let impl_ty_name = impl_.ty(db).pretty_print(db);
             if impl_ty_name == ty_name {
                 for func in impl_.funcs(db) {
-                    if func.is_method(db)
-                        && let Some(name) = func.name(db).to_opt()
-                    {
-                        let detail = format!("fn {}(...)", name.data(db));
-                        items.push(CompletionItem {
-                            label: name.data(db).to_string(),
-                            kind: Some(CompletionItemKind::METHOD),
-                            detail: Some(detail),
-                            ..Default::default()
-                        });
+                    if func.is_method(db) {
+                        if let Some(completion) =
+                            build_callable_completion(db, func, CompletionItemKind::METHOD)
+                        {
+                            items.push(completion);
+                        }
                     }
                 }
             }
@@ -713,7 +771,7 @@ impl<'a, 'db> Visitor<'db> for LetBindingCollector<'a, 'db> {
 
 /// Convert a NameRes to a CompletionItem.
 fn name_res_to_completion<'db>(
-    _db: &'db DriverDataBase,
+    db: &'db DriverDataBase,
     name: &str,
     name_res: &hir::analysis::name_resolution::NameRes<'db>,
 ) -> Option<CompletionItem> {
@@ -729,9 +787,13 @@ fn name_res_to_completion<'db>(
         }
     };
 
+    // For functions, use the callable snippet builder
+    if let Some(ItemKind::Func(func)) = scope.to_item() {
+        return build_callable_completion(db, func, CompletionItemKind::FUNCTION);
+    }
+
     // Determine the completion kind based on the scope
     let kind = match scope.to_item() {
-        Some(ItemKind::Func(_)) => CompletionItemKind::FUNCTION,
         Some(ItemKind::Struct(_)) => CompletionItemKind::STRUCT,
         Some(ItemKind::Enum(_)) => CompletionItemKind::ENUM,
         Some(ItemKind::Trait(_)) => CompletionItemKind::INTERFACE,
