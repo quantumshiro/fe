@@ -8,8 +8,7 @@ mod path;
 mod stmt;
 
 pub use self::contract::{
-    check_contract_init_body, check_contract_recv_arm_body, check_contract_recv_block,
-    check_contract_recv_blocks,
+    check_contract_recv_arm_body, check_contract_recv_block, check_contract_recv_blocks,
 };
 pub use self::path::RecordLike;
 use crate::{

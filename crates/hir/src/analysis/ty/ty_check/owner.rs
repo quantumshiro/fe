@@ -8,7 +8,6 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BodyOwner<'db> {
     Func(Func<'db>),
-    ContractInit(Contract<'db>),
     ContractRecvArm {
         contract: Contract<'db>,
         recv_idx: u32,
@@ -22,7 +21,6 @@ impl<'db> BodyOwner<'db> {
     pub fn body(self, db: &'db dyn HirAnalysisDb) -> Option<Body<'db>> {
         match self {
             BodyOwner::Func(func) => func.body(db),
-            BodyOwner::ContractInit(contract) => contract.init_body(db),
             BodyOwner::ContractRecvArm { arm, .. } => Some(arm.body),
         }
     }
@@ -30,7 +28,6 @@ impl<'db> BodyOwner<'db> {
     pub fn scope(self) -> ScopeId<'db> {
         match self {
             BodyOwner::Func(func) => func.scope(),
-            BodyOwner::ContractInit(contract) => contract.scope(),
             BodyOwner::ContractRecvArm { contract, .. } => contract.scope(),
         }
     }

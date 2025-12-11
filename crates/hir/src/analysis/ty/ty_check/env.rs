@@ -110,8 +110,7 @@ impl<'db> TyCheckEnv<'db> {
 
         env.enter_scope(body.expr(db));
 
-        env.register_params(base_assumptions);
-
+        env.register_params();
         env.seed_effects(base_assumptions);
 
         // Finalize assumptions by merging in effect-derived bounds
@@ -122,7 +121,7 @@ impl<'db> TyCheckEnv<'db> {
         Ok(env)
     }
 
-    fn register_params(&mut self, base_assumptions: PredicateListId<'db>) {
+    fn register_params(&mut self) {
         match self.owner {
             BodyOwner::Func(func) => {
                 let arg_tys = func.arg_tys(self.db);
@@ -149,45 +148,20 @@ impl<'db> TyCheckEnv<'db> {
                     self.var_env.last_mut().unwrap().register_var(name, var);
                 }
             }
-            BodyOwner::ContractInit(contract) => {
-                let Some(params) = contract.init_params(self.db) else {
-                    return;
-                };
-
-                for (idx, param) in params.data(self.db).iter().enumerate() {
-                    let Some(name) = param.name() else {
-                        continue;
-                    };
-                    let ty = match param.ty.to_opt() {
-                        Some(hir_ty) => {
-                            lower_hir_ty(self.db, hir_ty, contract.scope(), base_assumptions)
-                        }
-                        None => TyId::invalid(self.db, InvalidCause::ParseError),
-                    };
-                    let ty = if ty.is_star_kind(self.db) {
-                        ty
-                    } else {
-                        TyId::invalid(self.db, InvalidCause::Other)
-                    };
-                    let var = LocalBinding::Param {
-                        site: ParamSite::ContractInit(contract),
-                        idx,
-                        ty,
-                        is_mut: param.is_mut,
-                    };
-                    self.var_env.last_mut().unwrap().register_var(name, var);
-                }
-            }
             BodyOwner::ContractRecvArm { .. } => {}
         }
     }
 
     fn seed_effects(&mut self, base_assumptions: PredicateListId<'db>) {
         match self.owner {
-            BodyOwner::Func(func) => self.seed_func_effects(func, base_assumptions),
-            BodyOwner::ContractInit(_) | BodyOwner::ContractRecvArm { .. } => {
-                self.seed_contract_effects(base_assumptions)
+            BodyOwner::Func(func) => {
+                if self.parent_contract_for_func(func).is_some() {
+                    self.seed_contract_effects(base_assumptions)
+                } else {
+                    self.seed_func_effects(func, base_assumptions)
+                }
             }
+            BodyOwner::ContractRecvArm { .. } => self.seed_contract_effects(base_assumptions),
         }
     }
 
@@ -261,6 +235,7 @@ impl<'db> TyCheckEnv<'db> {
     }
 
     fn seed_contract_effects(&mut self, base_assumptions: PredicateListId<'db>) {
+        let effect_scope = self.effect_owner_scope();
         let mut global_idx = 0usize;
         for (site, list) in self.effect_sites() {
             for (idx, effect) in list.data(self.db).iter().enumerate() {
@@ -285,7 +260,7 @@ impl<'db> TyCheckEnv<'db> {
 
                 let e_ty = TyId::new(
                     self.db,
-                    TyData::TyParam(TyParam::effect_param(ident, global_idx, self.owner_scope)),
+                    TyData::TyParam(TyParam::effect_param(ident, global_idx, effect_scope)),
                 );
 
                 let trait_ref = TraitRefId::new(self.db, Partial::Present(key_path));
@@ -296,7 +271,7 @@ impl<'db> TyCheckEnv<'db> {
                         self.db,
                         e_ty,
                         trait_ref,
-                        self.owner_scope,
+                        effect_scope,
                         base_assumptions,
                         None,
                     ) {
@@ -325,7 +300,7 @@ impl<'db> TyCheckEnv<'db> {
                     // Insert effect keyed by the field's type (e.g., TokenStore)
                     self.effect_env.insert(EffectKey::Type(field_ty), provided);
                 } else if let Some(key) =
-                    self.effect_key_for_path_in_scope(key_path, self.owner_scope, base_assumptions)
+                    self.effect_key_for_path_in_scope(key_path, effect_scope, base_assumptions)
                 {
                     self.effect_env.insert(key, provided);
                 }
@@ -359,17 +334,18 @@ impl<'db> TyCheckEnv<'db> {
 
     fn effect_sites(&self) -> Vec<(EffectParamSite<'db>, EffectParamListId<'db>)> {
         match self.owner {
-            BodyOwner::Func(_) => Vec::new(),
-            BodyOwner::ContractInit(contract) => vec![
-                (
-                    EffectParamSite::Contract(contract),
-                    contract.effects(self.db),
-                ),
-                (
-                    EffectParamSite::ContractInit(contract),
-                    contract.init_effects(self.db),
-                ),
-            ],
+            BodyOwner::Func(func) => {
+                let Some(contract) = self.parent_contract_for_func(func) else {
+                    return Vec::new();
+                };
+                vec![
+                    (
+                        EffectParamSite::Contract(contract),
+                        contract.effects(self.db),
+                    ),
+                    (EffectParamSite::Func(func), func.effects(self.db)),
+                ]
+            }
             BodyOwner::ContractRecvArm {
                 contract,
                 recv_idx,
@@ -395,13 +371,29 @@ impl<'db> TyCheckEnv<'db> {
         }
     }
 
-    fn contract_from_site(site: EffectParamSite<'db>) -> Option<Contract<'db>> {
+    fn parent_contract_for_func(&self, func: Func<'db>) -> Option<Contract<'db>> {
+        if let Some(ItemKind::Contract(contract)) = func.scope().parent_item(self.db) {
+            Some(contract)
+        } else {
+            None
+        }
+    }
+
+    fn effect_owner_scope(&self) -> ScopeId<'db> {
+        match self.owner {
+            BodyOwner::Func(func) => self
+                .parent_contract_for_func(func)
+                .map(|c| c.scope())
+                .unwrap_or(self.owner_scope),
+            _ => self.owner_scope,
+        }
+    }
+
+    fn contract_from_site(&self, site: EffectParamSite<'db>) -> Option<Contract<'db>> {
         match site {
-            EffectParamSite::Contract(contract) | EffectParamSite::ContractInit(contract) => {
-                Some(contract)
-            }
+            EffectParamSite::Contract(contract) => Some(contract),
             EffectParamSite::ContractRecvArm { contract, .. } => Some(contract),
-            EffectParamSite::Func(_) => None,
+            EffectParamSite::Func(func) => self.parent_contract_for_func(func),
         }
     }
 
@@ -410,7 +402,7 @@ impl<'db> TyCheckEnv<'db> {
         site: EffectParamSite<'db>,
         key_path: PathId<'db>,
     ) -> Option<TyId<'db>> {
-        let contract = Self::contract_from_site(site)?;
+        let contract = self.contract_from_site(site)?;
         let ident = key_path.ident(self.db).to_opt()?;
         let parent = FieldParent::Contract(contract);
         let field_ty = parent
@@ -475,7 +467,6 @@ impl<'db> TyCheckEnv<'db> {
                     rt
                 }
             }
-            BodyOwner::ContractInit(_) => TyId::unit(self.db),
             BodyOwner::ContractRecvArm { arm, .. } => {
                 let Some(ret_ty) = arm.ret_ty else {
                     return TyId::unit(self.db);
@@ -1017,7 +1008,6 @@ impl<'db> EffectEnv<'db> {
 pub(crate) enum EffectParamSite<'db> {
     Func(Func<'db>),
     Contract(Contract<'db>),
-    ContractInit(Contract<'db>),
     ContractRecvArm {
         contract: Contract<'db>,
         recv_idx: u32,
@@ -1028,7 +1018,6 @@ pub(crate) enum EffectParamSite<'db> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
 pub(crate) enum ParamSite<'db> {
     Func(Func<'db>),
-    ContractInit(Contract<'db>),
     /// Effect param that resolves to a contract field.
     EffectField(EffectParamSite<'db>),
 }
@@ -1036,13 +1025,6 @@ pub(crate) enum ParamSite<'db> {
 fn param_span(site: ParamSite<'_>, idx: usize) -> DynLazySpan<'_> {
     match site {
         ParamSite::Func(func) => func.span().params().param(idx).name().into(),
-        ParamSite::ContractInit(contract) => contract
-            .span()
-            .init_block()
-            .params()
-            .param(idx)
-            .name()
-            .into(),
         ParamSite::EffectField(effect_site) => effect_param_span(effect_site, idx),
     }
 }
@@ -1054,7 +1036,6 @@ fn param_name<'db>(
 ) -> Option<IdentId<'db>> {
     match site {
         ParamSite::Func(func) => func.params(db).nth(idx).and_then(|p| p.name(db)),
-        ParamSite::ContractInit(contract) => contract.init_params(db)?.data(db).get(idx)?.name(),
         ParamSite::EffectField(effect_site) => effect_param_name(db, effect_site, idx),
     }
 }
@@ -1069,11 +1050,6 @@ fn effect_param_name<'db>(
         EffectParamSite::Contract(contract) => {
             contract.effects(db).data(db).get(idx).and_then(|p| p.name)
         }
-        EffectParamSite::ContractInit(contract) => contract
-            .init_effects(db)
-            .data(db)
-            .get(idx)
-            .and_then(|p| p.name),
         EffectParamSite::ContractRecvArm {
             contract,
             recv_idx,
@@ -1093,13 +1069,6 @@ fn effect_param_span(site: EffectParamSite<'_>, idx: usize) -> DynLazySpan<'_> {
         EffectParamSite::Contract(contract) => {
             contract.span().effects().param_idx(idx).name().into()
         }
-        EffectParamSite::ContractInit(contract) => contract
-            .span()
-            .init_block()
-            .effects()
-            .param_idx(idx)
-            .name()
-            .into(),
         EffectParamSite::ContractRecvArm {
             contract,
             recv_idx,

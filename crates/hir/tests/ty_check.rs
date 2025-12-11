@@ -2,9 +2,7 @@ mod test_db;
 use std::path::Path;
 
 use dir_test::{Fixture, dir_test};
-use fe_hir::analysis::ty::ty_check::{
-    check_contract_init_body, check_contract_recv_arm_body, check_func_body,
-};
+use fe_hir::analysis::ty::ty_check::{check_contract_recv_arm_body, check_func_body};
 use test_db::HirAnalysisTestDb;
 use test_utils::snap_test;
 
@@ -29,11 +27,6 @@ fn ty_check_standalone(fixture: Fixture<&str>) {
     }
 
     for &contract in top_mod.all_contracts(&db) {
-        if let Some(body) = contract.init_body(&db) {
-            let typed_body = &check_contract_init_body(&db, contract).1;
-            collect_body_props(&db, body, typed_body, &mut prop_formatter);
-        }
-
         let recvs = contract.recvs(&db);
         for (recv_idx, recv) in recvs.data(&db).iter().enumerate() {
             for (arm_idx, arm) in recv.arms.data(&db).iter().enumerate() {

@@ -26,7 +26,7 @@ impl<'db> LazyUsePathSpan<'db> {
                         .get(idx)
                         .map(|ptr| ResolvedOriginKind::Node(ptr.syntax_node_ptr().to_node(&root)))
                         .unwrap_or_else(|| ResolvedOriginKind::None),
-                    DesugaredOrigin::Msg(_) => ResolvedOriginKind::None,
+                    _ => ResolvedOriginKind::None,
                 })
         }
 
@@ -63,7 +63,7 @@ impl<'db> LazyUseAliasSpan<'db> {
                         .alias
                         .and_then(|ptr| ptr.to_node(&root).alias().map(ResolvedOriginKind::Token))
                         .unwrap_or_else(|| ResolvedOriginKind::None),
-                    DesugaredOrigin::Msg(_) => ResolvedOriginKind::None,
+                    _ => ResolvedOriginKind::None,
                 })
         }
 

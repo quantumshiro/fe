@@ -1,4 +1,4 @@
-use parser::ast::{self, prelude::*};
+use parser::ast::{self, AstPtr, prelude::*};
 use salsa::Accumulator;
 
 use super::{FileLowerCtxt, body::BodyCtxt};
@@ -10,7 +10,7 @@ use crate::{
         attr::{Attr, NormalAttr},
         item::*,
     },
-    span::{HirOrigin, MsgDesugared, MsgDesugaredFocus},
+    span::{ContractInitDesugared, HirOrigin, MsgDesugared, MsgDesugaredFocus},
 };
 
 /// Selector-related errors accumulated during msg block lowering.
@@ -205,19 +205,9 @@ impl<'db> Contract<'db> {
         // Contract-level uses clause
         let effects = lower_uses_clause_opt(ctxt, ast.uses_clause());
 
-        // Optional init block
-        let (init_params, init_effects, init_body) = if let Some(init_ast) = ast.init_block() {
-            let params = init_ast
-                .params()
-                .map(|p| FuncParamListId::lower_ast(ctxt, p));
-            let effects = lower_uses_clause_opt(ctxt, init_ast.uses_clause());
-            let body = init_ast
-                .body()
-                .map(|b| Body::lower_ast(ctxt, ast::Expr::cast(b.syntax().clone()).unwrap()));
-            (params, effects, body)
-        } else {
-            (None, EffectParamListId::new(ctxt.db(), vec![]), None)
-        };
+        if let Some(init_ast) = ast.init_block() {
+            lower_contract_init_as_func(ctxt, init_ast);
+        }
 
         // Recv blocks (message handlers)
         let recvs = {
@@ -242,15 +232,51 @@ impl<'db> Contract<'db> {
             vis,
             fields,
             effects,
-            init_params,
-            init_effects,
-            init_body,
             recvs,
             ctxt.top_mod(),
             origin,
         );
         ctxt.leave_item_scope(contract)
     }
+}
+
+fn lower_contract_init_as_func<'db>(
+    ctxt: &mut FileLowerCtxt<'db>,
+    init_ast: ast::ContractInit,
+) -> Func<'db> {
+    let db = ctxt.db();
+
+    let init_name = Partial::Present(IdentId::new(db, "init".to_string()));
+    let id = ctxt.joined_id(TrackedItemVariant::Func(init_name));
+    ctxt.enter_item_scope(id, false);
+
+    let params = init_ast
+        .params()
+        .map(|p| FuncParamListId::lower_ast(ctxt, p))
+        .into();
+    let body = init_ast
+        .body()
+        .map(|b| Body::lower_ast(ctxt, ast::Expr::cast(b.syntax().clone()).unwrap()));
+
+    let init_fn = Func::new(
+        db,
+        id,
+        init_name,
+        AttrListId::new(db, vec![]),
+        GenericParamListId::new(db, vec![]),
+        WhereClauseId::new(db, vec![]),
+        params,
+        lower_uses_clause_opt(ctxt, init_ast.uses_clause()),
+        None,
+        ItemModifier::None,
+        body,
+        ctxt.top_mod(),
+        HirOrigin::desugared(ContractInitDesugared {
+            init: AstPtr::new(&init_ast),
+            focus: Default::default(),
+        }),
+    );
+    ctxt.leave_item_scope(init_fn)
 }
 
 /// Desugars a `msg` block into a module containing structs and trait impls.

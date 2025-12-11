@@ -515,6 +515,15 @@ impl DesugaredOrigin {
                     }
                 }
             }
+            Self::ContractInit(super::ContractInitDesugared { init, focus }) => {
+                use super::ContractInitDesugaredFocus;
+                use parser::ast::prelude::*;
+
+                let init_node = init.to_node(&root);
+                match focus {
+                    ContractInitDesugaredFocus::Block => init_node.syntax().text_range(),
+                }
+            }
         };
 
         Span::new(file, range, SpanKind::Original)

@@ -158,15 +158,6 @@ impl ModuleAnalysisPass for BodyAnalysisPass {
             .collect();
 
         for &contract in top_mod.all_contracts(db) {
-            if contract.init_body(db).is_some() {
-                diags.extend(
-                    ty_check::check_contract_init_body(db, contract)
-                        .0
-                        .iter()
-                        .map(|diag| diag.to_voucher()),
-                );
-            }
-
             diags.extend(
                 ty_check::check_contract_recv_blocks(db, contract)
                     .iter()

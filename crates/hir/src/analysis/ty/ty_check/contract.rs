@@ -133,14 +133,6 @@ pub fn resolve_variant_bare<'db>(
 }
 
 #[salsa::tracked(return_ref)]
-pub fn check_contract_init_body<'db>(
-    db: &'db dyn HirAnalysisDb,
-    contract: Contract<'db>,
-) -> (Vec<FuncBodyDiag<'db>>, TypedBody<'db>) {
-    check_body_owner(db, BodyOwner::ContractInit(contract))
-}
-
-#[salsa::tracked(return_ref)]
 pub fn check_contract_recv_block<'db>(
     db: &'db dyn HirAnalysisDb,
     contract: Contract<'db>,

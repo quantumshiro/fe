@@ -626,7 +626,7 @@ pub struct Func<'db> {
     pub(in crate::core) generic_params: GenericParamListId<'db>,
     pub(in crate::core) where_clause: WhereClauseId<'db>,
     pub(in crate::core) params_list: Partial<FuncParamListId<'db>>,
-    pub(in crate::core) effects: EffectParamListId<'db>,
+    pub(crate) effects: EffectParamListId<'db>,
     pub(in crate::core) ret_type_ref: Option<TypeId<'db>>,
     pub modifier: ItemModifier,
     pub body: Option<Body<'db>>,
@@ -748,10 +748,6 @@ pub struct Contract<'db> {
     pub(in crate::core) fields: FieldDefListId<'db>,
     /// `uses` clause attached to the contract header
     pub effects: EffectParamListId<'db>,
-    /// Optional contract initializer block components
-    pub init_params: Option<FuncParamListId<'db>>,
-    pub init_effects: EffectParamListId<'db>,
-    pub init_body: Option<Body<'db>>,
     /// Receive handlers declared in the contract
     pub recvs: ContractRecvListId<'db>,
     pub top_mod: TopLevelMod<'db>,
@@ -766,6 +762,23 @@ impl<'db> Contract<'db> {
 
     pub fn scope(self) -> ScopeId<'db> {
         ScopeId::from_item(self.into())
+    }
+
+    pub fn init_func(self, db: &'db dyn HirDb) -> Option<Func<'db>> {
+        let s_graph = self.top_mod(db).scope_graph(db);
+        let scope = ScopeId::from_item(self.into());
+        s_graph.child_items(scope).find_map(|item| match item {
+            ItemKind::Func(func) => {
+                if let Some(name) = func.name(db).to_opt()
+                    && name.data(db).as_str() == "init"
+                {
+                    Some(func)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
     }
 
     pub fn recv_arm(

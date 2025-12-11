@@ -92,16 +92,66 @@ impl<'db> LazyFuncSpan<'db> {
         self.sig().name()
     }
 
-    pub fn effects(self) -> LazyUsesClauseSpan<'db> {
-        self.sig().effects()
+    pub fn effects(mut self) -> LazyUsesClauseSpan<'db> {
+        use parser::ast::prelude::*;
+
+        fn f(origin: ResolvedOrigin, _: LazyArg) -> ResolvedOrigin {
+            origin
+                .map(|node| {
+                    ast::Func::cast(node)
+                        .map(|f| f.sig())
+                        .and_then(|sig| sig.uses_clause())
+                        .map(|n| n.syntax().clone().into())
+                })
+                .map_desugared(|root, desugared| match desugared {
+                    DesugaredOrigin::ContractInit(init) => init
+                        .init
+                        .to_node(&root)
+                        .uses_clause()
+                        .map(|n| ResolvedOriginKind::Node(n.syntax().clone()))
+                        .unwrap_or_else(|| ResolvedOriginKind::None),
+                    other => ResolvedOriginKind::Desugared(root, other),
+                })
+        }
+
+        self.0.push(LazyTransitionFn {
+            f,
+            arg: LazyArg::None,
+        });
+        LazyUsesClauseSpan(self.0)
     }
 
     pub fn where_clause(self) -> LazyWhereClauseSpan<'db> {
         self.sig().where_clause()
     }
 
-    pub fn params(self) -> LazyFuncParamListSpan<'db> {
-        self.sig().params()
+    pub fn params(mut self) -> LazyFuncParamListSpan<'db> {
+        use parser::ast::prelude::*;
+
+        fn f(origin: ResolvedOrigin, _: LazyArg) -> ResolvedOrigin {
+            origin
+                .map(|node| {
+                    ast::Func::cast(node)
+                        .map(|f| f.sig())
+                        .and_then(|sig| sig.params())
+                        .map(|n| n.syntax().clone().into())
+                })
+                .map_desugared(|root, desugared| match desugared {
+                    DesugaredOrigin::ContractInit(init) => init
+                        .init
+                        .to_node(&root)
+                        .params()
+                        .map(|n| ResolvedOriginKind::Node(n.syntax().clone()))
+                        .unwrap_or_else(|| ResolvedOriginKind::None),
+                    other => ResolvedOriginKind::Desugared(root, other),
+                })
+        }
+
+        self.0.push(LazyTransitionFn {
+            f,
+            arg: LazyArg::None,
+        });
+        LazyFuncParamListSpan(self.0)
     }
 
     pub fn ret_ty(self) -> LazyTySpan<'db> {
@@ -356,7 +406,7 @@ impl<'db> LazyUseSpan<'db> {
                         use_.focus = DesugaredUseFocus::Path;
                         ResolvedOriginKind::Desugared(root, DesugaredOrigin::Use(use_))
                     }
-                    DesugaredOrigin::Msg(_) => ResolvedOriginKind::None,
+                    _ => ResolvedOriginKind::None,
                 })
         }
 
@@ -383,7 +433,7 @@ impl<'db> LazyUseSpan<'db> {
                         use_.focus = DesugaredUseFocus::Alias;
                         ResolvedOriginKind::Desugared(root, DesugaredOrigin::Use(use_))
                     }
-                    DesugaredOrigin::Msg(_) => ResolvedOriginKind::None,
+                    _ => ResolvedOriginKind::None,
                 })
         }
 

@@ -676,25 +676,11 @@ pub fn walk_contract<'db, V>(
         },
     );
 
-    // Contract init: params, effects, body
-    ctxt.with_new_ctxt(
-        |span| span.init_block(),
-        |ctxt| {
-            if let Some(params) = contract.init_params(ctxt.db) {
-                ctxt.with_new_ctxt(
-                    |span| span.params(),
-                    |ctxt| visitor.visit_func_param_list(ctxt, params),
-                );
-            }
-            ctxt.with_new_ctxt(
-                |span| span.effects(),
-                |ctxt| visitor.visit_effect_param_list(ctxt, contract.init_effects(ctxt.db)),
-            );
-            if let Some(body) = contract.init_body(ctxt.db) {
-                visitor.visit_body(&mut VisitorCtxt::with_body(ctxt.db, body), body);
-            }
-        },
-    );
+    let s_graph = contract.top_mod(ctxt.db).scope_graph(ctxt.db);
+    let scope = ScopeId::from_item(contract.into());
+    for child in s_graph.child_items(scope) {
+        visitor.visit_item(&mut VisitorCtxt::with_item(ctxt.db, child), child);
+    }
 
     // Recv handlers
     let recvs = contract.recvs(ctxt.db);
