@@ -414,7 +414,7 @@ impl super::Parse for RecvArmScope {
 
         parse_recv_arm_pat(parser)?;
 
-        let nt = parser.set_newline_as_trivia(true);
+        parser.set_newline_as_trivia(true);
 
         // Optional return type
         if parser.bump_if(SyntaxKind::Arrow) {
@@ -425,8 +425,6 @@ impl super::Parse for RecvArmScope {
         if parser.current_kind() == Some(SyntaxKind::UsesKw) {
             parser.parse(UsesClauseScope::default())?;
         }
-
-        parser.set_newline_as_trivia(nt);
 
         // Body block
         if parser.current_kind() == Some(SyntaxKind::LBrace) {

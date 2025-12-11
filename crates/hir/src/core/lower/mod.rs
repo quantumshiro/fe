@@ -149,6 +149,27 @@ impl<'db> FileLowerCtxt<'db> {
         self.leave_item_scope(use_);
     }
 
+    /// Inserts `use super::*` to re-export parent module items into current scope.
+    pub(super) fn insert_synthetic_super_use(&mut self) {
+        let db = self.db();
+
+        let super_ident = IdentId::new(db, "super".to_string());
+
+        let segs = vec![
+            Partial::Present(UsePathSegment::Ident(super_ident)),
+            Partial::Present(UsePathSegment::Glob),
+        ];
+        let path = Partial::Present(UsePathId::new(db, segs));
+
+        let id = self.joined_id(TrackedItemVariant::Use(path));
+        self.enter_item_scope(id, false);
+
+        let top_mod = self.top_mod();
+        let origin = HirOrigin::synthetic();
+        let use_ = Use::new(db, id, path, None, Visibility::Private, top_mod, origin);
+        self.leave_item_scope(use_);
+    }
+
     pub(super) fn enter_block_scope(&mut self) {
         self.builder.enter_block_scope();
     }

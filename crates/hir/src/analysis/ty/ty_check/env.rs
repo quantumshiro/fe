@@ -320,12 +320,11 @@ impl<'db> TyCheckEnv<'db> {
                     ty: provided_ty,
                     is_mut: effect.is_mut,
                 };
-                if field_ty.is_none()
-                    && let Some(key) = self.effect_key_for_path_in_scope(
-                        key_path,
-                        self.owner_scope,
-                        base_assumptions,
-                    )
+                if let Some(field_ty) = field_ty {
+                    // Insert effect keyed by the field's type (e.g., TokenStore)
+                    self.effect_env.insert(EffectKey::Type(field_ty), provided);
+                } else if let Some(key) =
+                    self.effect_key_for_path_in_scope(key_path, self.owner_scope, base_assumptions)
                 {
                     self.effect_env.insert(key, provided);
                 }

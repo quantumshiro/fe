@@ -286,6 +286,8 @@ fn lower_msg_as_mod<'db>(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Msg) -> Mod<'d
 
     // Insert synthetic prelude use for the module
     ctxt.insert_synthetic_prelude_use();
+    // Insert `use super::*` so msg modules can see parent types
+    ctxt.insert_synthetic_super_use();
 
     // Create the #[msg] attribute to mark this as a desugared msg module
     let msg_attr_path = PathId::from_ident(db, IdentId::new(db, "msg".to_string()));
