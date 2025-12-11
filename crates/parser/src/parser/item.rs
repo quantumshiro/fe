@@ -14,7 +14,6 @@ use super::{
         parse_where_clause_opt,
     },
     parse_list,
-    pat::parse_pat,
     path::PathScope,
     struct_::{RecordFieldDefListScope, RecordFieldDefScope},
     token_stream::{LexicalToken, TokenStream},
@@ -23,7 +22,10 @@ use super::{
 };
 use crate::{
     ExpectedKind, SyntaxKind,
-    parser::func::{FuncScope, UsesClauseScope},
+    parser::{
+        func::{FuncScope, UsesClauseScope},
+        pat::parse_recv_arm_pat,
+    },
 };
 
 define_scope! {
@@ -410,8 +412,7 @@ impl super::Parse for RecvArmScope {
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
         parser.set_newline_as_trivia(false);
 
-        // Pattern (e.g., `Transfer { to, amount }` or just `Transfer`)
-        parse_pat(parser)?;
+        parse_recv_arm_pat(parser)?;
 
         let nt = parser.set_newline_as_trivia(true);
 

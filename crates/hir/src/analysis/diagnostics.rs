@@ -2685,7 +2685,7 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     message: "type is not a variant of the specified msg".to_string(),
                     sub_diagnostics,
                     notes: vec![
-                        "in a named recv block, only variants defined in that msg module are allowed".to_string(),
+                        "in a named recv block, only variants defined in that `msg` block are allowed".to_string(),
                     ],
                     error_code,
                 }
