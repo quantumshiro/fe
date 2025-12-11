@@ -4,7 +4,6 @@ use core::{
     code_region_len,
     code_region_offset,
     codecopy,
-    keccak,
     mstore,
     return_data,
     revert,
@@ -26,18 +25,11 @@ fn abi_encode_string(word: u256, len: u256) {
     return_data(0, 96)
 }
 
-// FIXME: We don't have tuple support yet, so we manually compute the allowance key
-fn allowance_key(owner: u256, spender: u256) -> u256 {
-    mstore(0, owner)
-    mstore(32, spender)
-    keccak(0, 64)
-}
-
 // ERC20 storage ---------------------------------------------------------
 
 struct Erc20 {
     balances: StorageMap<u256, u256>,
-    allowances: StorageMap<u256, u256>,
+    allowances: StorageMap<(u256, u256), u256>,
     supply: u256,
     owner: u256,
 }
@@ -49,11 +41,11 @@ impl Erc20 {
     }
 
     fn allowance(self, owner: u256, spender: u256) -> u256 {
-        self.allowances.get(key: allowance_key(owner, spender))
+        self.allowances.get(key: (owner, spender))
     }
 
     fn approve(mut self, owner: u256, spender: u256, value: u256) {
-        self.allowances.set(key: allowance_key(owner, spender), value: value)
+        self.allowances.set(key: (owner, spender), value: value)
     }
 
     fn total_supply(self) -> u256 {
@@ -84,7 +76,7 @@ impl Erc20 {
             revert(0, 0)
         }
         self.transfer(from: owner, to: to, amount: amount)
-        self.allowances.set(key: allowance_key(owner, spender), value: allowed - amount)
+        self.allowances.set(key: (owner, spender), value: allowed - amount)
     }
 
     fn mint(mut self, to: u256, amount: u256) {

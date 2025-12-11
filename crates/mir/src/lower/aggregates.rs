@@ -41,10 +41,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         size_bytes: usize,
     ) -> ValueId {
         let alloc_callable = self.core.make_callable(expr, CoreHelper::Alloc, &[]);
-        let alloc_ret_ty = alloc_callable.ret_ty(self.db);
+        let alloc_value_ty = self.typed_body.expr_ty(self.db, expr);
         let size_value = self.synthetic_u256(BigUint::from(size_bytes));
         let alloc_value = self.mir_body.alloc_value(ValueData {
-            ty: alloc_ret_ty,
+            ty: alloc_value_ty,
             origin: ValueOrigin::Call(CallOrigin {
                 expr,
                 callable: alloc_callable,
@@ -141,6 +141,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
         for (offset_bytes, field_ty, field_value) in stores {
+            if self.is_zero_sized_ty(*field_ty) {
+                continue;
+            }
             let is_aggregate = field_ty.field_count(self.db) > 0;
 
             if is_aggregate {
@@ -196,6 +199,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// - `src_ptr`: Source pointer to the aggregate.
     /// - `addr_space`: Address space of the destination.
     fn emit_aggregate_copy(&mut self, ty: TyId<'db>, src_ptr: ValueId, ctx: AggregateCopyCtx) {
+        if self.is_zero_sized_ty(ty) {
+            return;
+        }
         let field_types = ty.field_types(self.db);
         let ptr_ty = match ctx.addr_space {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
@@ -209,6 +215,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         };
 
         for (field_idx, field_ty) in field_types.iter().enumerate() {
+            if self.is_zero_sized_ty(*field_ty) {
+                continue;
+            }
             let is_nested_aggregate = field_ty.field_count(self.db) > 0;
             let field_offset = layout::field_offset_bytes_or_word_aligned(self.db, ty, field_idx);
 
@@ -342,6 +351,11 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             let value_id = self.ensure_value(expr);
             return (Some(curr_block), value_id);
         };
+        if size_bytes == 0 {
+            let value_id = self.synthetic_zero_for_ty(record_ty);
+            self.mir_body.expr_values.insert(expr, value_id);
+            return (Some(curr_block), value_id);
+        }
 
         let value_id = self.emit_alloc(expr, curr_block, size_bytes);
 
@@ -352,6 +366,88 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 continue;
             };
             stores.push((info.offset_bytes, info.field_ty, field_value));
+        }
+        self.emit_store_fields(expr, curr_block, value_id, &stores);
+
+        (Some(curr_block), value_id)
+    }
+
+    /// Lowers a tuple literal into an allocation plus `store_field` calls.
+    ///
+    /// Tuples are treated as struct-like aggregates: memory is allocated for the
+    /// full tuple size, and each element is stored at its computed byte offset.
+    ///
+    /// # Parameters
+    /// - `block`: Block to start lowering in.
+    /// - `expr`: Tuple literal expression id.
+    /// - `elems`: Element expressions.
+    ///
+    /// # Returns
+    /// The successor block and the value representing the allocated tuple.
+    pub(super) fn try_lower_tuple(
+        &mut self,
+        block: BasicBlockId,
+        expr: ExprId,
+        elems: &[ExprId],
+    ) -> (Option<BasicBlockId>, ValueId) {
+        let tuple_ty = self.typed_body.expr_ty(self.db, expr);
+
+        // Handle unit tuple () - zero size, no allocation needed
+        if tuple_ty.field_count(self.db) == 0 {
+            let value_id = self.ensure_value(expr);
+            return (Some(block), value_id);
+        }
+
+        // Lower all element expressions
+        let mut current = Some(block);
+        let mut lowered_elems = Vec::with_capacity(elems.len());
+        for &elem_expr in elems {
+            let Some(curr_block) = current else {
+                break;
+            };
+            let (next_block, value) = self.lower_expr_in(curr_block, elem_expr);
+            current = next_block;
+            lowered_elems.push(value);
+        }
+
+        let Some(curr_block) = current else {
+            let value_id = self.ensure_value(expr);
+            return (None, value_id);
+        };
+
+        // Compute tuple size and allocate.
+        // When size is unknown (e.g., tuple contains unmonomorphized type parameters),
+        // fall back to word-aligned layout (32 bytes per element). This matches EVM
+        // conventions and will be corrected during monomorphization when concrete
+        // types are substituted.
+        let Some(size_bytes) = layout::ty_size_bytes(self.db, tuple_ty) else {
+            let size_bytes = tuple_ty.field_count(self.db) * 32;
+            let value_id = self.emit_alloc(expr, curr_block, size_bytes);
+            let field_types = tuple_ty.field_types(self.db);
+            let mut stores = Vec::with_capacity(lowered_elems.len());
+            for (i, elem_value) in lowered_elems.into_iter().enumerate() {
+                let field_ty = field_types[i];
+                let offset = i * 32;
+                stores.push((offset, field_ty, elem_value));
+            }
+            self.emit_store_fields(expr, curr_block, value_id, &stores);
+            return (Some(curr_block), value_id);
+        };
+        if size_bytes == 0 {
+            let value_id = self.synthetic_zero_for_ty(tuple_ty);
+            self.mir_body.expr_values.insert(expr, value_id);
+            return (Some(curr_block), value_id);
+        }
+
+        let value_id = self.emit_alloc(expr, curr_block, size_bytes);
+
+        // Store each element at its computed offset using centralized layout API
+        let field_types = tuple_ty.field_types(self.db);
+        let mut stores = Vec::with_capacity(lowered_elems.len());
+        for (i, elem_value) in lowered_elems.into_iter().enumerate() {
+            let field_ty = field_types[i];
+            let offset = layout::field_offset_bytes_or_word_aligned(self.db, tuple_ty, i);
+            stores.push((offset, field_ty, elem_value));
         }
         self.emit_store_fields(expr, curr_block, value_id, &stores);
 
@@ -370,6 +466,21 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             TyData::TyBase(TyBase::Prim(prim)) => prim_int_bits(*prim),
             _ => None,
         }
+    }
+
+    pub(super) fn is_zero_sized_ty(&self, ty: TyId<'db>) -> bool {
+        matches!(layout::ty_size_bytes(self.db, ty), Some(0))
+    }
+
+    pub(super) fn synthetic_zero_for_ty(&mut self, ty: TyId<'db>) -> ValueId {
+        let value = self.mir_body.alloc_value(ValueData {
+            ty,
+            origin: ValueOrigin::Synthetic(SyntheticValue::Int(BigUint::from(0u8))),
+        });
+        self.value_address_space
+            .entry(value)
+            .or_insert(AddressSpaceKind::Memory);
+        value
     }
 
     /// Returns the field type and byte offset for a given receiver/field pair.
@@ -517,6 +628,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let field_index = field_index.to_opt()?;
         let lhs_ty = self.typed_body.expr_ty(self.db, *lhs);
         let info = self.field_access_info(lhs_ty, field_index)?;
+        if self.is_zero_sized_ty(info.field_ty) {
+            return Some(block);
+        }
 
         let addr_value = self.ensure_value(*lhs);
         let addr_space = self.value_address_space(addr_value);
