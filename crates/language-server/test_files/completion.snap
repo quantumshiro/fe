@@ -1,5 +1,6 @@
 ---
 source: crates/language-server/src/functionality/completion.rs
+assertion_line: 1731
 expression: snapshot
 input_file: test_files/completion.fe
 ---
@@ -15,6 +16,7 @@ completions:
   - Err (EnumMember)
   - Helpable (Interface) [use utils::Helpable [Helpable]]
   - Helper (Struct) [use utils::Helper [Helper]]
+  - Helper (Struct) [use shadow_test::Helper [Helper]]
   - None (EnumMember)
   - Ok (EnumMember)
   - Option (Enum)
@@ -26,11 +28,13 @@ completions:
   - helper_func (Function) -> "helper_func()$0" [use utils::helper_func [fn helper_func() -> i32]]
   - panic (Function) -> "panic()$0" [fn panic() -> !]
   - self (Variable) [self: Point]
+  - shadow_test (Module) -> "shadow_test::"
   - test_expression_context (Function) -> "test_expression_context()$0" [fn test_expression_context()]
   - test_locals (Function) -> "test_locals(${1:param})$0" [fn test_locals(param: i32)]
   - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
   - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
   - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
+  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]]
   - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
   - todo (Function) -> "todo()$0" [fn todo() -> !]
   - utils (Module) -> "utils::"
@@ -57,6 +61,7 @@ note:
 completions:
   - Helpable (Interface) [use utils::Helpable [Helpable]]
   - Helper (Struct) [use utils::Helper [Helper]]
+  - Helper (Struct) [use shadow_test::Helper [Helper]]
   - Option (Enum)
   - Point (Struct)
   - Result (Enum)
@@ -82,6 +87,7 @@ completions:
   - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
   - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
   - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
+  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]]
   - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
   - todo (Function) -> "todo()$0" [fn todo() -> !]
 
@@ -106,6 +112,7 @@ note:
 completions:
   - Helpable (Interface) [use utils::Helpable [Helpable]]
   - Helper (Struct) [use utils::Helper [Helper]]
+  - Helper (Struct) [use shadow_test::Helper [Helper]]
   - Option (Enum)
   - Point (Struct)
   - Result (Enum)
@@ -132,6 +139,19 @@ completions:
   - test_member_completion (Function) -> "test_member_completion()$0" [fn test_member_completion()]
   - test_path_completion (Function) -> "test_path_completion()$0" [fn test_path_completion()]
   - test_return_type (Function) -> "test_return_type()$0" [fn test_return_type() -> invalid(PathResolutionFailed(_))]
+  - test_shadowing (Function) -> "test_shadowing()$0" [use shadow_test::test_shadowing [fn test_shadowing()]]
   - test_type_annotation (Function) -> "test_type_annotation()$0" [fn test_type_annotation()]
   - todo (Function) -> "todo()$0" [fn todo() -> !]
   - x (Variable) [x: _]
+
+note: 
+   ┌─ completion.fe:92:16
+   │
+92 │         let h: 
+   │                ^ cursor 8
+
+completions:
+  - Helper (Struct)
+  - Option (Enum)
+  - Point (Struct)
+  - Result (Enum)

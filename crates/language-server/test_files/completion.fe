@@ -77,3 +77,18 @@ fn test_locals(param: i32) {
     // Should show param, local_var
     let x = <|>
 }
+
+// Test that local definitions shadow glob imports
+mod shadow_test {
+    use super::utils::*
+
+    // Local Helper shadows glob-imported Helper
+    pub struct Helper {
+        pub local_value: i32
+    }
+
+    pub fn test_shadowing() {
+        // Should show local Helper (with local_value field), not utils::Helper
+        let h: <|>
+    }
+}
