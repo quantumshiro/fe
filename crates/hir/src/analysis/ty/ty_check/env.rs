@@ -139,12 +139,11 @@ impl<'db> TyCheckEnv<'db> {
                     if !ty.is_star_kind(self.db) {
                         ty = TyId::invalid(self.db, InvalidCause::Other);
                     }
-                    let def_span = func.span().params().param(idx).name().into();
                     let var = LocalBinding::Param {
-                        ident: name,
+                        site: ParamSite::Func(func),
+                        idx,
                         ty,
                         is_mut: view.is_mut(self.db),
-                        def_span,
                     };
 
                     self.var_env.last_mut().unwrap().register_var(name, var);
@@ -170,18 +169,11 @@ impl<'db> TyCheckEnv<'db> {
                     } else {
                         TyId::invalid(self.db, InvalidCause::Other)
                     };
-                    let def_span = contract
-                        .span()
-                        .init_block()
-                        .params()
-                        .param(idx)
-                        .name()
-                        .into();
                     let var = LocalBinding::Param {
-                        ident: name,
+                        site: ParamSite::ContractInit(contract),
+                        idx,
                         ty,
                         is_mut: param.is_mut,
-                        def_span,
                     };
                     self.var_env.last_mut().unwrap().register_var(name, var);
                 }
@@ -254,12 +246,11 @@ impl<'db> TyCheckEnv<'db> {
             }
 
             if let Some(ident) = effect.name(self.db) {
-                let def_span = func.span().effects().param_idx(idx).name().into();
                 let binding = LocalBinding::EffectParam {
-                    ident,
+                    site: EffectParamSite::Func(func),
+                    idx,
                     key_path,
                     is_mut: effect.is_mut(self.db),
-                    def_span,
                 };
                 self.var_env
                     .last_mut()
@@ -340,20 +331,19 @@ impl<'db> TyCheckEnv<'db> {
                 }
 
                 if let Some(ident) = binding_ident {
-                    let def_span = self.effect_param_span(site, idx);
                     let binding = if let Some(field_ty) = field_ty {
                         LocalBinding::Param {
-                            ident,
+                            site: ParamSite::EffectField(site),
+                            idx,
                             ty: field_ty,
                             is_mut: effect.is_mut,
-                            def_span,
                         }
                     } else {
                         LocalBinding::EffectParam {
-                            ident,
+                            site,
+                            idx,
                             key_path,
                             is_mut: effect.is_mut,
-                            def_span,
                         }
                     };
                     self.var_env
@@ -402,35 +392,6 @@ impl<'db> TyCheckEnv<'db> {
                     ),
                 ]
             }
-        }
-    }
-
-    fn effect_param_span(&self, site: EffectParamSite<'db>, idx: usize) -> DynLazySpan<'db> {
-        match site {
-            EffectParamSite::Func(func) => func.span().effects().param_idx(idx).name().into(),
-            EffectParamSite::Contract(contract) => {
-                contract.span().effects().param_idx(idx).name().into()
-            }
-            EffectParamSite::ContractInit(contract) => contract
-                .span()
-                .init_block()
-                .effects()
-                .param_idx(idx)
-                .name()
-                .into(),
-            EffectParamSite::ContractRecvArm {
-                contract,
-                recv_idx,
-                arm_idx,
-            } => contract
-                .span()
-                .recv(recv_idx as usize)
-                .arms()
-                .arm(arm_idx as usize)
-                .effects()
-                .param_idx(idx)
-                .name()
-                .into(),
         }
     }
 
@@ -1052,8 +1013,8 @@ impl<'db> EffectEnv<'db> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum EffectParamSite<'db> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub(crate) enum EffectParamSite<'db> {
     Func(Func<'db>),
     Contract(Contract<'db>),
     ContractInit(Contract<'db>),
@@ -1062,6 +1023,97 @@ pub(super) enum EffectParamSite<'db> {
         recv_idx: u32,
         arm_idx: u32,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub(crate) enum ParamSite<'db> {
+    Func(Func<'db>),
+    ContractInit(Contract<'db>),
+    /// Effect param that resolves to a contract field.
+    EffectField(EffectParamSite<'db>),
+}
+
+fn param_span(site: ParamSite<'_>, idx: usize) -> DynLazySpan<'_> {
+    match site {
+        ParamSite::Func(func) => func.span().params().param(idx).name().into(),
+        ParamSite::ContractInit(contract) => contract
+            .span()
+            .init_block()
+            .params()
+            .param(idx)
+            .name()
+            .into(),
+        ParamSite::EffectField(effect_site) => effect_param_span(effect_site, idx),
+    }
+}
+
+fn param_name<'db>(
+    db: &'db dyn HirAnalysisDb,
+    site: ParamSite<'db>,
+    idx: usize,
+) -> Option<IdentId<'db>> {
+    match site {
+        ParamSite::Func(func) => func.params(db).nth(idx).and_then(|p| p.name(db)),
+        ParamSite::ContractInit(contract) => contract.init_params(db)?.data(db).get(idx)?.name(),
+        ParamSite::EffectField(effect_site) => effect_param_name(db, effect_site, idx),
+    }
+}
+
+fn effect_param_name<'db>(
+    db: &'db dyn HirAnalysisDb,
+    site: EffectParamSite<'db>,
+    idx: usize,
+) -> Option<IdentId<'db>> {
+    match site {
+        EffectParamSite::Func(func) => func.effect_params(db).nth(idx).and_then(|p| p.name(db)),
+        EffectParamSite::Contract(contract) => {
+            contract.effects(db).data(db).get(idx).and_then(|p| p.name)
+        }
+        EffectParamSite::ContractInit(contract) => contract
+            .init_effects(db)
+            .data(db)
+            .get(idx)
+            .and_then(|p| p.name),
+        EffectParamSite::ContractRecvArm {
+            contract,
+            recv_idx,
+            arm_idx,
+        } => contract
+            .recv_arm(db, recv_idx as usize, arm_idx as usize)?
+            .effects
+            .data(db)
+            .get(idx)
+            .and_then(|p| p.name),
+    }
+}
+
+fn effect_param_span(site: EffectParamSite<'_>, idx: usize) -> DynLazySpan<'_> {
+    match site {
+        EffectParamSite::Func(func) => func.span().effects().param_idx(idx).name().into(),
+        EffectParamSite::Contract(contract) => {
+            contract.span().effects().param_idx(idx).name().into()
+        }
+        EffectParamSite::ContractInit(contract) => contract
+            .span()
+            .init_block()
+            .effects()
+            .param_idx(idx)
+            .name()
+            .into(),
+        EffectParamSite::ContractRecvArm {
+            contract,
+            recv_idx,
+            arm_idx,
+        } => contract
+            .span()
+            .recv(recv_idx as usize)
+            .arms()
+            .arm(arm_idx as usize)
+            .effects()
+            .param_idx(idx)
+            .name()
+            .into(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1127,16 +1179,16 @@ pub(crate) enum LocalBinding<'db> {
         is_mut: bool,
     },
     Param {
-        ident: IdentId<'db>,
+        site: ParamSite<'db>,
+        idx: usize,
         ty: TyId<'db>,
         is_mut: bool,
-        def_span: DynLazySpan<'db>,
     },
     EffectParam {
-        ident: IdentId<'db>,
+        site: EffectParamSite<'db>,
+        idx: usize,
         key_path: PathId<'db>,
         is_mut: bool,
-        def_span: DynLazySpan<'db>,
     },
 }
 
@@ -1165,15 +1217,16 @@ impl<'db> LocalBinding<'db> {
                 path.ident(hir_db).unwrap()
             }
 
-            Self::Param { ident, .. } | Self::EffectParam { ident, .. } => *ident,
+            Self::Param { site, idx, .. } => param_name(env.db, *site, *idx).unwrap(),
+            Self::EffectParam { key_path, .. } => key_path.ident(env.db).unwrap(),
         }
     }
 
     pub(super) fn def_span(&self, env: &TyCheckEnv<'db>) -> DynLazySpan<'db> {
         match self {
             LocalBinding::Local { pat, .. } => pat.span(env.body).into(),
-            LocalBinding::Param { def_span, .. } => def_span.clone(),
-            LocalBinding::EffectParam { def_span, .. } => def_span.clone(),
+            LocalBinding::Param { site, idx, .. } => param_span(*site, *idx),
+            LocalBinding::EffectParam { site, idx, .. } => effect_param_span(*site, *idx),
         }
     }
 }

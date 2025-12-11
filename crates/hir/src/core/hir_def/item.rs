@@ -767,6 +767,21 @@ impl<'db> Contract<'db> {
     pub fn scope(self) -> ScopeId<'db> {
         ScopeId::from_item(self.into())
     }
+
+    pub fn recv_arm(
+        self,
+        db: &'db dyn HirDb,
+        recv_idx: usize,
+        arm_idx: usize,
+    ) -> Option<ContractRecvArm<'db>> {
+        self.recvs(db)
+            .data(db)
+            .get(recv_idx)?
+            .arms
+            .data(db)
+            .get(arm_idx)
+            .copied()
+    }
 }
 
 #[salsa::interned]
