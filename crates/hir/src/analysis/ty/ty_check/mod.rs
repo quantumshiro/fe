@@ -22,8 +22,8 @@ use crate::{
     visitor::{Visitor, VisitorCtxt, walk_expr, walk_pat},
 };
 pub use callable::Callable;
-use env::{LocalBinding, TyCheckEnv};
-pub use env::{ExprProp, LocalBinding};
+use env::TyCheckEnv;
+pub use env::{EffectParamSite, ExprProp, LocalBinding, ParamSite};
 pub(super) use expr::TraitOps;
 use owner::BodyOwner;
 

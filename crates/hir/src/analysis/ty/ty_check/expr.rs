@@ -208,7 +208,7 @@ impl<'db> TyChecker<'db> {
             };
 
             let is_mut = value_prop
-                .binding()
+                .binding
                 .map(|b| b.is_mut())
                 .unwrap_or(value_prop.is_mut);
 
@@ -1387,7 +1387,7 @@ impl<'db> TyChecker<'db> {
         match expr_data {
             Expr::Field(lhs, ..) => self.find_base_binding(*lhs),
             Expr::Bin(lhs, _rhs, op) if *op == BinOp::Index => self.find_base_binding(*lhs),
-            Expr::Path(..) => self.env.typed_expr(expr)?.binding(),
+            Expr::Path(..) => self.env.typed_expr(expr)?.binding,
             _ => None,
         }
     }

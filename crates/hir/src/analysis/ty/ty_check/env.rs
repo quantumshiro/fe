@@ -117,34 +117,35 @@ impl<'db> TyCheckEnv<'db> {
 
         env.enter_scope(body.expr(db));
 
-        // We proceed using semantic traversal (params); parse errors are handled upstream.
+        match owner {
+            BodyOwner::Func(func) => {
+                let arg_tys = func.arg_tys(db);
+                for (idx, view) in func.params(db).enumerate() {
+                    let mut ty = *arg_tys
+                        .get(idx)
+                        .map(|b| b.skip_binder())
+                        .unwrap_or(&TyId::invalid(db, InvalidCause::ParseError));
 
-        let arg_tys = func.arg_tys(db);
-        for (idx, view) in func.params(db).enumerate() {
-            let Some(name) = view.name(db) else {
-                continue;
-            };
+                    if !ty.is_star_kind(db) {
+                        ty = TyId::invalid(db, InvalidCause::Other);
+                    }
+                    let var = LocalBinding::Param {
+                        site: ParamSite::Func(func),
+                        idx,
+                        ty,
+                        is_mut: view.is_mut(db),
+                    };
 
-            // Use semantic arg types we compute via Func::arg_tys
-            let mut ty = *arg_tys
-                .get(idx)
-                .map(|b| b.skip_binder())
-                .unwrap_or(&TyId::invalid(db, InvalidCause::ParseError));
-
-            if !ty.is_star_kind(db) {
-                ty = TyId::invalid(db, InvalidCause::Other);
+                    env.param_bindings.push(var);
+                    if let Some(name) = view.name(db) {
+                        env.var_env.last_mut().unwrap().register_var(name, var);
+                    };
+                }
             }
-            let var = LocalBinding::Param {
-                idx,
-                ty,
-                is_mut: view.is_mut(db),
-            };
-
-            env.var_env.last_mut().unwrap().register_var(name, var);
+            BodyOwner::ContractRecvArm { .. } => {}
         }
 
-        // Seed effect parameters using only base assumptions
-        env.seed_effects(func);
+        env.seed_effects(base_assumptions);
 
         // Finalize assumptions by merging in effect-derived bounds
         let mut preds = base_preds.list(db).to_vec();
@@ -152,37 +153,6 @@ impl<'db> TyCheckEnv<'db> {
         env.assumptions = PredicateListId::new(db, preds).extend_all_bounds(db);
 
         Ok(env)
-    }
-
-    fn register_params(&mut self) {
-        match self.owner {
-            BodyOwner::Func(func) => {
-                let arg_tys = func.arg_tys(self.db);
-                for (idx, view) in func.params(self.db).enumerate() {
-                    let Some(name) = view.name(self.db) else {
-                        continue;
-                    };
-
-                    let mut ty = *arg_tys
-                        .get(idx)
-                        .map(|b| b.skip_binder())
-                        .unwrap_or(&TyId::invalid(self.db, InvalidCause::ParseError));
-
-                    if !ty.is_star_kind(self.db) {
-                        ty = TyId::invalid(self.db, InvalidCause::Other);
-                    }
-                    let var = LocalBinding::Param {
-                        site: ParamSite::Func(func),
-                        idx,
-                        ty,
-                        is_mut: view.is_mut(self.db),
-                    };
-
-                    self.var_env.last_mut().unwrap().register_var(name, var);
-                }
-            }
-            BodyOwner::ContractRecvArm { .. } => {}
-        }
     }
 
     fn seed_effects(&mut self, base_assumptions: PredicateListId<'db>) {
@@ -1044,7 +1014,7 @@ impl<'db> EffectEnv<'db> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
-pub(crate) enum EffectParamSite<'db> {
+pub enum EffectParamSite<'db> {
     Func(Func<'db>),
     Contract(Contract<'db>),
     ContractRecvArm {
@@ -1055,7 +1025,7 @@ pub(crate) enum EffectParamSite<'db> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
-pub(crate) enum ParamSite<'db> {
+pub enum ParamSite<'db> {
     Func(Func<'db>),
     /// Effect param that resolves to a contract field.
     EffectField(EffectParamSite<'db>),
@@ -1147,7 +1117,7 @@ pub(super) enum EffectOrigin<'db> {
 pub struct ExprProp<'db> {
     pub ty: TyId<'db>,
     pub is_mut: bool,
-    pub(crate) binding: Option<LocalBinding<'db>>,
+    pub binding: Option<LocalBinding<'db>>,
 }
 
 impl<'db> ExprProp<'db> {
@@ -1167,10 +1137,6 @@ impl<'db> ExprProp<'db> {
         }
     }
 
-    pub fn binding(&self) -> Option<LocalBinding<'db>> {
-        self.binding.clone()
-    }
-
     pub(super) fn invalid(db: &'db dyn HirAnalysisDb) -> Self {
         Self {
             ty: TyId::invalid(db, InvalidCause::Other),
@@ -1180,7 +1146,7 @@ impl<'db> ExprProp<'db> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
 pub enum LocalBinding<'db> {
     Local {
         pat: PatId,
@@ -1242,11 +1208,11 @@ impl<'db> LocalBinding<'db> {
     ///
     /// This is used by `TypedBody::expr_binding_def_span` to get the definition
     /// span without needing a full `TyCheckEnv`.
-    pub(super) fn def_span_with(&self, body: Body<'db>, func: Func<'db>) -> DynLazySpan<'db> {
+    pub(super) fn def_span_with(&self, body: Body<'db>, _func: Func<'db>) -> DynLazySpan<'db> {
         match self {
             LocalBinding::Local { pat, .. } => pat.span(body).into(),
-            LocalBinding::Param { idx, .. } => func.span().params().param(*idx).name().into(),
-            LocalBinding::EffectParam { func: f, .. } => f.span().name().into(),
+            LocalBinding::Param { site, idx, .. } => param_span(*site, *idx),
+            LocalBinding::EffectParam { site, idx, .. } => effect_param_span(*site, *idx),
         }
     }
 }
