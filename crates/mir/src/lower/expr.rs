@@ -446,7 +446,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             Expr::Assign(target, value) => {
                 let (next_block, value_id) = self.lower_expr_in(block, *value);
                 if let Some(curr_block) = next_block {
-                    if let Some(binding) = self.typed_body.expr_prop(self.db, *target).binding()
+                    if let Some(binding) = self.typed_body.expr_prop(self.db, *target).binding
                         && let LocalBinding::Local { pat, .. } = binding
                     {
                         let space = self.value_address_space(value_id);
@@ -485,7 +485,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             Expr::AugAssign(target, value, op) => {
                 let (next_block, value_id) = self.lower_expr_in(block, *value);
                 if let Some(curr_block) = next_block {
-                    if let Some(binding) = self.typed_body.expr_prop(self.db, *target).binding()
+                    if let Some(binding) = self.typed_body.expr_prop(self.db, *target).binding
                         && let LocalBinding::Local { pat, .. } = binding
                     {
                         let space = self.value_address_space(value_id);

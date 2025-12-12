@@ -312,7 +312,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// The address space kind for the expression.
     pub(super) fn expr_address_space(&self, expr: ExprId) -> AddressSpaceKind {
         let prop = self.typed_body.expr_prop(self.db, expr);
-        if let Some(binding) = prop.binding() {
+        if let Some(binding) = prop.binding {
             self.address_space_for_binding(&binding)
         } else {
             AddressSpaceKind::Memory
