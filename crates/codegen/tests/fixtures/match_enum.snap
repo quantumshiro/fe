@@ -6,7 +6,7 @@ input_file: tests/fixtures/match_enum.fe
 ---
 function match_enum(e) -> ret {
   let v0 := 0
-  switch e
+  switch get_discriminant(e, 0)
     case 0 {
       v0 := 1
     }
@@ -18,6 +18,19 @@ function match_enum(e) -> ret {
     }
     default {
       v0 := 4
+    }
+  ret := v0
+}
+function get_discriminant(addr, space) -> ret {
+  let v0 := 0
+  switch space
+    case 0 {
+      v0 := mload(addr)
+    }
+    case 1 {
+      v0 := sload(addr)
+    }
+    default {
     }
   ret := v0
 }

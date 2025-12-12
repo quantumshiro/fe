@@ -22,8 +22,8 @@ use crate::{
     visitor::{Visitor, VisitorCtxt, walk_expr, walk_pat},
 };
 pub use callable::Callable;
-pub use env::ExprProp;
 use env::{LocalBinding, TyCheckEnv};
+pub use env::{ExprProp, LocalBinding};
 pub(super) use expr::TraitOps;
 use owner::BodyOwner;
 
@@ -447,6 +447,10 @@ pub struct TypedBody<'db> {
     pat_ty: FxHashMap<PatId, TyId<'db>>,
     expr_ty: FxHashMap<ExprId, ExprProp<'db>>,
     callables: FxHashMap<ExprId, Callable<'db>>,
+    /// Bindings for function parameters (indexed by param position)
+    param_bindings: Vec<LocalBinding<'db>>,
+    /// Bindings for local variables (keyed by the pattern that introduces them)
+    pat_bindings: FxHashMap<PatId, LocalBinding<'db>>,
 }
 
 impl<'db> TypedBody<'db> {
@@ -476,12 +480,84 @@ impl<'db> TypedBody<'db> {
         self.callables.get(&expr)
     }
 
+    /// Get the binding for a function parameter by index.
+    pub fn param_binding(&self, idx: usize) -> Option<LocalBinding<'db>> {
+        self.param_bindings.get(idx).copied()
+    }
+
+    /// Get the binding for a local variable by its pattern.
+    pub fn pat_binding(&self, pat: PatId) -> Option<LocalBinding<'db>> {
+        self.pat_bindings.get(&pat).copied()
+    }
+
+    /// Get the definition span for an expression that references a local binding.
+    ///
+    /// Returns `Some(span)` if the expression references a local variable, parameter,
+    /// or effect parameter. Returns `None` if the expression doesn't have a binding
+    /// or if no body is available.
+    ///
+    /// This is used by the language server for goto-definition on local variables.
+    pub fn expr_binding_def_span(&self, func: Func<'db>, expr: ExprId) -> Option<DynLazySpan<'db>> {
+        let body = self.body?;
+        let binding = self.expr_binding(expr)?;
+        Some(binding.def_span_with(body, func))
+    }
+
+    /// Get the binding kind for an expression that references a local binding.
+    ///
+    /// Returns the identity of the binding (param index, pattern id, or effect param ident).
+    pub fn expr_binding(&self, expr: ExprId) -> Option<LocalBinding<'db>> {
+        self.expr_ty.get(&expr)?.binding
+    }
+
+    /// Find all expressions that reference the same local binding as the given expression.
+    ///
+    /// Returns a list of ExprIds that share the same local binding (variable, parameter,
+    /// or effect parameter). Returns an empty list if the expression doesn't have a binding.
+    ///
+    /// This is used by the language server for find-all-references and rename on local variables.
+    pub fn local_references(&self, expr: ExprId) -> Vec<ExprId> {
+        let Some(binding) = self.expr_ty.get(&expr).and_then(|p| p.binding) else {
+            return vec![];
+        };
+
+        self.expr_ty
+            .iter()
+            .filter_map(|(id, p)| {
+                if p.binding == Some(binding) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Find all expressions that reference a binding by its kind.
+    ///
+    /// This is the general method for finding all references to any kind of binding
+    /// (param, local, or effect param).
+    pub fn references_by_binding(&self, binding: LocalBinding<'db>) -> Vec<ExprId> {
+        self.expr_ty
+            .iter()
+            .filter_map(|(id, p)| {
+                if p.binding == Some(binding) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     fn empty() -> Self {
         Self {
             body: None,
             pat_ty: FxHashMap::default(),
             expr_ty: FxHashMap::default(),
             callables: FxHashMap::default(),
+            param_bindings: Vec::new(),
+            pat_bindings: FxHashMap::default(),
         }
     }
 }
