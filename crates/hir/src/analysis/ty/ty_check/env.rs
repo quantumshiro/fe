@@ -559,6 +559,10 @@ impl<'db> TyCheckEnv<'db> {
         }
     }
 
+    pub(super) fn insert_unkeyed_effect_binding(&mut self, binding: ProvidedEffect<'db>) {
+        self.effect_env.insert_unkeyed(binding);
+    }
+
     pub(super) fn effect_candidates_in_scope(
         &self,
         key_path: PathId<'db>,
@@ -604,8 +608,32 @@ impl<'db> TyCheckEnv<'db> {
                     _ => {}
                 }
             }
+
+            for provided in frame.unkeyed.iter() {
+                if provided.ty.has_invalid(self.db) {
+                    continue;
+                }
+                match &path_res {
+                    PathRes::Ty(req) | PathRes::TyAlias(_, req) => {
+                        if provided.ty.is_ty_var(self.db)
+                            || req.base_ty(self.db).as_scope(self.db)
+                                == provided.ty.base_ty(self.db).as_scope(self.db)
+                        {
+                            out.push(*provided);
+                        }
+                    }
+                    PathRes::Trait(_) => {
+                        // Trait satisfaction is checked at the call site so we
+                        // can consider type arguments and current assumptions.
+                        out.push(*provided);
+                    }
+                    _ => {}
+                }
+            }
         }
 
+        out.sort_by_key(|p| (p.ty, p.is_mut));
+        out.dedup_by_key(|p| (p.ty, p.is_mut));
         out
     }
 
@@ -983,6 +1011,7 @@ pub(super) enum EffectKey<'db> {
 #[derive(Default)]
 struct EffectFrame<'db> {
     bindings: FxHashMap<EffectKey<'db>, ProvidedEffect<'db>>,
+    unkeyed: Vec<ProvidedEffect<'db>>,
 }
 
 pub(super) struct EffectEnv<'db> {
@@ -1012,6 +1041,14 @@ impl<'db> EffectEnv<'db> {
             .expect("EffectEnv must always have at least one frame")
             .bindings
             .insert(key, binding);
+    }
+
+    pub fn insert_unkeyed(&mut self, binding: ProvidedEffect<'db>) {
+        self.frames
+            .last_mut()
+            .expect("EffectEnv must always have at least one frame")
+            .unkeyed
+            .push(binding);
     }
 
     pub fn lookup(&self, key: EffectKey<'db>) -> Option<ProvidedEffect<'db>> {

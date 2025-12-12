@@ -74,7 +74,7 @@ fn test_withdraw() {
     let ctx = MockCtx { caller: Address { inner: 0xbeef } }
     let owner = Address { inner: 0xfe }
     let mut balance = 100
-    with (Ctx = ctx, Address = owner, u256 = balance) { // xxx with (ctx, owner, balance)
+    with (ctx, owner, balance) {
         let ok = withdraw(amount: 100)
     }
 }

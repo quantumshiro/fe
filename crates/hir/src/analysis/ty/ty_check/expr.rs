@@ -1,4 +1,5 @@
 use either::Either;
+use smallvec1::SmallVec;
 
 use crate::core::hir_def::{
     ArithBinOp, BinOp, CallableDef, Expr, ExprId, FieldIndex, IdentId, Partial, Pat, PatId, PathId,
@@ -43,6 +44,7 @@ use crate::analysis::{
     },
 };
 
+#[derive(Debug, Clone, Copy)]
 enum EffectRequirement<'db> {
     Type(TyId<'db>),
     Trait(TraitInstId<'db>),
@@ -203,9 +205,6 @@ impl<'db> TyChecker<'db> {
 
         for binding in bindings {
             let value_prop = self.check_expr_unknown(binding.value);
-            let Some(key_path) = binding.key_path.to_opt() else {
-                continue;
-            };
 
             let is_mut = value_prop
                 .binding
@@ -220,7 +219,16 @@ impl<'db> TyChecker<'db> {
                 is_mut,
             };
 
-            self.env.insert_effect_binding(key_path, provided);
+            match binding.key_path {
+                Some(key_path) => {
+                    if let Some(key_path) = key_path.to_opt() {
+                        self.env.insert_effect_binding(key_path, provided);
+                    }
+                }
+                None => {
+                    self.env.insert_unkeyed_effect_binding(provided);
+                }
+            }
         }
 
         let result = self.check_expr(body_expr, expected);
@@ -294,7 +302,8 @@ impl<'db> TyChecker<'db> {
             return;
         }
 
-        let call_span = expr.span(self.body());
+        let body = self.body();
+        let call_span = expr.span(body);
         let callee_assumptions = collect_func_def_constraints(self.db, func.into(), true)
             .instantiate_identity()
             .extend_all_bounds(self.db);
@@ -321,8 +330,135 @@ impl<'db> TyChecker<'db> {
             let cands =
                 self.env
                     .effect_candidates_in_scope(key_path, func.scope(), callee_assumptions);
-            let provided = match cands.as_slice() {
+            if cands.is_empty() {
+                let diag = BodyDiag::MissingEffect {
+                    primary: call_span.clone().into(),
+                    func,
+                    key: key_path,
+                };
+                self.push_diag(diag);
+                continue;
+            }
+
+            let required_mut = effect.is_mut(self.db);
+            let mut_compatible: SmallVec<[ProvidedEffect<'db>; 2]> = cands
+                .iter()
+                .copied()
+                .filter(|p| !required_mut || p.is_mut)
+                .collect();
+
+            let provided_span = |provided: ProvidedEffect<'db>| match provided.origin {
+                EffectOrigin::With { value_expr } => Some(value_expr.span(body).into()),
+                EffectOrigin::Param { .. } => None,
+            };
+
+            if mut_compatible.is_empty() {
+                // Effects are present but don't satisfy mutability.
+                let diag = BodyDiag::EffectMutabilityMismatch {
+                    primary: call_span.clone().into(),
+                    func,
+                    key: key_path,
+                    provided_span: cands.first().copied().and_then(provided_span),
+                };
+                self.push_diag(diag);
+                continue;
+            }
+
+            let ingot = self.env.body().top_mod(self.db).ingot(self.db);
+            let mut viable: SmallVec<[(ProvidedEffect<'db>, EffectRequirement<'db>); 2]> =
+                SmallVec::new();
+            for provided in mut_compatible.iter().copied() {
+                let Some(requirement) = self.resolve_effect_requirement(
+                    key_path,
+                    callable,
+                    func.scope(),
+                    callee_assumptions,
+                    provided.ty,
+                ) else {
+                    continue;
+                };
+
+                match requirement {
+                    EffectRequirement::Type(expected) => {
+                        let snapshot = self.table.snapshot();
+                        let ok = self.table.unify(expected, provided.ty).is_ok();
+                        self.table.rollback_to(snapshot);
+                        if ok {
+                            viable.push((provided, EffectRequirement::Type(expected)));
+                        }
+                    }
+                    EffectRequirement::Trait(trait_req) => {
+                        let canonical = Canonicalized::new(self.db, trait_req);
+                        match is_goal_satisfiable(
+                            self.db,
+                            ingot,
+                            canonical.value,
+                            self.env.assumptions(),
+                        ) {
+                            GoalSatisfiability::UnSat(_) => {}
+                            GoalSatisfiability::ContainsInvalid => {}
+                            _ => viable.push((provided, EffectRequirement::Trait(trait_req))),
+                        }
+                    }
+                }
+            }
+
+            let (provided, requirement) = match viable.as_slice() {
                 [] => {
+                    // Preserve detailed mismatch diagnostics when there's a single candidate.
+                    if mut_compatible.len() == 1 {
+                        let provided = mut_compatible[0];
+                        let Some(requirement) = self.resolve_effect_requirement(
+                            key_path,
+                            callable,
+                            func.scope(),
+                            callee_assumptions,
+                            provided.ty,
+                        ) else {
+                            continue;
+                        };
+                        match requirement {
+                            EffectRequirement::Type(expected) => {
+                                if self.table.unify(expected, provided.ty).is_err() {
+                                    let diag = BodyDiag::EffectTypeMismatch {
+                                        primary: call_span.clone().into(),
+                                        func,
+                                        key: key_path,
+                                        expected,
+                                        given: provided.ty,
+                                        provided_span: provided_span(provided),
+                                    };
+                                    self.push_diag(diag);
+                                }
+                            }
+                            EffectRequirement::Trait(trait_req) => {
+                                let canonical = Canonicalized::new(self.db, trait_req);
+                                match is_goal_satisfiable(
+                                    self.db,
+                                    ingot,
+                                    canonical.value,
+                                    self.env.assumptions(),
+                                ) {
+                                    GoalSatisfiability::UnSat(_) => {
+                                        let diag = BodyDiag::EffectTraitUnsatisfied {
+                                            primary: call_span.clone().into(),
+                                            func,
+                                            key: key_path,
+                                            trait_req,
+                                            given: provided.ty,
+                                            provided_span: provided_span(provided),
+                                        };
+                                        self.push_diag(diag);
+                                    }
+                                    GoalSatisfiability::ContainsInvalid => {}
+                                    _ => {}
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Multiple candidates exist, but none can satisfy this effect.
                     let diag = BodyDiag::MissingEffect {
                         primary: call_span.clone().into(),
                         func,
@@ -331,7 +467,7 @@ impl<'db> TyChecker<'db> {
                     self.push_diag(diag);
                     continue;
                 }
-                [one] => *one,
+                [(provided, requirement)] => (*provided, *requirement),
                 _ => {
                     let diag = BodyDiag::AmbiguousEffect {
                         primary: call_span.clone().into(),
@@ -343,54 +479,23 @@ impl<'db> TyChecker<'db> {
                 }
             };
 
-            if effect.is_mut(self.db) && !provided.is_mut {
-                let provided_span = match provided.origin {
-                    EffectOrigin::With { value_expr } => Some(value_expr.span(self.body()).into()),
-                    EffectOrigin::Param { .. } => None,
-                };
-                let diag = BodyDiag::EffectMutabilityMismatch {
-                    primary: call_span.clone().into(),
-                    func,
-                    key: key_path,
-                    provided_span,
-                };
-                self.push_diag(diag);
-                continue;
-            }
-
-            let Some(requirement) = self.resolve_effect_requirement(
-                key_path,
-                callable,
-                func.scope(),
-                callee_assumptions,
-                provided.ty,
-            ) else {
-                continue;
-            };
-
             match requirement {
                 EffectRequirement::Type(expected) => {
+                    // Commit unification for the selected candidate.
                     if self.table.unify(expected, provided.ty).is_err() {
-                        let provided_span = match provided.origin {
-                            EffectOrigin::With { value_expr } => {
-                                Some(value_expr.span(self.body()).into())
-                            }
-                            EffectOrigin::Param { .. } => None,
-                        };
                         let diag = BodyDiag::EffectTypeMismatch {
                             primary: call_span.clone().into(),
                             func,
                             key: key_path,
                             expected,
                             given: provided.ty,
-                            provided_span,
+                            provided_span: provided_span(provided),
                         };
                         self.push_diag(diag);
                     }
                 }
                 EffectRequirement::Trait(trait_req) => {
                     let canonical = Canonicalized::new(self.db, trait_req);
-                    let ingot = self.env.body().top_mod(self.db).ingot(self.db);
                     match is_goal_satisfiable(
                         self.db,
                         ingot,
@@ -398,19 +503,13 @@ impl<'db> TyChecker<'db> {
                         self.env.assumptions(),
                     ) {
                         GoalSatisfiability::UnSat(_) => {
-                            let provided_span = match provided.origin {
-                                EffectOrigin::With { value_expr } => {
-                                    Some(value_expr.span(self.body()).into())
-                                }
-                                EffectOrigin::Param { .. } => None,
-                            };
                             let diag = BodyDiag::EffectTraitUnsatisfied {
                                 primary: call_span.clone().into(),
                                 func,
                                 key: key_path,
                                 trait_req,
                                 given: provided.ty,
-                                provided_span,
+                                provided_span: provided_span(provided),
                             };
                             self.push_diag(diag);
                         }
