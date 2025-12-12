@@ -356,7 +356,6 @@ pub async fn handle_files_need_diagnostics(
     let ingots_need_diagnostics: FxHashSet<_> = need_diagnostics
         .iter()
         .filter_map(|NeedsDiagnostics(url)| {
-            // url is already a url::Url
             backend
                 .db
                 .workspace()
@@ -369,10 +368,6 @@ pub async fn handle_files_need_diagnostics(
         use crate::lsp_diagnostics::LspDiagnostics;
         let diagnostics_map = backend.db.diagnostics_for_ingot(ingot);
 
-        info!(
-            "Computed diagnostics: {:?}",
-            diagnostics_map.keys().collect::<Vec<_>>()
-        );
         for uri in diagnostics_map.keys() {
             let diagnostic = diagnostics_map.get(uri).cloned().unwrap_or_default();
             let diagnostics_params = async_lsp::lsp_types::PublishDiagnosticsParams {
@@ -380,10 +375,9 @@ pub async fn handle_files_need_diagnostics(
                 diagnostics: diagnostic,
                 version: None,
             };
-            info!("Publishing diagnostics for URI: {:?}", uri);
-            let _ = client
-                .publish_diagnostics(diagnostics_params)
-                .map_err(|e| error!("Failed to publish diagnostics for {}: {:?}", uri, e));
+            if let Err(e) = client.publish_diagnostics(diagnostics_params) {
+                error!("Failed to publish diagnostics for {}: {:?}", uri, e);
+            }
         }
     }
     Ok(())

@@ -1,6 +1,8 @@
 // Formatting tests are in tests/fixtures/*.fe with snapshot tests.
 // See tests/format_snapshots.rs for the test harness.
 
+#![allow(clippy::print_stdout)]
+
 #[test]
 fn test_pretty_group_behavior() {
     use pretty::RcDoc;
