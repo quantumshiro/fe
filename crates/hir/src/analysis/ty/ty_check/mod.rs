@@ -31,6 +31,8 @@ pub use owner::EffectParamOwner;
 use rustc_hash::{FxHashMap, FxHashSet};
 use salsa::Update;
 
+use crate::analysis::place::Place;
+
 use super::{
     diagnostics::{BodyDiag, FuncBodyDiag, TyDiagCollection, TyLowerDiag},
     fold::TyFoldable,
@@ -574,12 +576,37 @@ impl<'db> TyChecker<'db> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub enum EffectArg<'db> {
+    Place(Place<'db>),
+    Value(ExprId),
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub enum EffectPassMode {
+    /// The provided effect is already a place; pass it directly.
+    ByPlace,
+    /// The provided effect is an rvalue; materialize it into a block-scoped temp place.
+    ByTempPlace,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub struct ResolvedEffectArg<'db> {
+    pub param_idx: usize,
+    pub key: PathId<'db>,
+    pub arg: EffectArg<'db>,
+    pub pass_mode: EffectPassMode,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Update)]
 pub struct TypedBody<'db> {
     body: Option<Body<'db>>,
     pat_ty: FxHashMap<PatId, TyId<'db>>,
     expr_ty: FxHashMap<ExprId, ExprProp<'db>>,
     callables: FxHashMap<ExprId, Callable<'db>>,
+    call_effect_args: FxHashMap<ExprId, Vec<ResolvedEffectArg<'db>>>,
     /// Bindings for function parameters (indexed by param position)
     param_bindings: Vec<LocalBinding<'db>>,
     /// Bindings for local variables (keyed by the pattern that introduces them)
@@ -613,6 +640,10 @@ impl<'db> TypedBody<'db> {
         self.callables.get(&expr)
     }
 
+    pub fn call_effect_args(&self, call_expr: ExprId) -> Option<&[ResolvedEffectArg<'db>]> {
+        self.call_effect_args.get(&call_expr).map(|v| v.as_slice())
+    }
+
     /// Get the binding for a function parameter by index.
     pub fn param_binding(&self, idx: usize) -> Option<LocalBinding<'db>> {
         self.param_bindings.get(idx).copied()
@@ -641,6 +672,11 @@ impl<'db> TypedBody<'db> {
     /// Returns the identity of the binding (param index, pattern id, or effect param ident).
     pub fn expr_binding(&self, expr: ExprId) -> Option<LocalBinding<'db>> {
         self.expr_ty.get(&expr)?.binding
+    }
+
+    /// Returns a place representation for `expr` if it denotes an assignable location.
+    pub fn expr_place(&self, db: &'db dyn HirAnalysisDb, expr: ExprId) -> Option<Place<'db>> {
+        Place::from_expr(db, self, expr)
     }
 
     /// Find all expressions that reference the same local binding as the given expression.
@@ -689,6 +725,7 @@ impl<'db> TypedBody<'db> {
             pat_ty: FxHashMap::default(),
             expr_ty: FxHashMap::default(),
             callables: FxHashMap::default(),
+            call_effect_args: FxHashMap::default(),
             param_bindings: Vec::new(),
             pat_bindings: FxHashMap::default(),
         }

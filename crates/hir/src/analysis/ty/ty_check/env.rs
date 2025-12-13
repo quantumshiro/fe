@@ -1,4 +1,5 @@
 use crate::{
+    analysis::place::Place,
     hir_def::{
         Body, Contract, EffectParamListId, Expr, ExprId, FieldParent, Func, IdentId, IntegerId,
         ItemKind, Partial, Pat, PatId, PathId, Stmt, StmtId, TraitRefId, prim_ty::PrimTy,
@@ -62,6 +63,9 @@ pub(super) struct TyCheckEnv<'db> {
     param_bindings: Vec<LocalBinding<'db>>,
     /// Pat bindings for transfer to TypedBody
     pat_bindings: FxHashMap<PatId, LocalBinding<'db>>,
+
+    /// Resolved effect arguments at call sites, keyed by the call expression.
+    call_effect_args: FxHashMap<ExprId, Vec<super::ResolvedEffectArg<'db>>>,
 }
 
 impl<'db> TyCheckEnv<'db> {
@@ -113,6 +117,7 @@ impl<'db> TyCheckEnv<'db> {
             expr_stack: Vec::new(),
             param_bindings: Vec::new(),
             pat_bindings: FxHashMap::default(),
+            call_effect_args: FxHashMap::default(),
         };
 
         env.enter_scope(body.expr(db));
@@ -206,26 +211,10 @@ impl<'db> TyCheckEnv<'db> {
                 _ => TyId::invalid(self.db, InvalidCause::Other),
             };
 
-            let origin = EffectOrigin::Param {
-                site: EffectParamSite::Func(func),
-                index: idx,
-                name: effect.name(self.db),
-            };
-            let provided = ProvidedEffect {
-                origin,
-                ty: provided_ty,
-                is_mut: effect.is_mut(self.db),
-            };
-            if let Some(key) =
-                self.effect_key_for_path_in_scope(key_path, func.scope(), base_assumptions)
-            {
-                self.effect_env.insert(key, provided);
-            }
-
             let binding_ident = effect
                 .name(self.db)
                 .or_else(|| key_path.ident(self.db).to_opt());
-            if let Some(ident) = binding_ident {
+            let binding = binding_ident.map(|ident| {
                 let binding = LocalBinding::EffectParam {
                     site: EffectParamSite::Func(func),
                     idx,
@@ -236,6 +225,24 @@ impl<'db> TyCheckEnv<'db> {
                     .last_mut()
                     .expect("function scope exists")
                     .register_var(ident, binding);
+                binding
+            });
+
+            let origin = EffectOrigin::Param {
+                site: EffectParamSite::Func(func),
+                index: idx,
+                name: effect.name(self.db),
+            };
+            let provided = ProvidedEffect {
+                origin,
+                ty: provided_ty,
+                is_mut: effect.is_mut(self.db),
+                binding,
+            };
+            if let Some(key) =
+                self.effect_key_for_path_in_scope(key_path, func.scope(), base_assumptions)
+            {
+                self.effect_env.insert(key, provided);
             }
         }
     }
@@ -292,26 +299,7 @@ impl<'db> TyCheckEnv<'db> {
                     }
                 };
 
-                let origin = EffectOrigin::Param {
-                    site,
-                    index: global_idx,
-                    name: binding_ident,
-                };
-                let provided = ProvidedEffect {
-                    origin,
-                    ty: provided_ty,
-                    is_mut: effect.is_mut,
-                };
-                if let Some(field_ty) = field_ty {
-                    // Insert effect keyed by the field's type (e.g., TokenStore)
-                    self.effect_env.insert(EffectKey::Type(field_ty), provided);
-                } else if let Some(key) =
-                    self.effect_key_for_path_in_scope(key_path, effect_scope, base_assumptions)
-                {
-                    self.effect_env.insert(key, provided);
-                }
-
-                if let Some(ident) = binding_ident {
+                let binding = binding_ident.map(|ident| {
                     let binding = if let Some(field_ty) = field_ty {
                         LocalBinding::Param {
                             site: ParamSite::EffectField(site),
@@ -331,6 +319,27 @@ impl<'db> TyCheckEnv<'db> {
                         .last_mut()
                         .expect("scope exists")
                         .register_var(ident, binding);
+                    binding
+                });
+
+                let origin = EffectOrigin::Param {
+                    site,
+                    index: global_idx,
+                    name: binding_ident,
+                };
+                let provided = ProvidedEffect {
+                    origin,
+                    ty: provided_ty,
+                    is_mut: effect.is_mut,
+                    binding,
+                };
+                if let Some(field_ty) = field_ty {
+                    // Insert effect keyed by the field's type (e.g., TokenStore)
+                    self.effect_env.insert(EffectKey::Type(field_ty), provided);
+                } else if let Some(key) =
+                    self.effect_key_for_path_in_scope(key_path, effect_scope, base_assumptions)
+                {
+                    self.effect_env.insert(key, provided);
                 }
 
                 global_idx += 1;
@@ -428,6 +437,12 @@ impl<'db> TyCheckEnv<'db> {
 
     pub(super) fn typed_expr(&self, expr: ExprId) -> Option<ExprProp<'db>> {
         self.expr_ty.get(&expr).cloned()
+    }
+
+    pub(super) fn expr_place(&self, expr: ExprId) -> Option<Place<'db>> {
+        Place::from_expr_in_body(self.db, self.body, expr, |expr| {
+            self.typed_expr(expr).and_then(|p| p.binding)
+        })
     }
 
     pub(super) fn register_callable(&mut self, expr: ExprId, callable: Callable<'db>) {
@@ -561,6 +576,17 @@ impl<'db> TyCheckEnv<'db> {
 
     pub(super) fn insert_unkeyed_effect_binding(&mut self, binding: ProvidedEffect<'db>) {
         self.effect_env.insert_unkeyed(binding);
+    }
+
+    pub(super) fn push_call_effect_arg(
+        &mut self,
+        call_expr: ExprId,
+        arg: super::ResolvedEffectArg<'db>,
+    ) {
+        self.call_effect_args
+            .entry(call_expr)
+            .or_default()
+            .push(arg);
     }
 
     pub(super) fn effect_candidates_in_scope(
@@ -781,6 +807,7 @@ impl<'db> TyCheckEnv<'db> {
             pat_ty: self.pat_ty,
             expr_ty: self.expr_ty,
             callables,
+            call_effect_args: self.call_effect_args,
             param_bindings: self.param_bindings,
             pat_bindings: self.pat_bindings,
         }
@@ -1145,6 +1172,7 @@ pub(super) struct ProvidedEffect<'db> {
     pub origin: EffectOrigin<'db>,
     pub ty: TyId<'db>,
     pub is_mut: bool,
+    pub binding: Option<LocalBinding<'db>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

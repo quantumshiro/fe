@@ -12,6 +12,7 @@ use super::{
     env::{EffectOrigin, ExprProp, LocalBinding, ProvidedEffect, TyCheckEnv},
     path::ResolvedPathInBody,
 };
+use crate::analysis::place::{Place, PlaceBase};
 use crate::analysis::ty::{
     binder::Binder,
     canonical::Canonicalized,
@@ -217,6 +218,7 @@ impl<'db> TyChecker<'db> {
                 },
                 ty: value_prop.ty,
                 is_mut,
+                binding: value_prop.binding,
             };
 
             match binding.key_path {
@@ -308,7 +310,7 @@ impl<'db> TyChecker<'db> {
             .instantiate_identity()
             .extend_all_bounds(self.db);
 
-        for effect in func.effect_params(self.db) {
+        for (param_idx, effect) in func.effect_params(self.db).enumerate() {
             let Some(key_path) = effect.key_path(self.db) else {
                 continue;
             };
@@ -344,7 +346,18 @@ impl<'db> TyChecker<'db> {
             let mut_compatible: SmallVec<[ProvidedEffect<'db>; 2]> = cands
                 .iter()
                 .copied()
-                .filter(|p| !required_mut || p.is_mut)
+                .filter(|p| {
+                    if !required_mut {
+                        return true;
+                    }
+                    if !p.is_mut {
+                        return false;
+                    }
+                    match p.origin {
+                        EffectOrigin::With { .. } => true,
+                        EffectOrigin::Param { .. } => p.binding.is_some(),
+                    }
+                })
                 .collect();
 
             let provided_span = |provided: ProvidedEffect<'db>| match provided.origin {
@@ -353,7 +366,6 @@ impl<'db> TyChecker<'db> {
             };
 
             if mut_compatible.is_empty() {
-                // Effects are present but don't satisfy mutability.
                 let diag = BodyDiag::EffectMutabilityMismatch {
                     primary: call_span.clone().into(),
                     func,
@@ -478,6 +490,52 @@ impl<'db> TyChecker<'db> {
                     continue;
                 }
             };
+
+            let place = match provided.origin {
+                EffectOrigin::With { value_expr } => self.env.expr_place(value_expr),
+                EffectOrigin::Param { .. } => provided
+                    .binding
+                    .map(|binding| Place::new(PlaceBase::Binding(binding))),
+            };
+
+            let arg = if let Some(place) = place.clone() {
+                super::EffectArg::Place(place)
+            } else {
+                match provided.origin {
+                    EffectOrigin::With { value_expr } => super::EffectArg::Value(value_expr),
+                    EffectOrigin::Param { .. } => super::EffectArg::Unknown,
+                }
+            };
+
+            let pass_mode = if matches!(arg, super::EffectArg::Place(..)) {
+                super::EffectPassMode::ByPlace
+            } else {
+                match provided.origin {
+                    EffectOrigin::With { .. } => super::EffectPassMode::ByTempPlace,
+                    EffectOrigin::Param { .. } => super::EffectPassMode::Unknown,
+                }
+            };
+
+            if required_mut && matches!(pass_mode, super::EffectPassMode::Unknown) {
+                let diag = BodyDiag::EffectMutabilityMismatch {
+                    primary: call_span.clone().into(),
+                    func,
+                    key: key_path,
+                    provided_span: provided_span(provided),
+                };
+                self.push_diag(diag);
+                continue;
+            }
+
+            self.env.push_call_effect_arg(
+                expr,
+                super::ResolvedEffectArg {
+                    param_idx,
+                    key: key_path,
+                    arg,
+                    pass_mode,
+                },
+            );
 
             match requirement {
                 EffectRequirement::Type(expected) => {
