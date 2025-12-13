@@ -1,5 +1,6 @@
 ---
 source: crates/codegen/tests/yul.rs
+assertion_line: 31
 expression: output
 input_file: tests/fixtures/erc20.fe
 ---
@@ -7,12 +8,12 @@ object "Erc20Contract" {
   code {
     init()
     function erc20_set_owner_once_stor(self, owner) {
-      let v0 := iszero(eq(get_field__StorPtr_u256__2bec36171fad53de(self, 96), 0))
+      let v0 := iszero(eq(get_field__StorPtr_u256__2bec36171fad53de(self, 3), 0))
       if v0 {
         revert(0, 0)
       }
       if iszero(v0) {
-        store_field__StorPtr_u256__2bec36171fad53de(self, 96, owner)
+        store_field__StorPtr_u256__2bec36171fad53de(self, 3, owner)
       }
     }
     function get_field__StorPtr_u256__2bec36171fad53de(ptr, offset) -> ret {
@@ -61,23 +62,23 @@ object "Erc20Contract" {
         ret := keccak256(0, 64)
       }
       function erc20_allowance_stor(self, owner, spender) -> ret {
-        ret := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(add(self, 32), allowance_key(owner, spender))
+        ret := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(add(self, 1), allowance_key(owner, spender))
       }
       function erc20_approve_stor(self, owner, spender, value) {
-        storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(add(self, 32), allowance_key(owner, spender), value)
+        storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(add(self, 1), allowance_key(owner, spender), value)
       }
       function erc20_balance_of_stor(self, addr) -> ret {
         ret := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(self, addr)
       }
       function erc20_mint_stor(self, to, amount) {
-        let v0 := iszero(eq(caller(), get_field__StorPtr_u256__2bec36171fad53de(self, 96)))
+        let v0 := iszero(eq(caller(), get_field__StorPtr_u256__2bec36171fad53de(self, 3)))
         if v0 {
           revert(0, 0)
         }
         if iszero(v0) {
           let v1 := erc20_balance_of_stor(self, to)
           storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(self, to, add(v1, amount))
-          store_field__StorPtr_u256__2bec36171fad53de(self, 64, add(get_field__StorPtr_u256__2bec36171fad53de(self, 64), amount))
+          store_field__StorPtr_u256__2bec36171fad53de(self, 2, add(get_field__StorPtr_u256__2bec36171fad53de(self, 2), amount))
         }
       }
       function erc20_transfer_from_stor(self, owner, to, amount) {
@@ -89,7 +90,7 @@ object "Erc20Contract" {
         }
         if iszero(v2) {
           erc20_transfer_stor(self, owner, to, amount)
-          storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(add(self, 32), allowance_key(owner, v0), sub(v1, amount))
+          storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(add(self, 1), allowance_key(owner, v0), sub(v1, amount))
         }
       }
       function erc20_transfer_stor(self, from, to, amount) {

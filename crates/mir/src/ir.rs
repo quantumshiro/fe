@@ -33,6 +33,8 @@ pub struct MirFunction<'db> {
     pub typed_body: TypedBody<'db>,
     /// Concrete generic arguments used to instantiate this function instance.
     pub generic_args: Vec<TyId<'db>>,
+    /// Effect provider kinds for this instance, indexed by effect param position.
+    pub effect_provider_kinds: Vec<EffectProviderKind>,
     /// Optional contract association declared via attributes.
     pub contract_function: Option<ContractFunction>,
     /// Symbol name used for codegen (includes monomorphization suffix when present).
@@ -281,6 +283,8 @@ pub enum ValueOrigin<'db> {
     Synthetic(SyntheticValue),
     Pat(PatId),
     Param(Func<'db>, usize),
+    /// Reference a named Yul binding in the current function scope.
+    BindingName(String),
     Call(CallOrigin<'db>),
     /// Call to a compiler intrinsic that should lower to a raw opcode, not a function call.
     Intrinsic(IntrinsicValue<'db>),
@@ -362,11 +366,23 @@ pub enum AddressSpaceKind {
     Storage,
 }
 
+/// Runtime "domain" for an effect provider value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EffectProviderKind {
+    Memory,
+    Storage,
+    Calldata,
+}
+
 #[derive(Debug, Clone)]
 pub struct CallOrigin<'db> {
     pub expr: ExprId,
     pub callable: Callable<'db>,
     pub args: Vec<ValueId>,
+    /// Explicit lowered effect arguments for this call, in callee effect-param order.
+    pub effect_args: Vec<ValueId>,
+    /// Effect provider kinds for this call, in callee effect-param order.
+    pub effect_kinds: Vec<EffectProviderKind>,
     /// Final lowered symbol name of the callee after monomorphization.
     pub resolved_name: Option<String>,
     /// For methods on struct types, the statically known address space of the receiver.
@@ -381,6 +397,8 @@ pub struct FieldPtrOrigin {
     pub base: ValueId,
     /// Byte offset to add to the base pointer.
     pub offset_bytes: u64,
+    /// Address space of the base pointer (controls offset scaling in codegen).
+    pub addr_space: AddressSpaceKind,
 }
 
 #[derive(Debug, Clone)]
@@ -446,6 +464,8 @@ pub enum IntrinsicOp {
     Revert,
     /// `caller()`
     Caller,
+    /// `stor_at(slot)` - interpret a slot as a storage-backed `T` pointer value.
+    StorAt,
 }
 
 impl IntrinsicOp {
@@ -461,6 +481,7 @@ impl IntrinsicOp {
                 | IntrinsicOp::CodeRegionLen
                 | IntrinsicOp::Keccak
                 | IntrinsicOp::Caller
+                | IntrinsicOp::StorAt
         )
     }
 }

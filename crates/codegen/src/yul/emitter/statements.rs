@@ -345,6 +345,14 @@ impl<'db> FunctionEmitter<'db> {
                 .next()
                 .expect("addr_of arity already checked"));
         }
+        if matches!(intr.op, IntrinsicOp::StorAt) {
+            let args = self.lower_intrinsic_args(intr, state)?;
+            self.expect_intrinsic_arity(intr.op, &args, 1)?;
+            return Ok(args
+                .into_iter()
+                .next()
+                .expect("stor_at arity already checked"));
+        }
         if matches!(
             intr.op,
             IntrinsicOp::CodeRegionOffset | IntrinsicOp::CodeRegionLen
@@ -482,6 +490,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::CodeRegionLen => "code_region_len",
             IntrinsicOp::Keccak => "keccak256",
             IntrinsicOp::Caller => "caller",
+            IntrinsicOp::StorAt => "stor_at",
         }
     }
 }

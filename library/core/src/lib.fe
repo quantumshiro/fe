@@ -24,9 +24,11 @@ pub use intrinsic::{
     caller,
     sload,
     sstore,
+    stor_at,
 }
 pub use mem::alloc
 pub use functional::{Fn, Functor, Applicative, Monad}
+pub use effect_ref::{EffectRef, EffectRefMut}
 
 extern {
     pub fn panic() -> !

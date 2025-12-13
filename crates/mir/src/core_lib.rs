@@ -93,6 +93,9 @@ define_core_helpers! {
     types {
         MemPtr => "core::ptr::MemPtr",
         StorPtr => "core::ptr::StorPtr",
+        EffectMemPtr => "core::effect_ref::MemPtr",
+        EffectStorPtr => "core::effect_ref::StorPtr",
+        EffectCalldataPtr => "core::effect_ref::CalldataPtr",
     }
 }
 

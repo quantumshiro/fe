@@ -72,6 +72,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     expr,
                     callable,
                     args: vec![value_id, offset_value, field_value],
+                    effect_args: Vec::new(),
+                    effect_kinds: Vec::new(),
                     receiver_space: None,
                     resolved_name: None,
                 }),

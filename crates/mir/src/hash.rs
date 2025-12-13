@@ -132,6 +132,10 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 self.write_u8(0x05);
                 self.write_usize(*idx);
             }
+            ValueOrigin::BindingName(name) => {
+                self.write_u8(0x09);
+                self.write_str(name);
+            }
             ValueOrigin::Call(call) => {
                 self.write_u8(0x06);
                 self.hash_call_origin(call);
@@ -150,6 +154,10 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 let slot = self.placeholder_value(field_ptr.base);
                 self.write_u32(slot);
                 self.write_u64(field_ptr.offset_bytes);
+                self.write_u8(match field_ptr.addr_space {
+                    crate::ir::AddressSpaceKind::Memory => 1,
+                    crate::ir::AddressSpaceKind::Storage => 2,
+                });
             }
         }
     }
@@ -160,6 +168,19 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
         for arg in &call.args {
             let slot = self.placeholder_value(*arg);
             self.write_u32(slot);
+        }
+        self.write_usize(call.effect_args.len());
+        for arg in &call.effect_args {
+            let slot = self.placeholder_value(*arg);
+            self.write_u32(slot);
+        }
+        self.write_usize(call.effect_kinds.len());
+        for kind in &call.effect_kinds {
+            self.write_u8(match kind {
+                crate::ir::EffectProviderKind::Memory => 1,
+                crate::ir::EffectProviderKind::Storage => 2,
+                crate::ir::EffectProviderKind::Calldata => 3,
+            });
         }
         self.write_usize(call.callable.generic_args().len());
         let symbol = call

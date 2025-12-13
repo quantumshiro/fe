@@ -92,6 +92,36 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 let val = self.ensure_value(expr);
                 (next_block, val, false)
             }
+            Partial::Present(Expr::With(bindings, body_expr)) => {
+                let mut current = Some(block);
+                for binding in bindings {
+                    let Some(curr_block) = current else { break };
+                    let (next_block, value, push_eval) =
+                        self.lower_expr_core(curr_block, binding.value);
+                    current = next_block;
+                    if push_eval && let Some(curr_block) = current {
+                        let bind_value =
+                            !self.is_unit_ty(self.typed_body.expr_ty(self.db, binding.value));
+                        self.push_inst(
+                            curr_block,
+                            MirInst::EvalExpr {
+                                expr: binding.value,
+                                value,
+                                bind_value,
+                            },
+                        );
+                    }
+                }
+
+                let Some(curr_block) = current else {
+                    let val = self.ensure_value(expr);
+                    return (None, val, false);
+                };
+
+                let (next_block, value) = self.lower_expr_in(curr_block, *body_expr);
+                self.mir_body.expr_values.insert(expr, value);
+                (next_block, value, false)
+            }
             Partial::Present(Expr::RecordInit(_, fields)) => {
                 let (next, val) = self.try_lower_record(block, expr, fields);
                 (next, val, true)
@@ -155,14 +185,82 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 }
                 args.clear();
             }
-            return Some(self.mir_body.alloc_value(ValueData {
+            let value_id = self.mir_body.alloc_value(ValueData {
                 ty,
                 origin: ValueOrigin::Intrinsic(IntrinsicValue {
                     op: kind,
                     args,
                     code_region,
                 }),
-            }));
+            });
+            if matches!(kind, IntrinsicOp::StorAt) {
+                self.value_address_space
+                    .insert(value_id, AddressSpaceKind::Storage);
+            }
+            return Some(value_id);
+        }
+
+        let mut effect_args = Vec::new();
+        let mut effect_kinds = Vec::new();
+        if let CallableDef::Func(func_def) = callable.callable_def
+            && func_def.has_effects(self.db)
+            && extract_contract_function(self.db, func_def).is_none()
+            && let Some(resolved) = self.typed_body.call_effect_args(expr)
+        {
+            for resolved_arg in resolved {
+                let kind = match resolved_arg.pass_mode {
+                    hir::analysis::ty::ty_check::EffectPassMode::ByPlace => {
+                        match &resolved_arg.arg {
+                            hir::analysis::ty::ty_check::EffectArg::Place(place) => {
+                                match place.base {
+                                    hir::analysis::place::PlaceBase::Binding(binding) => self
+                                        .effect_provider_kind_for_address_space(
+                                            self.address_space_for_binding(&binding),
+                                        ),
+                                }
+                            }
+                            _ => EffectProviderKind::Storage,
+                        }
+                    }
+                    hir::analysis::ty::ty_check::EffectPassMode::ByTempPlace => {
+                        EffectProviderKind::Memory
+                    }
+                    hir::analysis::ty::ty_check::EffectPassMode::ByValue => match &resolved_arg.arg
+                    {
+                        hir::analysis::ty::ty_check::EffectArg::Value(expr_id) => self
+                            .effect_provider_kind_for_provider_ty(
+                                self.typed_body.expr_ty(self.db, *expr_id),
+                            )
+                            .unwrap_or(EffectProviderKind::Storage),
+                        hir::analysis::ty::ty_check::EffectArg::Binding(binding) => {
+                            self.effect_provider_kind_for_binding(*binding)
+                        }
+                        _ => EffectProviderKind::Storage,
+                    },
+                    hir::analysis::ty::ty_check::EffectPassMode::Unknown => {
+                        EffectProviderKind::Storage
+                    }
+                };
+
+                let value = match &resolved_arg.arg {
+                    hir::analysis::ty::ty_check::EffectArg::Place(place) => match place.base {
+                        hir::analysis::place::PlaceBase::Binding(binding) => self
+                            .binding_value(binding)
+                            .unwrap_or_else(|| self.synthetic_u256(BigUint::from(0u8))),
+                    },
+                    hir::analysis::ty::ty_check::EffectArg::Value(expr_id) => {
+                        self.ensure_value(*expr_id)
+                    }
+                    hir::analysis::ty::ty_check::EffectArg::Binding(binding) => self
+                        .binding_value(*binding)
+                        .unwrap_or_else(|| self.synthetic_u256(BigUint::from(0u8))),
+                    hir::analysis::ty::ty_check::EffectArg::Unknown => {
+                        self.synthetic_u256(BigUint::from(0u8))
+                    }
+                };
+                effect_args.push(value);
+                effect_kinds.push(kind);
+            }
         }
         Some(self.mir_body.alloc_value(ValueData {
             ty,
@@ -170,6 +268,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: callable.clone(),
                 args,
+                effect_args,
+                effect_kinds,
                 receiver_space,
                 resolved_name: None,
             }),
@@ -216,6 +316,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
                     base: addr_value,
                     offset_bytes: info.offset_bytes,
+                    addr_space,
                 }),
             });
             // Propagate address space to the result
@@ -228,7 +329,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
             AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
-        let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
+        let offset_units = self.offset_units_for_space(addr_space, info.offset_bytes);
+        let offset_value = self.synthetic_u256(BigUint::from(offset_units));
         let callable =
             self.core
                 .make_callable(expr, CoreHelper::GetField, &[ptr_ty, info.field_ty]);
@@ -239,6 +341,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable,
                 args: vec![addr_value, offset_value],
+                effect_args: Vec::new(),
+                effect_kinds: Vec::new(),
                 receiver_space: None,
                 resolved_name: None,
             }),

@@ -101,6 +101,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         expr: match_expr,
                         callable,
                         args: vec![scrutinee_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),
@@ -376,13 +378,17 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     CoreHelper::GetVariantField,
                     &[ptr_ty, binding_ty],
                 );
-                let offset_value = self.synthetic_u256(BigUint::from(binding.field_offset));
+                let addr_space = self.value_address_space(scrutinee_value);
+                let offset_units = self.offset_units_for_space(addr_space, binding.field_offset);
+                let offset_value = self.synthetic_u256(BigUint::from(offset_units));
                 let load_value = self.mir_body.alloc_value(ValueData {
                     ty: binding_ty,
                     origin: ValueOrigin::Call(CallOrigin {
                         expr: match_expr,
                         callable,
                         args: vec![scrutinee_value, offset_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),

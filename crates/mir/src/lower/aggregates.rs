@@ -47,6 +47,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: alloc_callable,
                 args: vec![size_value],
+                effect_args: Vec::new(),
+                effect_kinds: Vec::new(),
                 receiver_space: None,
                 resolved_name: None,
             }),
@@ -94,6 +96,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: store_discr_callable,
                 args: vec![base_value, discr_value],
+                effect_args: Vec::new(),
+                effect_kinds: Vec::new(),
                 receiver_space: None,
                 resolved_name: None,
             }),
@@ -152,7 +156,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 let callable =
                     self.core
                         .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, *field_ty]);
-                let offset_value = self.synthetic_u256(BigUint::from(*offset_bytes));
+                let offset_units = self.offset_units_for_space(addr_space, *offset_bytes);
+                let offset_value = self.synthetic_u256(BigUint::from(offset_units));
                 let store_ret_ty = callable.ret_ty(self.db);
                 let store_call = self.mir_body.alloc_value(ValueData {
                     ty: store_ret_ty,
@@ -160,6 +165,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         expr,
                         callable,
                         args: vec![base_value, offset_value, *field_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),
@@ -215,6 +222,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
                             base: src_ptr,
                             offset_bytes: field_offset,
+                            addr_space: src_space,
                         }),
                     });
                     self.value_address_space.insert(ptr, src_space);
@@ -223,7 +231,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 self.emit_aggregate_copy(field_ty, src_field_ptr, ctx.with_offset(field_offset));
             } else {
                 // Load from source and store to destination
-                let src_offset_value = self.synthetic_u256(BigUint::from(field_offset));
+                let src_offset_units = self.offset_units_for_space(src_space, field_offset);
+                let src_offset_value = self.synthetic_u256(BigUint::from(src_offset_units));
                 let get_callable = self.core.make_callable(
                     ctx.expr,
                     CoreHelper::GetField,
@@ -235,14 +244,17 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         expr: ctx.expr,
                         callable: get_callable,
                         args: vec![src_ptr, src_offset_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),
                 });
 
                 // Store to destination
-                let dst_offset_value =
-                    self.synthetic_u256(BigUint::from(ctx.dst_offset + field_offset));
+                let dst_offset_units =
+                    self.offset_units_for_space(ctx.addr_space, ctx.dst_offset + field_offset);
+                let dst_offset_value = self.synthetic_u256(BigUint::from(dst_offset_units));
                 let store_callable =
                     self.core
                         .make_callable(ctx.expr, CoreHelper::StoreField, &[ptr_ty, field_ty]);
@@ -253,6 +265,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         expr: ctx.expr,
                         callable: store_callable,
                         args: vec![ctx.dst_base, dst_offset_value, loaded_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),
@@ -306,6 +320,23 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         };
 
         let record_ty = self.typed_body.expr_ty(self.db, expr);
+        let record_base = record_ty.base_ty(self.db);
+        let effect_ptr_bases = [
+            self.core
+                .helper_ty(CoreHelperTy::EffectMemPtr)
+                .base_ty(self.db),
+            self.core
+                .helper_ty(CoreHelperTy::EffectStorPtr)
+                .base_ty(self.db),
+            self.core
+                .helper_ty(CoreHelperTy::EffectCalldataPtr)
+                .base_ty(self.db),
+        ];
+        if effect_ptr_bases.contains(&record_base) && lowered_fields.len() == 1 {
+            let value = lowered_fields[0].1;
+            self.mir_body.expr_values.insert(expr, value);
+            return (Some(curr_block), value);
+        }
         let record_like = RecordLike::from_ty(record_ty);
         let Some(size_bytes) = self.record_size_bytes(&record_like) else {
             let value_id = self.ensure_value(expr);
@@ -533,7 +564,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
             AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
-        let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
+        let offset_units = self.offset_units_for_space(addr_space, info.offset_bytes);
+        let offset_value = self.synthetic_u256(BigUint::from(offset_units));
         let callable =
             self.core
                 .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, info.field_ty]);
@@ -545,6 +577,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable,
                 args: vec![addr_value, offset_value, value],
+                effect_args: Vec::new(),
+                effect_kinds: Vec::new(),
                 receiver_space: None,
                 resolved_name: None,
             }),

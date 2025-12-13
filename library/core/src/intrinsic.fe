@@ -29,6 +29,11 @@ extern {
     pub fn keccak(_: u256, _: u256) -> u256
     /// Return the address of the caller.
     pub fn caller() -> u256
+    /// Reinterpret a storage slot as a storage-backed value of type `T`.
+    ///
+    /// This is a compiler intrinsic used to construct storage-backed struct values
+    /// (thin pointers) at a known slot offset.
+    pub fn stor_at<T>(slot: u256) -> T
     /// Return the code offset/size for the call graph rooted at `func`.
     ///
     /// This is resolved at compile time and is intended for low-level contract

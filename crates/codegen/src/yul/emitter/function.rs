@@ -5,7 +5,7 @@ use hir::{
         ty::{
             adt_def::AdtRef,
             trait_resolution::PredicateListId,
-            ty_def::{PrimTy, TyBase, TyData, TyId, prim_int_bits},
+            ty_def::{PrimTy, TyBase, TyData, TyId},
         },
     },
     hir_def::{Body, Expr, ExprId, Partial, Pat, PatId, PathId, Stmt, StmtId},
@@ -149,20 +149,17 @@ impl<'db> FunctionEmitter<'db> {
         let effect_params: Vec<_> = self.mir_func.func.effect_params(self.db).collect();
         let is_contract_entry = self.mir_func.contract_function.is_some();
         if is_contract_entry {
-            let mut storage_offset = 0u64;
             for effect in effect_params {
                 let binding = self.effect_binding_name(effect);
                 let temp = state.alloc_local();
                 state.insert_binding(binding.clone(), temp.clone());
-                let base = self.storage_base_ptr_expr();
-                let ptr_expr = if storage_offset == 0 {
-                    base.to_string()
-                } else {
-                    format!("add({base}, {storage_offset})")
-                };
-                prologue.push(YulDoc::line(format!("let {temp} := {ptr_expr}")));
-                let stride = self.effect_size_bytes(effect, &binding)?;
-                storage_offset = storage_offset.saturating_add(stride);
+                let slots = self.effect_storage_slots(effect, &binding)?;
+                if slots != 0 {
+                    return Err(YulError::Unsupported(format!(
+                        "contract entrypoint effect `{binding}` must be zero-sized (instantiate storage pointers manually)"
+                    )));
+                }
+                prologue.push(YulDoc::line(format!("let {temp} := 0")));
             }
         } else {
             for effect in effect_params {
@@ -265,14 +262,10 @@ impl<'db> FunctionEmitter<'db> {
     }
 
     /// Returns the Yul expression used as the storage base pointer for contract entrypoints.
-    pub(super) fn storage_base_ptr_expr(&self) -> &'static str {
-        "0"
-    }
-
-    /// Computes the byte size of an effect's storage type to space out bindings.
+    /// Computes the storage slot size of an effect type (for contract entrypoints).
     ///
     /// Returns an error if the effect type cannot be resolved or its size cannot be computed.
-    fn effect_size_bytes(
+    fn effect_storage_slots(
         &self,
         effect: hir::core::semantic::EffectParamView<'db>,
         binding_name: &str,
@@ -303,32 +296,46 @@ impl<'db> FunctionEmitter<'db> {
                 )));
             }
         };
-        self.ty_size_bytes(ty).ok_or_else(|| {
+        self.ty_storage_slots(ty).ok_or_else(|| {
             YulError::Unsupported(format!(
                 "cannot determine storage size for effect `{binding_name}`: unsupported type"
             ))
         })
     }
 
-    /// Best-effort byte size computation for types used as storage effects.
-    fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
+    /// Best-effort slot size computation for types in storage.
+    fn ty_storage_slots(&self, ty: TyId<'db>) -> Option<u64> {
         // Handle tuples first (check base type for TyApp cases)
         if ty.is_tuple(self.db) {
             let mut size = 0u64;
             for field_ty in ty.field_types(self.db) {
-                size += self.ty_size_bytes(field_ty)?;
+                size += self.ty_storage_slots(field_ty)?;
             }
             return Some(size);
         }
 
         // Handle primitives
-        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db) {
-            if *prim == PrimTy::Bool {
-                return Some(1);
-            }
-            if let Some(bits) = prim_int_bits(*prim) {
-                return Some((bits / 8) as u64);
-            }
+        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db)
+            && matches!(
+                prim,
+                PrimTy::Bool
+                    | PrimTy::U8
+                    | PrimTy::U16
+                    | PrimTy::U32
+                    | PrimTy::U64
+                    | PrimTy::U128
+                    | PrimTy::U256
+                    | PrimTy::I8
+                    | PrimTy::I16
+                    | PrimTy::I32
+                    | PrimTy::I64
+                    | PrimTy::I128
+                    | PrimTy::I256
+                    | PrimTy::Usize
+                    | PrimTy::Isize
+            )
+        {
+            return Some(1);
         }
 
         // Handle ADT types (structs) - use adt_def() which handles TyApp
@@ -337,7 +344,7 @@ impl<'db> FunctionEmitter<'db> {
         {
             let mut size = 0u64;
             for field_ty in ty.field_types(self.db) {
-                size += self.ty_size_bytes(field_ty)?;
+                size += self.ty_storage_slots(field_ty)?;
             }
             return Some(size);
         }

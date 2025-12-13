@@ -580,6 +580,7 @@ impl<'db> TyChecker<'db> {
 pub enum EffectArg<'db> {
     Place(Place<'db>),
     Value(ExprId),
+    Binding(LocalBinding<'db>),
     Unknown,
 }
 
@@ -589,6 +590,7 @@ pub enum EffectPassMode {
     ByPlace,
     /// The provided effect is an rvalue; materialize it into a block-scoped temp place.
     ByTempPlace,
+    ByValue,
     Unknown,
 }
 

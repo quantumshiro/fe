@@ -214,19 +214,18 @@ impl<'db> TyCheckEnv<'db> {
             let binding_ident = effect
                 .name(self.db)
                 .or_else(|| key_path.ident(self.db).to_opt());
-            let binding = binding_ident.map(|ident| {
-                let binding = LocalBinding::EffectParam {
-                    site: EffectParamSite::Func(func),
-                    idx,
-                    key_path,
-                    is_mut: effect.is_mut(self.db),
-                };
+            let binding = LocalBinding::EffectParam {
+                site: EffectParamSite::Func(func),
+                idx,
+                key_path,
+                is_mut: effect.is_mut(self.db),
+            };
+            if let Some(ident) = binding_ident {
                 self.var_env
                     .last_mut()
                     .expect("function scope exists")
                     .register_var(ident, binding);
-                binding
-            });
+            }
 
             let origin = EffectOrigin::Param {
                 site: EffectParamSite::Func(func),
@@ -237,7 +236,7 @@ impl<'db> TyCheckEnv<'db> {
                 origin,
                 ty: provided_ty,
                 is_mut: effect.is_mut(self.db),
-                binding,
+                binding: Some(binding),
             };
             if let Some(key) =
                 self.effect_key_for_path_in_scope(key_path, func.scope(), base_assumptions)
@@ -299,28 +298,27 @@ impl<'db> TyCheckEnv<'db> {
                     }
                 };
 
-                let binding = binding_ident.map(|ident| {
-                    let binding = if let Some(field_ty) = field_ty {
-                        LocalBinding::Param {
-                            site: ParamSite::EffectField(site),
-                            idx,
-                            ty: field_ty,
-                            is_mut: effect.is_mut,
-                        }
-                    } else {
-                        LocalBinding::EffectParam {
-                            site,
-                            idx,
-                            key_path,
-                            is_mut: effect.is_mut,
-                        }
-                    };
+                let binding = if let Some(field_ty) = field_ty {
+                    LocalBinding::Param {
+                        site: ParamSite::EffectField(site),
+                        idx,
+                        ty: field_ty,
+                        is_mut: effect.is_mut,
+                    }
+                } else {
+                    LocalBinding::EffectParam {
+                        site,
+                        idx,
+                        key_path,
+                        is_mut: effect.is_mut,
+                    }
+                };
+                if let Some(ident) = binding_ident {
                     self.var_env
                         .last_mut()
                         .expect("scope exists")
                         .register_var(ident, binding);
-                    binding
-                });
+                }
 
                 let origin = EffectOrigin::Param {
                     site,
@@ -331,7 +329,7 @@ impl<'db> TyCheckEnv<'db> {
                     origin,
                     ty: provided_ty,
                     is_mut: effect.is_mut,
-                    binding,
+                    binding: Some(binding),
                 };
                 if let Some(field_ty) = field_ty {
                     // Insert effect keyed by the field's type (e.g., TokenStore)
@@ -519,20 +517,11 @@ impl<'db> TyCheckEnv<'db> {
 
             LocalBinding::Param { ty, .. } => *ty,
 
-            LocalBinding::EffectParam { key_path, .. } => {
-                if let Some(key) = self.effect_key_for_path_in_scope(
-                    *key_path,
-                    self.owner_scope,
-                    self.assumptions(),
-                ) {
-                    self.effect_env
-                        .lookup(key)
-                        .map(|binding| binding.ty)
-                        .unwrap_or_else(|| TyId::invalid(self.db, InvalidCause::Other))
-                } else {
-                    TyId::invalid(self.db, InvalidCause::Other)
-                }
-            }
+            LocalBinding::EffectParam { .. } => self
+                .effect_env
+                .lookup_by_binding(*binding)
+                .map(|binding| binding.ty)
+                .unwrap_or_else(|| TyId::invalid(self.db, InvalidCause::Other)),
         }
     }
 
@@ -589,46 +578,31 @@ impl<'db> TyCheckEnv<'db> {
             .push(arg);
     }
 
-    pub(super) fn effect_candidates_in_scope(
+    pub(super) fn effect_candidate_frames_in_scope(
         &self,
         key_path: PathId<'db>,
         scope: ScopeId<'db>,
         assumptions: PredicateListId<'db>,
-    ) -> SmallVec<[ProvidedEffect<'db>; 2]> {
-        let mut out = SmallVec::new();
+    ) -> Vec<SmallVec<[ProvidedEffect<'db>; 2]>> {
+        let mut frames_out = Vec::new();
         let Some(path_res) = resolve_path(self.db, key_path, scope, assumptions, false).ok() else {
-            return out;
+            return frames_out;
         };
 
-        match path_res {
-            PathRes::Ty(ty) | PathRes::TyAlias(_, ty) => {
-                if let Some(b) = self.effect_env.lookup(EffectKey::Type(ty)) {
-                    out.push(b);
-                    return out;
-                }
-            }
-            PathRes::Trait(tr) => {
-                if let Some(b) = self.effect_env.lookup(EffectKey::Trait(tr)) {
-                    out.push(b);
-                    return out;
-                }
-            }
-            _ => {}
-        }
-
         for frame in self.effect_env.frames.iter().rev() {
+            let mut out = SmallVec::new();
             for (effect_key, provided) in &frame.bindings {
                 match (&path_res, effect_key) {
                     (PathRes::Ty(req) | PathRes::TyAlias(_, req), EffectKey::Type(got)) => {
                         if req.base_ty(self.db).as_scope(self.db)
                             == got.base_ty(self.db).as_scope(self.db)
                         {
-                            out.push(*provided);
+                            out.extend_from_slice(provided);
                         }
                     }
                     (PathRes::Trait(req), EffectKey::Trait(got)) => {
                         if req.def(self.db) == got.def(self.db) {
-                            out.push(*provided);
+                            out.extend_from_slice(provided);
                         }
                     }
                     _ => {}
@@ -640,14 +614,7 @@ impl<'db> TyCheckEnv<'db> {
                     continue;
                 }
                 match &path_res {
-                    PathRes::Ty(req) | PathRes::TyAlias(_, req) => {
-                        if provided.ty.is_ty_var(self.db)
-                            || req.base_ty(self.db).as_scope(self.db)
-                                == provided.ty.base_ty(self.db).as_scope(self.db)
-                        {
-                            out.push(*provided);
-                        }
-                    }
+                    PathRes::Ty(_) | PathRes::TyAlias(_, _) => out.push(*provided),
                     PathRes::Trait(_) => {
                         // Trait satisfaction is checked at the call site so we
                         // can consider type arguments and current assumptions.
@@ -656,11 +623,18 @@ impl<'db> TyCheckEnv<'db> {
                     _ => {}
                 }
             }
+            if out.is_empty() {
+                continue;
+            }
+
+            // Prefer call-site validation over eager deduplication: multiple distinct providers
+            // may share the same type (e.g. two `StorageMap<u256, u256>` effects).
+            let mut seen = rustc_hash::FxHashSet::default();
+            out.retain(|p| seen.insert(*p));
+            frames_out.push(out);
         }
 
-        out.sort_by_key(|p| (p.ty, p.is_mut));
-        out.dedup_by_key(|p| (p.ty, p.is_mut));
-        out
+        frames_out
     }
 
     pub(super) fn enter_scope(&mut self, block: ExprId) {
@@ -1037,7 +1011,7 @@ pub(super) enum EffectKey<'db> {
 
 #[derive(Default)]
 struct EffectFrame<'db> {
-    bindings: FxHashMap<EffectKey<'db>, ProvidedEffect<'db>>,
+    bindings: FxHashMap<EffectKey<'db>, Vec<ProvidedEffect<'db>>>,
     unkeyed: Vec<ProvidedEffect<'db>>,
 }
 
@@ -1067,7 +1041,9 @@ impl<'db> EffectEnv<'db> {
             .last_mut()
             .expect("EffectEnv must always have at least one frame")
             .bindings
-            .insert(key, binding);
+            .entry(key)
+            .or_default()
+            .push(binding);
     }
 
     pub fn insert_unkeyed(&mut self, binding: ProvidedEffect<'db>) {
@@ -1078,11 +1054,20 @@ impl<'db> EffectEnv<'db> {
             .push(binding);
     }
 
-    pub fn lookup(&self, key: EffectKey<'db>) -> Option<ProvidedEffect<'db>> {
-        self.frames
-            .iter()
-            .rev()
-            .find_map(|frame| frame.bindings.get(&key).copied())
+    pub fn lookup_by_binding(&self, binding: LocalBinding<'db>) -> Option<ProvidedEffect<'db>> {
+        for frame in self.frames.iter().rev() {
+            for provided in frame.unkeyed.iter().copied() {
+                if provided.binding == Some(binding) {
+                    return Some(provided);
+                }
+            }
+            for provided in frame.bindings.values().flat_map(|v| v.iter().copied()) {
+                if provided.binding == Some(binding) {
+                    return Some(provided);
+                }
+            }
+        }
+        None
     }
 }
 
