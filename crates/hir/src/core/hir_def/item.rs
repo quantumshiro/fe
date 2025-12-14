@@ -765,6 +765,10 @@ impl<'db> Contract<'db> {
         ScopeId::from_item(self.into())
     }
 
+    pub fn hir_fields(self, db: &'db dyn HirDb) -> FieldDefListId<'db> {
+        self.fields(db)
+    }
+
     pub fn init_func(self, db: &'db dyn HirDb) -> Option<Func<'db>> {
         let s_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
@@ -1408,6 +1412,10 @@ impl<'db> FieldDef<'db> {
             type_ref,
             vis,
         }
+    }
+
+    pub fn type_ref(&self) -> Partial<TypeId<'db>> {
+        self.type_ref
     }
 }
 

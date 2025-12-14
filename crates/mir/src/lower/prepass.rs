@@ -1,6 +1,7 @@
 //! Prepass utilities for MIR lowering: ensures expressions have values and resolves consts.
 
 use super::*;
+use hir::analysis::ty::trait_def::assoc_const_body_for_trait_inst;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
     /// Helper to iterate expressions and conditionally force value lowering.
@@ -199,7 +200,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         scope: ScopeId<'db>,
         visited: &mut FxHashSet<Const<'db>>,
     ) -> Option<ValueId> {
-        let PathRes::Const(const_def, ty) = resolve_path(
+        match resolve_path(
             self.db,
             path,
             scope,
@@ -207,10 +208,44 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             true,
         )
         .ok()?
-        else {
-            return None;
+        {
+            PathRes::Const(const_def, ty) => self.const_literal_from_def(const_def, ty, visited),
+            PathRes::TraitConst(ty, trait_inst, const_name) => {
+                self.trait_const_literal_from_inst(ty, trait_inst, const_name, scope, visited)
+            }
+            _ => None,
+        }
+    }
+
+    fn trait_const_literal_from_inst(
+        &mut self,
+        ty: TyId<'db>,
+        trait_inst: hir::analysis::ty::trait_def::TraitInstId<'db>,
+        const_name: hir::hir_def::IdentId<'db>,
+        scope: ScopeId<'db>,
+        visited: &mut FxHashSet<Const<'db>>,
+    ) -> Option<ValueId> {
+        let ingot = scope.ingot(self.db);
+        let body = assoc_const_body_for_trait_inst(self.db, ingot, trait_inst, const_name)?;
+        let expr_id = body.expr(self.db);
+        let expr = match expr_id.data(self.db, body) {
+            Partial::Present(expr) => expr,
+            Partial::Absent => return None,
         };
-        self.const_literal_from_def(const_def, ty, visited)
+
+        let const_scope = body.scope();
+        match expr {
+            Expr::Lit(LitKind::Int(value)) => Some(
+                self.alloc_synthetic_value(ty, SyntheticValue::Int(value.data(self.db).clone())),
+            ),
+            Expr::Lit(LitKind::Bool(flag)) => {
+                Some(self.alloc_synthetic_value(ty, SyntheticValue::Bool(*flag)))
+            }
+            Expr::Path(path) => path
+                .to_opt()
+                .and_then(|inner| self.const_literal_from_path(inner, const_scope, visited)),
+            _ => None,
+        }
     }
 
     /// Converts a concrete const definition into a MIR literal value.

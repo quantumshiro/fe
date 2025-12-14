@@ -18,6 +18,7 @@ use hir::analysis::{
             EffectParamSite, LocalBinding, ParamSite, RecordLike, TypedBody, check_func_body,
         },
         ty_def::{PrimTy, TyBase, TyData, TyId},
+        ty_lower::lower_opt_hir_ty,
     },
 };
 use hir::hir_def::{
@@ -169,8 +170,14 @@ pub(crate) fn lower_function<'db>(
     };
 
     let effect_provider_kinds_for_func = effect_provider_kinds.clone();
-    let mut builder =
-        MirBuilder::new(db, body, &typed_body, receiver_space, effect_provider_kinds)?;
+    let mut builder = MirBuilder::new(
+        db,
+        func,
+        body,
+        &typed_body,
+        receiver_space,
+        effect_provider_kinds,
+    )?;
     let entry = builder.alloc_block();
     let fallthrough = builder.lower_root(entry, body.expr(db));
     builder.ensure_const_expr_values();
@@ -201,6 +208,7 @@ pub(crate) fn lower_function<'db>(
 /// Stateful helper that incrementally constructs MIR while walking HIR.
 pub(super) struct MirBuilder<'db, 'a> {
     pub(super) db: &'db dyn HirAnalysisDb,
+    pub(super) func: Func<'db>,
     pub(super) body: Body<'db>,
     pub(super) typed_body: &'a TypedBody<'db>,
     pub(super) mir_body: MirBody<'db>,
@@ -233,6 +241,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// A ready-to-use `MirBuilder` or an error if core helpers are missing.
     fn new(
         db: &'db dyn HirAnalysisDb,
+        func: Func<'db>,
         body: Body<'db>,
         typed_body: &'a TypedBody<'db>,
         receiver_space: Option<AddressSpaceKind>,
@@ -242,6 +251,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         let builder = Self {
             db,
+            func,
             body,
             typed_body,
             mir_body: MirBody::new(),

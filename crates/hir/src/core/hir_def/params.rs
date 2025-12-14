@@ -203,15 +203,15 @@ pub enum FuncParamName<'db> {
 }
 
 impl<'db> FuncParamName<'db> {
-    pub fn ident(&self) -> Option<IdentId<'db>> {
-        match self {
-            FuncParamName::Ident(name) => Some(*name),
-            _ => None,
-        }
+    pub fn ident(db: &'db dyn HirDb, name: &str) -> Self {
+        Self::Ident(IdentId::new(db, name))
     }
 
     pub fn is_self(&self, db: &dyn HirDb) -> bool {
-        self.ident().is_some_and(|id| id.is_self(db))
+        match self {
+            FuncParamName::Ident(id) => id.is_self(db),
+            _ => false,
+        }
     }
 
     pub fn pretty_print(&self, db: &dyn HirDb) -> String {

@@ -1,4 +1,33 @@
 use ingot::Result
+use ingot::intrinsic::revert
+use ingot::num::{
+    __i128_as_u256,
+    __i16_as_u256,
+    __i256_as_u256,
+    __i32_as_u256,
+    __i64_as_u256,
+    __i8_as_u256,
+    __isize_as_u256,
+    __u128_as_u256,
+    __u16_as_u256,
+    __u256_as_i128,
+    __u256_as_i16,
+    __u256_as_i256,
+    __u256_as_i32,
+    __u256_as_i64,
+    __u256_as_i8,
+    __u256_as_isize,
+    __u256_as_u128,
+    __u256_as_u16,
+    __u256_as_u32,
+    __u256_as_u64,
+    __u256_as_u8,
+    __u256_as_usize,
+    __u32_as_u256,
+    __u64_as_u256,
+    __u8_as_u256,
+    __usize_as_u256,
+}
 
 /// Errors returned by ABI decoding/encoding helpers.
 pub enum AbiError {
@@ -30,10 +59,11 @@ pub struct Prefix {
 }
 
 pub fn prefix<I: ByteInput>(input: I) -> Prefix {
-    Prefix {
+    let p = Prefix {
         len: input.len(),
         word0: input.word_at(0),
     }
+    p
 }
 
 /// Generic cursor over a `ByteInput`.
@@ -46,14 +76,16 @@ impl<I> Cursor<I>
     where I: ByteInput
 {
     pub fn new(input: I) -> Self {
-        Cursor { input, pos: 0 }
+        let cur = Cursor { input, pos: 0 }
+        cur
     }
 
     pub fn fork(self, pos: u256) -> Self {
-        Cursor {
+        let cur = Cursor {
             input: self.input,
             pos,
         }
+        cur
     }
 
     pub fn read_u8(mut self) -> Result<AbiError, u8> {
@@ -61,7 +93,7 @@ impl<I> Cursor<I>
             return Result::Err(AbiError::InputTooShort)
         }
         let b = self.input.byte_at(self.pos)
-        self.pos += 1
+        self.pos = self.pos + 1
         Result::Ok(b)
     }
 
@@ -70,7 +102,7 @@ impl<I> Cursor<I>
             return Result::Err(AbiError::InputTooShort)
         }
         let w = self.input.word_at(self.pos)
-        self.pos += 32
+        self.pos = self.pos + 32
         Result::Ok(w)
     }
 
@@ -122,11 +154,20 @@ pub trait AbiEncoder<A: Abi> {
 }
 
 pub trait Decode<A: Abi> {
-    fn decode<D: AbiDecoder<A>>(mut d: D) -> Result<AbiError, Self>
+    fn decode<D: AbiDecoder<A>>(mut _: D) -> Result<AbiError, Self>
 }
 
 pub trait Encode<A: Abi> {
-    fn encode<E: AbiEncoder<A>>(self, mut e: E) -> Result<AbiError, ()>
+    fn encode<E: AbiEncoder<A>>(self, mut _: E) -> Result<AbiError, ()>
+}
+
+pub fn decode_or_revert<A: Abi, T, D>(d: D) -> T
+    where T: Decode<A>, D: AbiDecoder<A>
+{
+    match T::decode(d) {
+        Result::Ok(v) => v,
+        Result::Err(_) => revert(0, 0),
+    }
 }
 
 pub struct BytesView<I> {
@@ -149,4 +190,776 @@ impl<I> BytesView<I>
 
 pub struct StringView<I> {
     pub bytes: BytesView<I>,
+}
+
+impl<A: Abi> Decode<A> for u256 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        d.read_word()
+    }
+}
+
+impl<A: Abi> Encode<A> for u256 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(self)
+    }
+}
+
+impl<A: Abi, const N: usize> Decode<A> for String<N> {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        ingot::todo() // xxx
+    }
+}
+
+impl<A: Abi, const N: usize> Encode<A> for String<N> {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        ingot::todo() // xxx
+    }
+}
+
+impl<A: Abi> Decode<A> for bool {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => match word {
+                0 => Result::Ok(false),
+                1 => Result::Ok(true),
+                _ => Result::Err(AbiError::InvalidBool),
+            },
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for bool {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        if self {
+            e.write_word(1)
+        } else {
+            e.write_word(0)
+        }
+    }
+}
+
+impl<A: Abi> Decode<A> for u8 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_u8(word)
+                if word != __u8_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for u8 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__u8_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for u16 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_u16(word)
+                if word != __u16_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for u16 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__u16_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for u32 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_u32(word)
+                if word != __u32_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for u32 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__u32_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for u64 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_u64(word)
+                if word != __u64_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for u64 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__u64_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for u128 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_u128(word)
+                if word != __u128_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for u128 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__u128_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for i8 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_i8(word)
+                if word != __i8_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for i8 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__i8_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for i16 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_i16(word)
+                if word != __i16_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for i16 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__i16_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for i32 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_i32(word)
+                if word != __i32_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for i32 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__i32_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for i64 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_i64(word)
+                if word != __i64_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for i64 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__i64_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for i128 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_i128(word)
+                if word != __i128_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for i128 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__i128_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for i256 {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => Result::Ok(__u256_as_i256(word)),
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for i256 {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__i256_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for usize {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_usize(word)
+                if word != __usize_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for usize {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__usize_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for isize {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => {
+                let v = __u256_as_isize(word)
+                if word != __isize_as_u256(v) {
+                    return Result::Err(AbiError::NonCanonical)
+                }
+                Result::Ok(v)
+            }
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi> Encode<A> for isize {
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        e.write_word(__isize_as_u256(self))
+    }
+}
+
+impl<A: Abi> Decode<A> for () {
+    fn decode<D: AbiDecoder<A>>(_ d: D) -> Result<AbiError, Self> {
+        Result::Ok(())
+    }
+}
+
+impl<A: Abi> Encode<A> for () {
+    fn encode<E: AbiEncoder<A>>(self, _ e: E) -> Result<AbiError, ()> {
+        Result::Ok(())
+    }
+}
+
+impl<A: Abi, T0> Decode<A> for (T0,)
+    where T0: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match T0::decode(d) {
+            Result::Ok(v0) => Result::Ok((v0,)),
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi, T0> Encode<A> for (T0,)
+    where T0: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0,) = self
+        v0.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1> Decode<A> for (T0, T1)
+    where T0: Decode<A>, T1: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match T0::decode(d) {
+            Result::Ok(v0) => match T1::decode(d) {
+                Result::Ok(v1) => Result::Ok((v0, v1)),
+                Result::Err(e) => Result::Err(e),
+            },
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi, T0, T1> Encode<A> for (T0, T1)
+    where T0: Encode<A>, T1: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1) = self
+        match v0.encode(e) {
+            Result::Ok(_) => v1.encode(e),
+            Result::Err(err) => Result::Err(err),
+        }
+    }
+}
+
+impl<A: Abi, T0, T1, T2> Decode<A> for (T0, T1, T2)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match T0::decode(d) {
+            Result::Ok(v0) => match T1::decode(d) {
+                Result::Ok(v1) => match T2::decode(d) {
+                    Result::Ok(v2) => Result::Ok((v0, v1, v2)),
+                    Result::Err(e) => Result::Err(e),
+                },
+                Result::Err(e) => Result::Err(e),
+            },
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi, T0, T1, T2> Encode<A> for (T0, T1, T2)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2) = self
+        match v0.encode(e) {
+            Result::Ok(_) => match v1.encode(e) {
+                Result::Ok(_) => v2.encode(e),
+                Result::Err(err) => Result::Err(err),
+            },
+            Result::Err(err) => Result::Err(err),
+        }
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3> Decode<A> for (T0, T1, T2, T3)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match T0::decode(d) {
+            Result::Ok(v0) => match T1::decode(d) {
+                Result::Ok(v1) => match T2::decode(d) {
+                    Result::Ok(v2) => match T3::decode(d) {
+                        Result::Ok(v3) => Result::Ok((v0, v1, v2, v3)),
+                        Result::Err(e) => Result::Err(e),
+                    },
+                    Result::Err(e) => Result::Err(e),
+                },
+                Result::Err(e) => Result::Err(e),
+            },
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3> Encode<A> for (T0, T1, T2, T3)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3) = self
+        match v0.encode(e) {
+            Result::Ok(_) => match v1.encode(e) {
+                Result::Ok(_) => match v2.encode(e) {
+                    Result::Ok(_) => v3.encode(e),
+                    Result::Err(err) => Result::Err(err),
+                },
+                Result::Err(err) => Result::Err(err),
+            },
+            Result::Err(err) => Result::Err(err),
+        }
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4> Decode<A> for (T0, T1, T2, T3, T4)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) },
+        }
+        let v1 = match T1::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) },
+        }
+        let v2 = match T2::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) },
+        }
+        let v3 = match T3::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) },
+        }
+        let v4 = match T4::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) },
+        }
+        Result::Ok((v0, v1, v2, v3, v4))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4> Encode<A> for (T0, T1, T2, T3, T4)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4) = self
+        match v0.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) },
+        }
+        match v1.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) },
+        }
+        match v2.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) },
+        }
+        match v3.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) },
+        }
+        v4.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5> Decode<A> for (T0, T1, T2, T3, T4, T5)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>, T5: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) }
+        }
+        let v1 = match T1::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) }
+        }
+        let v2 = match T2::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) }
+        }
+        let v3 = match T3::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) }
+        }
+        let v4 = match T4::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) }
+        }
+        let v5 = match T5::decode(d) {
+            Result::Ok(v) => v,
+            Result::Err(e) => { return Result::Err(e) }
+        }
+        Result::Ok((v0, v1, v2, v3, v4, v5))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5> Encode<A> for (T0, T1, T2, T3, T4, T5)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>, T5: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4, v5) = self
+        match v0.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) }
+        }
+        match v1.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) }
+        }
+        match v2.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) }
+        }
+        match v3.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) }
+        }
+        match v4.encode(e) {
+            Result::Ok(_) => (),
+            Result::Err(err) => { return Result::Err(err) }
+        }
+        v5.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6> Decode<A> for (T0, T1, T2, T3, T4, T5, T6)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>, T5: Decode<A>, T6: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v1 = match T1::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v2 = match T2::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v3 = match T3::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v4 = match T4::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v5 = match T5::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v6 = match T6::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        Result::Ok((v0, v1, v2, v3, v4, v5, v6))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6> Encode<A> for (T0, T1, T2, T3, T4, T5, T6)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>, T5: Encode<A>, T6: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4, v5, v6) = self
+        match v0.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v1.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v2.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v3.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v4.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v5.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        v6.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7> Decode<A> for (T0, T1, T2, T3, T4, T5, T6, T7)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>, T5: Decode<A>, T6: Decode<A>, T7: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v1 = match T1::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v2 = match T2::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v3 = match T3::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v4 = match T4::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v5 = match T5::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v6 = match T6::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v7 = match T7::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        Result::Ok((v0, v1, v2, v3, v4, v5, v6, v7))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7> Encode<A> for (T0, T1, T2, T3, T4, T5, T6, T7)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>, T5: Encode<A>, T6: Encode<A>, T7: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4, v5, v6, v7) = self
+        match v0.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v1.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v2.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v3.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v4.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v5.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v6.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        v7.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8> Decode<A> for (T0, T1, T2, T3, T4, T5, T6, T7, T8)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>, T5: Decode<A>, T6: Decode<A>, T7: Decode<A>, T8: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v1 = match T1::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v2 = match T2::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v3 = match T3::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v4 = match T4::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v5 = match T5::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v6 = match T6::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v7 = match T7::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v8 = match T8::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        Result::Ok((v0, v1, v2, v3, v4, v5, v6, v7, v8))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8> Encode<A> for (T0, T1, T2, T3, T4, T5, T6, T7, T8)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>, T5: Encode<A>, T6: Encode<A>, T7: Encode<A>, T8: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4, v5, v6, v7, v8) = self
+        match v0.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v1.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v2.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v3.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v4.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v5.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v6.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v7.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        v8.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9> Decode<A>
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>, T5: Decode<A>, T6: Decode<A>, T7: Decode<A>, T8: Decode<A>, T9: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v1 = match T1::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v2 = match T2::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v3 = match T3::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v4 = match T4::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v5 = match T5::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v6 = match T6::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v7 = match T7::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v8 = match T8::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v9 = match T9::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        Result::Ok((v0, v1, v2, v3, v4, v5, v6, v7, v8, v9))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9> Encode<A>
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>, T5: Encode<A>, T6: Encode<A>, T7: Encode<A>, T8: Encode<A>, T9: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9) = self
+        match v0.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v1.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v2.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v3.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v4.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v5.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v6.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v7.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v8.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        v9.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> Decode<A>
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>, T5: Decode<A>, T6: Decode<A>, T7: Decode<A>, T8: Decode<A>, T9: Decode<A>, T10: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v1 = match T1::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v2 = match T2::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v3 = match T3::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v4 = match T4::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v5 = match T5::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v6 = match T6::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v7 = match T7::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v8 = match T8::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v9 = match T9::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v10 = match T10::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        Result::Ok((v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> Encode<A>
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>, T5: Encode<A>, T6: Encode<A>, T7: Encode<A>, T8: Encode<A>, T9: Encode<A>, T10: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10) = self
+        match v0.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v1.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v2.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v3.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v4.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v5.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v6.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v7.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v8.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v9.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        v10.encode(e)
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11> Decode<A>
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)
+    where T0: Decode<A>, T1: Decode<A>, T2: Decode<A>, T3: Decode<A>, T4: Decode<A>, T5: Decode<A>, T6: Decode<A>, T7: Decode<A>, T8: Decode<A>, T9: Decode<A>, T10: Decode<A>, T11: Decode<A>
+{
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        let v0 = match T0::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v1 = match T1::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v2 = match T2::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v3 = match T3::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v4 = match T4::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v5 = match T5::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v6 = match T6::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v7 = match T7::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v8 = match T8::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v9 = match T9::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v10 = match T10::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        let v11 = match T11::decode(d) { Result::Ok(v) => v, Result::Err(e) => { return Result::Err(e) } }
+        Result::Ok((v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11))
+    }
+}
+
+impl<A: Abi, T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11> Encode<A>
+    for (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)
+    where T0: Encode<A>, T1: Encode<A>, T2: Encode<A>, T3: Encode<A>, T4: Encode<A>, T5: Encode<A>, T6: Encode<A>, T7: Encode<A>, T8: Encode<A>, T9: Encode<A>, T10: Encode<A>, T11: Encode<A>
+{
+    fn encode<E: AbiEncoder<A>>(self, mut _ e: E) -> Result<AbiError, ()> {
+        let (v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11) = self
+        match v0.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v1.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v2.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v3.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v4.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v5.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v6.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v7.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v8.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v9.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        match v10.encode(e) { Result::Ok(_) => (), Result::Err(err) => { return Result::Err(err) } }
+        v11.encode(e)
+    }
 }

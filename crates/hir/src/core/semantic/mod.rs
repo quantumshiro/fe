@@ -73,7 +73,7 @@ use crate::analysis::ty::{
     ty_error::collect_ty_lower_errors,
     ty_lower::{TyAlias, lower_hir_ty, lower_type_alias, lower_type_alias_from_hir},
 };
-use crate::core::adt_lower::lower_adt;
+use crate::core::adt_lower::{lower_adt, lower_contract_fields};
 use common::indexmap::IndexMap;
 use indexmap::IndexSet;
 use salsa::Update;
@@ -98,7 +98,8 @@ pub fn constraints_for<'db>(
     match item {
         ItemKind::Struct(s) => collect_adt_constraints(db, s.as_adt(db)).instantiate_identity(),
         ItemKind::Enum(e) => collect_adt_constraints(db, e.as_adt(db)).instantiate_identity(),
-        ItemKind::Contract(c) => collect_adt_constraints(db, c.as_adt(db)).instantiate_identity(),
+        // Contracts have no generic parameters, so no constraints
+        ItemKind::Contract(_) => PredicateListId::empty_list(db),
         ItemKind::Func(f) => {
             collect_func_def_constraints(db, f.into(), true).instantiate_identity()
         }
@@ -746,6 +747,18 @@ fn matches_adt<'db>(db: &'db dyn HirAnalysisDb, ty: TyId<'db>, adt: AdtDef<'db>)
     }
 }
 
+/// Helper to check if a type's base matches a given contract.
+fn matches_contract<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ty: TyId<'db>,
+    contract: Contract<'db>,
+) -> bool {
+    match ty.base_ty(db).data(db) {
+        TyData::TyBase(TyBase::Contract(c)) => *c == contract,
+        _ => false,
+    }
+}
+
 impl<'db> Enum<'db> {
     pub fn len_variants(&self, db: &'db dyn HirDb) -> usize {
         self.variants_list(db).data(db).len()
@@ -865,32 +878,25 @@ impl<'db> Contract<'db> {
             .collect()
     }
 
-    /// Semantic ADT definition for this contract (cached via tracked query).
-    pub fn as_adt(self, db: &'db dyn HirAnalysisDb) -> AdtDef<'db> {
-        lower_adt(db, AdtRef::from(self))
-    }
-
     /// Returns all inherent `impl` blocks for this contract within the same ingot.
     pub fn all_impls(self, db: &'db dyn HirAnalysisDb) -> Vec<Impl<'db>> {
-        let adt = self.as_adt(db);
         self.top_mod(db)
             .ingot(db)
             .all_impls(db)
             .iter()
             .copied()
-            .filter(|impl_| matches_adt(db, impl_.ty(db), adt))
+            .filter(|impl_| matches_contract(db, impl_.ty(db), self))
             .collect()
     }
 
     /// Returns all `impl Trait for Contract` blocks for this contract within the same ingot.
     pub fn all_impl_traits(self, db: &'db dyn HirAnalysisDb) -> Vec<ImplTrait<'db>> {
-        let adt = self.as_adt(db);
         self.top_mod(db)
             .ingot(db)
             .all_impl_traits(db)
             .iter()
             .copied()
-            .filter(|impl_trait| matches_adt(db, impl_trait.ty(db), adt))
+            .filter(|impl_trait| matches_contract(db, impl_trait.ty(db), self))
             .collect()
     }
 }
@@ -2331,7 +2337,7 @@ impl<'db> FieldView<'db> {
     }
 
     /// Returns the semantic ADT field-set and index for this field.
-    pub fn as_adt_field(self, db: &'db dyn HirAnalysisDb) -> (&'db AdtField<'db>, usize) {
+    pub fn as_adt_field(self, db: &'db dyn HirAnalysisDb) -> (AdtField<'db>, usize) {
         (self.parent.as_adt_fields(db), self.idx)
     }
 
@@ -2462,11 +2468,11 @@ impl<'db> FieldParent<'db> {
     }
 
     /// Semantic field-set for this parent.
-    pub fn as_adt_fields(self, db: &'db dyn HirAnalysisDb) -> &'db AdtField<'db> {
+    pub fn as_adt_fields(self, db: &'db dyn HirAnalysisDb) -> AdtField<'db> {
         match self {
-            FieldParent::Struct(s) => &s.as_adt(db).fields(db)[0],
-            FieldParent::Contract(c) => &c.as_adt(db).fields(db)[0],
-            FieldParent::Variant(v) => v.as_adt_fields(db),
+            FieldParent::Struct(s) => s.as_adt(db).fields(db)[0].clone(),
+            FieldParent::Contract(c) => lower_contract_fields(db, c),
+            FieldParent::Variant(v) => v.as_adt_fields(db).clone(),
         }
     }
 }
@@ -2485,9 +2491,13 @@ impl<'db> TyId<'db> {
     /// Returns the field parent for this type if it's a struct or contract.
     /// This provides access to fields via `field_parent.fields(db)`.
     pub fn field_parent(self, db: &'db dyn HirAnalysisDb) -> Option<FieldParent<'db>> {
+        // Check for contract first
+        if let Some(contract) = self.as_contract(db) {
+            return Some(FieldParent::Contract(contract));
+        }
+        // Check for struct
         match self.adt_ref(db)? {
             AdtRef::Struct(s) => Some(FieldParent::Struct(s)),
-            AdtRef::Contract(c) => Some(FieldParent::Contract(c)),
             AdtRef::Enum(_) => None, // Enums don't have direct field access
         }
     }

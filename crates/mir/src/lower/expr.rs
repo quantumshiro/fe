@@ -4,6 +4,87 @@
 use super::*;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
+    fn u256_lit_from_expr(&self, expr: ExprId) -> Option<BigUint> {
+        match expr.data(self.db, self.body) {
+            Partial::Present(Expr::Lit(LitKind::Int(int_id))) => Some(int_id.data(self.db).clone()),
+            _ => None,
+        }
+    }
+
+    fn ty_storage_slots(&self, ty: TyId<'db>) -> Option<u64> {
+        if ty.is_tuple(self.db) {
+            let mut size = 0u64;
+            for field_ty in ty.field_types(self.db) {
+                size += self.ty_storage_slots(field_ty)?;
+            }
+            return Some(size);
+        }
+
+        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db)
+            && matches!(
+                prim,
+                PrimTy::Bool
+                    | PrimTy::U8
+                    | PrimTy::U16
+                    | PrimTy::U32
+                    | PrimTy::U64
+                    | PrimTy::U128
+                    | PrimTy::U256
+                    | PrimTy::I8
+                    | PrimTy::I16
+                    | PrimTy::I32
+                    | PrimTy::I64
+                    | PrimTy::I128
+                    | PrimTy::I256
+                    | PrimTy::Usize
+                    | PrimTy::Isize
+            )
+        {
+            return Some(1);
+        }
+
+        if let Some(adt_def) = ty.adt_def(self.db)
+            && matches!(adt_def.adt_ref(self.db), AdtRef::Struct(_))
+        {
+            let mut size = 0u64;
+            for field_ty in ty.field_types(self.db) {
+                size += self.ty_storage_slots(field_ty)?;
+            }
+            return Some(size);
+        }
+
+        None
+    }
+
+    fn contract_field_slot_offset(&self, contract_name: &str, field_idx: usize) -> Option<u64> {
+        let top_mod = self.body.top_mod(self.db);
+        let contract = top_mod
+            .all_contracts(self.db)
+            .iter()
+            .copied()
+            .find(|contract| {
+                contract
+                    .name(self.db)
+                    .to_opt()
+                    .is_some_and(|id| id.data(self.db) == contract_name)
+            })?;
+
+        let fields = contract.hir_fields(self.db).data(self.db);
+        if field_idx >= fields.len() {
+            return None;
+        }
+
+        let scope = contract.scope();
+        let assumptions = PredicateListId::empty_list(self.db);
+
+        let mut offset = 0u64;
+        for field in fields.iter().take(field_idx) {
+            let field_ty = lower_opt_hir_ty(self.db, field.type_ref(), scope, assumptions);
+            offset += self.ty_storage_slots(field_ty)?;
+        }
+        Some(offset)
+    }
+
     /// Lowers the body root expression, starting from the provided entry block.
     ///
     /// # Parameters
@@ -171,6 +252,26 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
 
         let ty = self.typed_body.expr_ty(self.db, expr);
+
+        if callable.callable_def.ingot(self.db).kind(self.db) == IngotKind::Core
+            && callable
+                .callable_def
+                .name(self.db)
+                .is_some_and(|name| name.data(self.db) == "contract_field_slot")
+            && let Some(contract_fn) = extract_contract_function(self.db, self.func)
+            && let Some(arg_expr) = arg_exprs.first().copied()
+            && let Some(field_idx) = self.u256_lit_from_expr(arg_expr)
+            && let Some(field_idx) = field_idx.to_usize()
+            && let Some(offset) =
+                self.contract_field_slot_offset(&contract_fn.contract_name, field_idx)
+        {
+            let value_id = self.mir_body.alloc_value(ValueData {
+                ty,
+                origin: ValueOrigin::Synthetic(SyntheticValue::Int(BigUint::from(offset))),
+            });
+            return Some(value_id);
+        }
+
         if let Some(kind) = self.intrinsic_kind(callable.callable_def) {
             if !kind.returns_value() {
                 return None;

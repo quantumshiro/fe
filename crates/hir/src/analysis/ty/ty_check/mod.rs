@@ -286,7 +286,7 @@ impl<'db> TyChecker<'db> {
         ) {
             // Named recv block - resolve within the msg module
             match contract::resolve_variant_in_msg(self.db, msg_mod, variant_path, assumptions) {
-                contract::VariantResolution::Ok(resolved) => resolved,
+                Ok(resolved) => resolved,
                 _ => {
                     // Return invalid types to suppress spurious type mismatch errors
                     // when the pattern doesn't resolve to a valid msg variant
@@ -296,7 +296,7 @@ impl<'db> TyChecker<'db> {
         } else if msg_path.is_none() {
             // Bare recv block - resolve from contract scope
             match contract::resolve_variant_bare(self.db, contract, variant_path, assumptions) {
-                contract::VariantResolution::Ok(resolved) => resolved,
+                Ok(resolved) => resolved,
                 _ => {
                     // Return invalid types to suppress spurious type mismatch errors
                     return (invalid_ty, invalid_ty);
@@ -613,6 +613,56 @@ pub struct TypedBody<'db> {
     param_bindings: Vec<LocalBinding<'db>>,
     /// Bindings for local variables (keyed by the pattern that introduces them)
     pat_bindings: FxHashMap<PatId, LocalBinding<'db>>,
+}
+
+impl<'db> crate::analysis::ty::visitor::TyVisitable<'db> for TypedBody<'db> {
+    fn visit_with<V>(&self, visitor: &mut V)
+    where
+        V: crate::analysis::ty::visitor::TyVisitor<'db> + ?Sized,
+    {
+        for ty in self.pat_ty.values() {
+            ty.visit_with(visitor);
+        }
+        for prop in self.expr_ty.values() {
+            prop.visit_with(visitor);
+        }
+        for callable in self.callables.values() {
+            callable.visit_with(visitor);
+        }
+    }
+}
+
+impl<'db> crate::analysis::ty::fold::TyFoldable<'db> for TypedBody<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: crate::analysis::ty::fold::TyFolder<'db>,
+    {
+        let pat_ty = self
+            .pat_ty
+            .into_iter()
+            .map(|(pat, ty)| (pat, ty.fold_with(db, folder)))
+            .collect();
+        let expr_ty = self
+            .expr_ty
+            .into_iter()
+            .map(|(expr, prop)| (expr, prop.fold_with(db, folder)))
+            .collect();
+        let callables = self
+            .callables
+            .into_iter()
+            .map(|(expr, callable)| (expr, callable.fold_with(db, folder)))
+            .collect();
+
+        Self {
+            body: self.body,
+            pat_ty,
+            expr_ty,
+            callables,
+            call_effect_args: self.call_effect_args,
+            param_bindings: self.param_bindings,
+            pat_bindings: self.pat_bindings,
+        }
+    }
 }
 
 impl<'db> TypedBody<'db> {

@@ -462,6 +462,8 @@ pub enum IntrinsicOp {
     ReturnData,
     /// `codecopy(dest, offset, size)`
     Codecopy,
+    /// `codesize()`
+    Codesize,
     /// `dataoffset` of the code region rooted at a function.
     CodeRegionOffset,
     /// `datasize` of the code region rooted at a function.
@@ -487,6 +489,7 @@ impl IntrinsicOp {
                 | IntrinsicOp::Calldatasize
                 | IntrinsicOp::Returndatasize
                 | IntrinsicOp::AddrOf
+                | IntrinsicOp::Codesize
                 | IntrinsicOp::CodeRegionOffset
                 | IntrinsicOp::CodeRegionLen
                 | IntrinsicOp::Keccak

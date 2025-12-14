@@ -4,10 +4,62 @@ expression: res
 input_file: test_files/ty_check/recv_nested_patterns.fe
 ---
 note: 
+  ┌─ recv_nested_patterns.fe:5:5
+  │  
+5 │ ╭     #[selector = 0x01]
+6 │ │     SetPair { pair: (u64, bool) } -> u64,
+  │ ╰────────────────────────────────────────^ (u64, bool)
+
+note: 
+  ┌─ recv_nested_patterns.fe:7:5
+  │  
+7 │ ╭     #[selector = 0x02]
+8 │ │     SetTriple { triple: (u64, u64, u64) } -> u64,
+  │ ╰────────────────────────────────────────────────^ (u64, u64, u64)
+
+note: 
+   ┌─ recv_nested_patterns.fe:9:5
+   │  
+ 9 │ ╭     #[selector = 0x03]
+10 │ │     SetNested { nested: ((u64, u64), bool) } -> u64,
+   │ ╰───────────────────────────────────────────────────^ ((u64, u64), bool)
+
+note: 
+   ┌─ recv_nested_patterns.fe:11:5
+   │  
+11 │ ╭     #[selector = 0x04]
+12 │ │     Multi { a: (u64, u64), b: (bool, bool) } -> bool,
+   │ ╰────────────────────────────────────────────────────^ (bool, bool)
+
+note: 
+   ┌─ recv_nested_patterns.fe:15:1
+   │  
+15 │ ╭ pub contract TupleContract {
+16 │ │     data: u64,
+17 │ │ 
+18 │ │     recv TupleMsg {
+   · │
+47 │ │     }
+48 │ │ }
+   │ ╰─^ u32
+
+note: 
    ┌─ recv_nested_patterns.fe:20:9
    │
 20 │         SetPair { pair: (first, second) } -> u64 uses () {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetPair
+
+note: 
+   ┌─ recv_nested_patterns.fe:20:9
+   │  
+20 │ ╭         SetPair { pair: (first, second) } -> u64 uses () {
+21 │ │             if second {
+22 │ │                 first
+23 │ │             } else {
+24 │ │                 0
+25 │ │             }
+26 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:20:25
@@ -93,6 +145,14 @@ note:
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetTriple
 
 note: 
+   ┌─ recv_nested_patterns.fe:29:9
+   │  
+29 │ ╭         SetTriple { triple: (a, b, c) } -> u64 uses () {
+30 │ │             a + b + c
+31 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
+
+note: 
    ┌─ recv_nested_patterns.fe:29:29
    │
 29 │         SetTriple { triple: (a, b, c) } -> u64 uses () {
@@ -160,6 +220,18 @@ note:
    │
 34 │         SetNested { nested: ((x, y), flag) } -> u64 uses () {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetNested
+
+note: 
+   ┌─ recv_nested_patterns.fe:34:9
+   │  
+34 │ ╭         SetNested { nested: ((x, y), flag) } -> u64 uses () {
+35 │ │             if flag {
+36 │ │                 x + y
+37 │ │             } else {
+38 │ │                 0
+39 │ │             }
+40 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:34:29
@@ -269,6 +341,15 @@ note:
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Multi
 
 note: 
+   ┌─ recv_nested_patterns.fe:43:9
+   │  
+43 │ ╭         Multi { a: (x, y), b: (p, q) } -> bool uses (mut data) {
+44 │ │             data = x + y
+45 │ │             p && q
+46 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
+
+note: 
    ┌─ recv_nested_patterns.fe:43:20
    │
 43 │         Multi { a: (x, y), b: (p, q) } -> bool uses (mut data) {
@@ -363,10 +444,30 @@ note:
    │                  ^ bool
 
 note: 
+   ┌─ recv_nested_patterns.fe:51:1
+   │  
+51 │ ╭ pub contract WildcardContract {
+52 │ │     data: u64,
+53 │ │ 
+54 │ │     recv TupleMsg {
+   · │
+75 │ │     }
+76 │ │ }
+   │ ╰─^ u32
+
+note: 
    ┌─ recv_nested_patterns.fe:56:9
    │
 56 │         SetPair { pair: (val, _) } -> u64 uses () {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^ SetPair
+
+note: 
+   ┌─ recv_nested_patterns.fe:56:9
+   │  
+56 │ ╭         SetPair { pair: (val, _) } -> u64 uses () {
+57 │ │             val
+58 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:56:25
@@ -406,6 +507,14 @@ note:
    │
 61 │         SetTriple { triple: (first, _, last) } -> u64 uses () {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetTriple
+
+note: 
+   ┌─ recv_nested_patterns.fe:61:9
+   │  
+61 │ ╭         SetTriple { triple: (first, _, last) } -> u64 uses () {
+62 │ │             first + last
+63 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:61:29
@@ -465,6 +574,14 @@ note:
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetNested
 
 note: 
+   ┌─ recv_nested_patterns.fe:66:9
+   │  
+66 │ ╭         SetNested { nested: ((x, _), _) } -> u64 uses () {
+67 │ │             x
+68 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
+
+note: 
    ┌─ recv_nested_patterns.fe:66:29
    │
 66 │         SetNested { nested: ((x, _), _) } -> u64 uses () {
@@ -514,6 +631,15 @@ note:
    │
 71 │         Multi { a: (_, y), b: (p, _) } -> bool uses (mut data) {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Multi
+
+note: 
+   ┌─ recv_nested_patterns.fe:71:9
+   │  
+71 │ ╭         Multi { a: (_, y), b: (p, _) } -> bool uses (mut data) {
+72 │ │             data = y
+73 │ │             p
+74 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:71:20
@@ -586,10 +712,30 @@ note:
    │             ^ bool
 
 note: 
+    ┌─ recv_nested_patterns.fe:79:1
+    │  
+ 79 │ ╭ pub contract RenameContract {
+ 80 │ │     data: u64,
+ 81 │ │ 
+ 82 │ │     recv TupleMsg {
+    · │
+ 99 │ │     }
+100 │ │ }
+    │ ╰─^ u32
+
+note: 
    ┌─ recv_nested_patterns.fe:83:9
    │
 83 │         SetPair { pair: (amount, is_valid) } -> u64 uses () {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetPair
+
+note: 
+   ┌─ recv_nested_patterns.fe:83:9
+   │  
+83 │ ╭         SetPair { pair: (amount, is_valid) } -> u64 uses () {
+84 │ │             if is_valid { amount } else { 0 }
+85 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:83:25
@@ -661,6 +807,14 @@ note:
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetTriple
 
 note: 
+   ┌─ recv_nested_patterns.fe:87:9
+   │  
+87 │ ╭         SetTriple { triple: (x, y, z) } -> u64 uses () {
+88 │ │             x + y + z
+89 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
+
+note: 
    ┌─ recv_nested_patterns.fe:87:29
    │
 87 │         SetTriple { triple: (x, y, z) } -> u64 uses () {
@@ -728,6 +882,14 @@ note:
    │
 91 │         SetNested { nested: ((left, right), enabled) } -> u64 uses () {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ SetNested
+
+note: 
+   ┌─ recv_nested_patterns.fe:91:9
+   │  
+91 │ ╭         SetNested { nested: ((left, right), enabled) } -> u64 uses () {
+92 │ │             if enabled { left + right } else { 0 }
+93 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:91:29
@@ -821,6 +983,15 @@ note:
    │
 95 │         Multi { a: (ax, ay), b: (b1, b2) } -> bool uses (mut data) {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Multi
+
+note: 
+   ┌─ recv_nested_patterns.fe:95:9
+   │  
+95 │ ╭         Multi { a: (ax, ay), b: (b1, b2) } -> bool uses (mut data) {
+96 │ │             data = ax + ay
+97 │ │             b1 || b2
+98 │ │         }
+   │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
    ┌─ recv_nested_patterns.fe:95:20
@@ -917,10 +1088,37 @@ note:
    │                   ^^ bool
 
 note: 
+    ┌─ recv_nested_patterns.fe:108:5
+    │  
+108 │ ╭     #[selector = 0x20]
+109 │ │     TypeMismatch { pair: (u64, u64) } -> u64,
+    │ ╰────────────────────────────────────────────^ (u64, u64)
+
+note: 
+    ┌─ recv_nested_patterns.fe:112:1
+    │  
+112 │ ╭ pub contract ErrorContract {
+113 │ │     data: u64,
+114 │ │ 
+115 │ │     recv ErrorMsg {
+    · │
+120 │ │     }
+121 │ │ }
+    │ ╰─^ u32
+
+note: 
     ┌─ recv_nested_patterns.fe:117:9
     │
 117 │         TypeMismatch { pair: (a, b) } -> u64 uses () {
     │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ TypeMismatch
+
+note: 
+    ┌─ recv_nested_patterns.fe:117:9
+    │  
+117 │ ╭         TypeMismatch { pair: (a, b) } -> u64 uses () {
+118 │ │             a + b
+119 │ │         }
+    │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
     ┌─ recv_nested_patterns.fe:117:30
@@ -968,10 +1166,41 @@ note:
     │                 ^ u64
 
 note: 
+    ┌─ recv_nested_patterns.fe:125:5
+    │  
+125 │ ╭     #[selector = 0x30]
+126 │ │     Deep { nested: (((u64, u64), u64), bool) } -> u64,
+    │ ╰─────────────────────────────────────────────────────^ (((u64, u64), u64), bool)
+
+note: 
+    ┌─ recv_nested_patterns.fe:129:1
+    │  
+129 │ ╭ pub contract DeepContract {
+130 │ │     data: u64,
+131 │ │ 
+132 │ │     recv DeepMsg {
+    · │
+141 │ │     }
+142 │ │ }
+    │ ╰─^ u32
+
+note: 
     ┌─ recv_nested_patterns.fe:134:9
     │
 134 │         Deep { nested: (((a, b), c), flag) } -> u64 uses () {
     │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Deep
+
+note: 
+    ┌─ recv_nested_patterns.fe:134:9
+    │  
+134 │ ╭         Deep { nested: (((a, b), c), flag) } -> u64 uses () {
+135 │ │             if flag {
+136 │ │                 a + b + c
+137 │ │             } else {
+138 │ │                 0
+139 │ │             }
+140 │ │         }
+    │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
     ┌─ recv_nested_patterns.fe:134:24
@@ -1099,10 +1328,30 @@ note:
     │                 ^ u64
 
 note: 
+    ┌─ recv_nested_patterns.fe:145:1
+    │  
+145 │ ╭ pub contract DeepWildcardContract {
+146 │ │     data: u64,
+147 │ │ 
+148 │ │     recv DeepMsg {
+    · │
+152 │ │     }
+153 │ │ }
+    │ ╰─^ u32
+
+note: 
     ┌─ recv_nested_patterns.fe:149:9
     │
 149 │         Deep { nested: (((x, _), _), _) } -> u64 uses () {
     │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Deep
+
+note: 
+    ┌─ recv_nested_patterns.fe:149:9
+    │  
+149 │ ╭         Deep { nested: (((x, _), _), _) } -> u64 uses () {
+150 │ │             x
+151 │ │         }
+    │ ╰─────────^ Result<AbiError, (u256, u256)>
 
 note: 
     ┌─ recv_nested_patterns.fe:149:24

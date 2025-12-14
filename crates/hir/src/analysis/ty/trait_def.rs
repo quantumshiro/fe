@@ -213,6 +213,47 @@ pub(crate) fn impls_for_ty<'db>(
         .collect()
 }
 
+/// Looks up the HIR body for an associated const defined in the selected trait impl, if unique.
+pub fn assoc_const_body_for_trait_inst<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ingot: Ingot<'db>,
+    trait_inst: TraitInstId<'db>,
+    const_name: IdentId<'db>,
+) -> Option<crate::hir_def::Body<'db>> {
+    let mut matches = Vec::new();
+    let canonical_self_ty = Canonical::new(db, trait_inst.self_ty(db));
+    for implementor in impls_for_ty(db, ingot, canonical_self_ty).iter() {
+        let implementor = implementor.skip_binder();
+        if implementor.trait_def(db) != trait_inst.def(db) {
+            continue;
+        }
+
+        if implementor.trait_(db).args(db) != trait_inst.args(db) {
+            continue;
+        }
+
+        let hir_impl = implementor.hir_impl_trait(db);
+        let Some(def) = hir_impl
+            .hir_consts(db)
+            .iter()
+            .find(|c| c.name.to_opt() == Some(const_name))
+        else {
+            continue;
+        };
+
+        let Some(body) = def.value.to_opt() else {
+            continue;
+        };
+
+        matches.push(body);
+        if matches.len() > 1 {
+            return None;
+        }
+    }
+
+    matches.pop()
+}
+
 /// Represents the trait environment of an ingot, which maintain all trait
 /// implementors which can be used in the ingot.
 #[derive(Debug, PartialEq, Eq, Clone, Update)]

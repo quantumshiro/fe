@@ -1089,9 +1089,22 @@ pub fn resolve_name_res<'db>(
         }
         NameResKind::Scope(scope_id) => match scope_id {
             ScopeId::Item(item) => match item {
-                ItemKind::Struct(_) | ItemKind::Contract(_) | ItemKind::Enum(_) => {
+                ItemKind::Struct(_) | ItemKind::Enum(_) => {
                     let adt_ref = AdtRef::try_from_item(item).unwrap();
                     PathRes::Ty(ty_from_adtref(db, path, adt_ref, args, assumptions)?)
+                }
+                ItemKind::Contract(contract) => {
+                    // Contracts have no generic parameters
+                    if !args.is_empty() {
+                        return Err(PathResError::new(
+                            PathResErrorKind::ArgNumMismatch {
+                                expected: 0,
+                                given: args.len(),
+                            },
+                            path,
+                        ));
+                    }
+                    PathRes::Ty(TyId::contract(db, contract))
                 }
 
                 ItemKind::Mod(_) | ItemKind::TopMod(_) => PathRes::Mod(scope_id),

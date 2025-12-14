@@ -256,14 +256,34 @@ impl<'db> Monomorphizer<'db> {
             return Some((idx, symbol));
         }
 
-        let template_idx = self.ensure_template(func, receiver_space, effect_kinds)?;
-        let mut instance = self.templates[template_idx].clone();
-        instance.generic_args = args.to_vec();
-        instance.receiver_space = receiver_space;
-        instance.effect_provider_kinds = effect_kinds.to_vec();
-        instance.symbol_name =
-            self.mangled_name(func, &instance.generic_args, receiver_space, effect_kinds);
-        self.apply_substitution(&mut instance);
+        let symbol_name = self.mangled_name(func, args, receiver_space, effect_kinds);
+
+        let instance = if args.is_empty() {
+            let template_idx = self.ensure_template(func, receiver_space, effect_kinds)?;
+            let mut instance = self.templates[template_idx].clone();
+            instance.receiver_space = receiver_space;
+            instance.effect_provider_kinds = effect_kinds.to_vec();
+            instance.symbol_name = symbol_name.clone();
+            self.apply_substitution(&mut instance);
+            instance
+        } else {
+            let (_diags, typed_body) = check_func_body(self.db, func);
+            let mut folder = ParamSubstFolder { args };
+            let typed_body = typed_body.clone().fold_with(self.db, &mut folder);
+            let mut instance = lower_function(
+                self.db,
+                func,
+                typed_body,
+                receiver_space,
+                effect_kinds.to_vec(),
+            )
+            .ok()?;
+            instance.generic_args = args.to_vec();
+            instance.receiver_space = receiver_space;
+            instance.effect_provider_kinds = effect_kinds.to_vec();
+            instance.symbol_name = symbol_name.clone();
+            instance
+        };
 
         let idx = self.instances.len();
         let symbol = instance.symbol_name.clone();

@@ -1,5 +1,5 @@
 use core::Result
-use core::abi::{Abi, AbiDecoder, AbiEncoder, AbiError, ByteInput, Decode, Encode, Cursor}
+use core::abi::{Abi, AbiDecoder, AbiEncoder, AbiError, ByteInput, Cursor}
 use core::mem
 use core::num::{__u256_as_u32, __u256_as_u8, __u32_as_u256, __u8_as_u256}
 use core::{mstore, mstore8}
@@ -24,16 +24,15 @@ impl<I> SolDecoder<I>
     where I: ByteInput
 {
     pub fn new(input: I) -> Self {
-        SolDecoder {
-            cur: Cursor::new(input),
-            base: 0,
-        }
+        let cur = Cursor::new(input)
+        let d = SolDecoder { cur, base: 0 }
+        d
     }
 
     pub fn with_base(input: I, base: u256) -> Self {
-        let mut cur = Cursor::new(input)
-        cur.pos = base
-        SolDecoder { cur, base }
+        let cur = Cursor::new(input).fork(base)
+        let d = SolDecoder { cur, base }
+        d
     }
 }
 
@@ -87,11 +86,12 @@ pub struct SolEncoder {
 
 impl SolEncoder {
     pub fn new() -> Self {
-        SolEncoder {
+        let e = SolEncoder {
             start: 0,
             pos: 0,
             end: 0,
         }
+        e
     }
 
     fn ensure_init(mut self, bytes: u256) {
@@ -126,7 +126,7 @@ impl AbiEncoder<Sol> for SolEncoder {
             return Result::Err(AbiError::OutOfBounds)
         }
         mstore8(self.pos, v)
-        self.pos += 1
+        self.pos = self.pos + 1
         Result::Ok(())
     }
 
@@ -135,7 +135,7 @@ impl AbiEncoder<Sol> for SolEncoder {
             return Result::Err(AbiError::OutOfBounds)
         }
         mstore(self.pos, v)
-        self.pos += 32
+        self.pos = self.pos + 32
         Result::Ok(())
     }
 
@@ -163,60 +163,11 @@ impl AbiEncoder<Sol> for SolEncoder {
         if ptr != self.end {
             return Result::Err(AbiError::AllocationFailed)
         }
-        self.end += bytes
+        self.end = self.end + bytes
         Result::Ok(ptr)
     }
 
     fn finish(self) -> Result<AbiError, (u256, u256)> {
         Result::Ok((self.start, self.end - self.start))
     }
-}
-
-pub fn decode_u256<D: AbiDecoder<Sol>>(mut dec: D) -> Result<AbiError, u256> {
-    dec.read_word()
-}
-
-pub fn encode_u256<E: AbiEncoder<Sol>>(mut enc: E, v: u256) -> Result<AbiError, ()> {
-    enc.write_word(v)
-}
-
-pub fn decode_bool<D: AbiDecoder<Sol>>(mut dec: D) -> Result<AbiError, bool> {
-    match dec.read_word() {
-        Result::Ok(word) => match word {
-            0 => Result::Ok(false),
-            1 => Result::Ok(true),
-            _ => Result::Err(AbiError::InvalidBool),
-        },
-        Result::Err(e) => Result::Err(e),
-    }
-}
-
-pub fn encode_bool<E: AbiEncoder<Sol>>(mut enc: E, v: bool) -> Result<AbiError, ()> {
-    if v {
-        enc.write_word(1)
-    } else {
-        enc.write_word(0)
-    }
-}
-
-pub fn decode_u32<D: AbiDecoder<Sol>>(mut dec: D) -> Result<AbiError, u32> {
-    match dec.read_word() {
-        Result::Ok(word) => Result::Ok(__u256_as_u32(word)),
-        Result::Err(e) => Result::Err(e),
-    }
-}
-
-pub fn encode_u32<E: AbiEncoder<Sol>>(mut enc: E, v: u32) -> Result<AbiError, ()> {
-    enc.write_word(__u32_as_u256(v))
-}
-
-pub fn decode_u8<D: AbiDecoder<Sol>>(mut dec: D) -> Result<AbiError, u8> {
-    match dec.read_word() {
-        Result::Ok(word) => Result::Ok(__u256_as_u8(word)),
-        Result::Err(e) => Result::Err(e),
-    }
-}
-
-pub fn encode_u8<E: AbiEncoder<Sol>>(mut enc: E, v: u8) -> Result<AbiError, ()> {
-    enc.write_word(__u8_as_u256(v))
 }

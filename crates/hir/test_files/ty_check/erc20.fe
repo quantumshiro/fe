@@ -260,10 +260,21 @@ extern {
     fn assert(_: bool, _: String<64>)
 }
 
+use core::abi::{Abi, AbiDecoder, AbiError, Decode}
+use core::Result
+
 pub struct Address { inner: u256 }
 impl Address {
     pub fn zero() -> Self {
         Address { inner: 0 }
+    }
+}
+impl<A: Abi> Decode<A> for Address {
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
+        match d.read_word() {
+            Result::Ok(word) => Result::Ok(Address { inner: word }),
+            Result::Err(e) => Result::Err(e),
+        }
     }
 }
 impl core::ops::Eq for Address {

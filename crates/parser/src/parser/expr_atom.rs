@@ -270,11 +270,13 @@ impl super::Parse for MatchArmListScope {
             parser.parse(MatchArmScope::default())?;
             parser.set_newline_as_trivia(false);
 
-            // Allow optional comma after match arm, then newline or closing brace
-            parser.bump_if(SyntaxKind::Comma);
-
-            parser.expect(&[SyntaxKind::Newline, SyntaxKind::RBrace], None)?;
-            if !parser.bump_if(SyntaxKind::Newline) {
+            parser.expect(
+                &[SyntaxKind::Comma, SyntaxKind::Newline, SyntaxKind::RBrace],
+                None,
+            )?;
+            let comma = parser.bump_if(SyntaxKind::Comma);
+            let nl = parser.bump_if(SyntaxKind::Newline);
+            if !(comma || nl) {
                 break;
             }
         }

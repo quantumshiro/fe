@@ -641,16 +641,20 @@ impl<'db> TyChecker<'db> {
                         continue;
                     };
 
-                    let mut name_matches =
-                        viable
-                            .iter()
-                            .copied()
-                            .filter(|(provided, ..)| match provided.origin {
+                    let mut name_matches = viable.iter().copied().filter(|(provided, ..)| {
+                        match (provided.origin, provided.binding) {
+                            (
                                 EffectOrigin::Param {
                                     name: Some(name), ..
-                                } => name == required_name,
-                                _ => false,
-                            });
+                                },
+                                _,
+                            ) => name == required_name,
+                            (EffectOrigin::With { .. }, Some(binding)) => {
+                                binding.binding_name(&self.env) == required_name
+                            }
+                            _ => false,
+                        }
+                    });
 
                     if let Some(best) = name_matches.next()
                         && name_matches.next().is_none()

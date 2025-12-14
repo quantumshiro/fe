@@ -363,6 +363,7 @@ impl<'db> FunctionEmitter<'db> {
         let expected = match intr.op {
             IntrinsicOp::Keccak => 2,
             IntrinsicOp::Caller => 0,
+            IntrinsicOp::Codesize => 0,
             IntrinsicOp::Calldatasize | IntrinsicOp::Returndatasize => 0,
             _ => 1,
         };
@@ -498,6 +499,7 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::ReturnData => "return",
             IntrinsicOp::Revert => "revert",
             IntrinsicOp::Codecopy => "codecopy",
+            IntrinsicOp::Codesize => "codesize",
             IntrinsicOp::CodeRegionOffset => "code_region_offset",
             IntrinsicOp::CodeRegionLen => "code_region_len",
             IntrinsicOp::Keccak => "keccak256",

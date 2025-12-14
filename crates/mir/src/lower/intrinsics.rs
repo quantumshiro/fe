@@ -86,6 +86,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             "return_data" => Some(IntrinsicOp::ReturnData),
             "revert" => Some(IntrinsicOp::Revert),
             "codecopy" => Some(IntrinsicOp::Codecopy),
+            "codesize" => Some(IntrinsicOp::Codesize),
             "code_region_offset" => Some(IntrinsicOp::CodeRegionOffset),
             "code_region_len" => Some(IntrinsicOp::CodeRegionLen),
             "keccak" => Some(IntrinsicOp::Keccak),
