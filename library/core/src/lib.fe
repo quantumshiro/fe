@@ -1,6 +1,7 @@
 pub use option::Option
 pub use result::Result
 pub use default::Default
+pub use abi::{self, *}
 pub use dispatcher::Dispatcher
 pub use message::MsgVariant
 pub use ops::{self, *}
@@ -10,6 +11,7 @@ pub use storage_map::{StorageKey, StorageMap}
 pub use intrinsic::{
     calldatacopy,
     calldataload,
+    calldatasize,
     code_region_len,
     code_region_offset,
     codecopy,
@@ -19,6 +21,8 @@ pub use intrinsic::{
     mstore,
     mstore8,
     addr_of,
+    returndatacopy,
+    returndatasize,
     return_data,
     revert,
     caller,

@@ -33,7 +33,7 @@ pub struct CalldataPtr<T> {
 
 impl<T> StorPtr<T> {
     pub fn at_offset(slot: u256) -> Self {
-        let _ = stor_at(slot)
+        let _ = stor_at<T>(slot)
         Self {
             slot
         }

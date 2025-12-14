@@ -1,0 +1,152 @@
+use ingot::Result
+
+/// Errors returned by ABI decoding/encoding helpers.
+pub enum AbiError {
+    InputTooShort,
+    OutOfBounds,
+    InvalidSelector,
+    InvalidOffset,
+    NonCanonical,
+    InvalidBool,
+    InvalidUtf8,
+    LengthOverflow,
+    AllocationFailed,
+}
+
+/// Generic read-only byte input for ABI decoding.
+///
+/// Implementations may return padded values (e.g. EVM calldata loads) so callers
+/// must use `len()` to enforce bounds/canonicality.
+pub trait ByteInput {
+    fn len(self) -> u256
+    fn word_at(self, byte_offset: u256) -> u256
+    fn byte_at(self, byte_offset: u256) -> u8
+}
+
+/// First-word prefix used for fast dispatch.
+pub struct Prefix {
+    pub len: u256,
+    pub word0: u256,
+}
+
+pub fn prefix<I: ByteInput>(input: I) -> Prefix {
+    Prefix {
+        len: input.len(),
+        word0: input.word_at(0),
+    }
+}
+
+/// Generic cursor over a `ByteInput`.
+pub struct Cursor<I> {
+    pub input: I,
+    pub pos: u256,
+}
+
+impl<I> Cursor<I>
+    where I: ByteInput
+{
+    pub fn new(input: I) -> Self {
+        Cursor { input, pos: 0 }
+    }
+
+    pub fn fork(self, pos: u256) -> Self {
+        Cursor {
+            input: self.input,
+            pos,
+        }
+    }
+
+    pub fn read_u8(mut self) -> Result<AbiError, u8> {
+        if self.pos >= self.input.len() {
+            return Result::Err(AbiError::InputTooShort)
+        }
+        let b = self.input.byte_at(self.pos)
+        self.pos += 1
+        Result::Ok(b)
+    }
+
+    pub fn read_word(mut self) -> Result<AbiError, u256> {
+        if self.pos + 32 > self.input.len() {
+            return Result::Err(AbiError::InputTooShort)
+        }
+        let w = self.input.word_at(self.pos)
+        self.pos += 32
+        Result::Ok(w)
+    }
+
+    pub fn peek_word(self, at: u256) -> Result<AbiError, u256> {
+        if at + 32 > self.input.len() {
+            return Result::Err(AbiError::InputTooShort)
+        }
+        Result::Ok(self.input.word_at(at))
+    }
+}
+
+/// ABI definition (selector width/format).
+pub trait Abi {
+    type Selector
+    const SELECTOR_SIZE: u256
+    fn selector_from_prefix(_: u256) -> Self::Selector
+}
+
+/// ABI decoder with cursor state and an allocation hook.
+pub trait AbiDecoder<A: Abi> {
+    type Input: ByteInput
+
+    fn input(self) -> Self::Input
+    fn base(self) -> u256
+    fn pos(self) -> u256
+    fn set_pos(mut self, new_pos: u256) -> Result<AbiError, ()>
+
+    fn read_u8(mut self) -> Result<AbiError, u8>
+    fn read_word(mut self) -> Result<AbiError, u256>
+    fn peek_word(self, at: u256) -> Result<AbiError, u256>
+
+    fn alloc(mut self, size: u256) -> Result<AbiError, u256>
+}
+
+/// ABI encoder with cursor state and dynamic tail allocation.
+pub trait AbiEncoder<A: Abi> {
+    fn base(self) -> u256
+    fn pos(self) -> u256
+    fn set_pos(mut self, new_pos: u256) -> Result<AbiError, ()>
+
+    fn write_u8(mut self, v: u8) -> Result<AbiError, ()>
+    fn write_word(mut self, v: u256) -> Result<AbiError, ()>
+    fn write_word_at(mut self, at: u256, v: u256) -> Result<AbiError, ()>
+
+    fn reserve_head(mut self, bytes: u256) -> Result<AbiError, u256>
+    fn append_tail(mut self, bytes: u256) -> Result<AbiError, u256>
+
+    fn finish(self) -> Result<AbiError, (u256, u256)>
+}
+
+pub trait Decode<A: Abi> {
+    fn decode<D: AbiDecoder<A>>(mut d: D) -> Result<AbiError, Self>
+}
+
+pub trait Encode<A: Abi> {
+    fn encode<E: AbiEncoder<A>>(self, mut e: E) -> Result<AbiError, ()>
+}
+
+pub struct BytesView<I> {
+    pub input: I,
+    pub start: u256,
+    pub len: u256,
+}
+
+impl<I> BytesView<I>
+    where I: ByteInput
+{
+    pub fn byte_at(self, offset: u256) -> u8 {
+        self.input.byte_at(self.start + offset)
+    }
+
+    pub fn word_at(self, offset: u256) -> u256 {
+        self.input.word_at(self.start + offset)
+    }
+}
+
+pub struct StringView<I> {
+    pub bytes: BytesView<I>,
+}

@@ -440,6 +440,14 @@ pub enum IntrinsicOp {
     Mload,
     /// `calldataload(offset)`
     Calldataload,
+    /// `calldatacopy(dest, offset, size)`
+    Calldatacopy,
+    /// `calldatasize()`
+    Calldatasize,
+    /// `returndatacopy(dest, offset, size)`
+    Returndatacopy,
+    /// `returndatasize()`
+    Returndatasize,
     /// `addr_of(ptr)` - returns the address of a pointer value as `u256`.
     AddrOf,
     /// `mstore(address, value)`
@@ -476,6 +484,8 @@ impl IntrinsicOp {
             IntrinsicOp::Mload
                 | IntrinsicOp::Sload
                 | IntrinsicOp::Calldataload
+                | IntrinsicOp::Calldatasize
+                | IntrinsicOp::Returndatasize
                 | IntrinsicOp::AddrOf
                 | IntrinsicOp::CodeRegionOffset
                 | IntrinsicOp::CodeRegionLen

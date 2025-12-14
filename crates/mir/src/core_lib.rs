@@ -55,6 +55,7 @@ macro_rules! define_core_helpers {
         }
 
         /// Core helper types used during MIR lowering.
+        #[allow(clippy::enum_variant_names)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum CoreHelperTy { $($t_variant,)+ }
 

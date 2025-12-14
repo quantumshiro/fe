@@ -5,8 +5,9 @@ use super::{FileLowerCtxt, body::BodyCtxt};
 use crate::{
     hir_def::{
         AttrListId, Body, BodyKind, BodySourceMap, EffectParamListId, Expr, ExprId,
-        FuncParamListId, GenericParamListId, IdentId, LitKind, NodeStore, Partial, Pat, PathId,
-        TraitRefId, TupleTypeId, TypeBound, TypeId, TypeKind, WhereClauseId,
+        FuncParamListId, GenericArg, GenericArgListId, GenericParamListId, IdentId, LitKind,
+        NodeStore, Partial, Pat, PathId, PathKind, TraitRefId, TupleTypeId, TypeBound,
+        TypeGenericArg, TypeId, TypeKind, WhereClauseId,
         attr::{Attr, NormalAttr},
         item::*,
     },
@@ -473,9 +474,32 @@ fn lower_msg_variant_impl<'db>(
     let message = IdentId::new(db, "message".to_string());
     let msg_variant = IdentId::new(db, "MsgVariant".to_string());
 
-    let msg_variant_trait_path = PathId::from_ident(db, root)
-        .push_ident(db, message)
-        .push_ident(db, msg_variant);
+    let std_root = if ingot.kind(db) == IngotKind::Std {
+        IdentId::make_ingot(db)
+    } else {
+        IdentId::new(db, "std".to_string())
+    };
+    let abi = IdentId::new(db, "abi".to_string());
+    let sol = IdentId::new(db, "Sol".to_string());
+    let sol_path = PathId::from_ident(db, std_root)
+        .push_ident(db, abi)
+        .push_ident(db, sol);
+    let sol_ty = TypeId::new(db, TypeKind::Path(Partial::Present(sol_path)));
+    let abi_args = GenericArgListId::new(
+        db,
+        vec![GenericArg::Type(TypeGenericArg {
+            ty: Partial::Present(sol_ty),
+        })],
+        true,
+    );
+
+    let msg_variant_trait_path = PathId::from_ident(db, root).push_ident(db, message).push(
+        db,
+        PathKind::Ident {
+            ident: Partial::Present(msg_variant),
+            generic_args: abi_args,
+        },
+    );
     let trait_ref = TraitRefId::new(db, Partial::Present(msg_variant_trait_path));
 
     // Create a path to Self (the struct we just created)
@@ -496,6 +520,21 @@ fn lower_msg_variant_impl<'db>(
     let generic_params = GenericParamListId::new(db, vec![]);
     let where_clause = WhereClauseId::new(db, vec![]);
 
+    let args_name = IdentId::new(db, "Args".to_string());
+    let args_ty = {
+        let elems = match variant.params() {
+            Some(params) => params
+                .into_iter()
+                .map(|field| TypeId::lower_ast_partial(ctxt, field.ty()))
+                .collect::<Vec<_>>(),
+            None => vec![],
+        };
+        Partial::Present(TypeId::new(
+            db,
+            TypeKind::Tuple(TupleTypeId::new(db, elems)),
+        ))
+    };
+
     // Create associated type Return = <return_type>
     let return_name = IdentId::new(db, "Return".to_string());
     let return_ty = match variant.ret_ty() {
@@ -506,10 +545,16 @@ fn lower_msg_variant_impl<'db>(
             TypeKind::Tuple(TupleTypeId::new(db, vec![])),
         )),
     };
-    let types = vec![AssocTyDef {
-        name: Partial::Present(return_name),
-        type_ref: return_ty,
-    }];
+    let types = vec![
+        AssocTyDef {
+            name: Partial::Present(args_name),
+            type_ref: args_ty,
+        },
+        AssocTyDef {
+            name: Partial::Present(return_name),
+            type_ref: return_ty,
+        },
+    ];
 
     // Create associated const SELECTOR: u32 = <value>
     // Extract from #[selector = ...] attribute, or default to 0 if not specified

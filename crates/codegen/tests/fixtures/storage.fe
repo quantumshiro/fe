@@ -59,6 +59,16 @@ fn balance_of(user: User) -> u256
     }
 }
 
+fn balance_of_raw(_ user: u256) -> u256
+    uses (store: CoinStore)
+{
+    match user {
+        0 => store.alice
+        _ => store.bob
+    }
+}
+
+
 fn total_supply() -> u256
     uses (supply: TotalSupply)
 {
@@ -112,8 +122,8 @@ fn init() {
 
 #[contract_runtime(Coin)]
 fn runtime() {
-    let mut store: CoinStore = core::effect_ref::StorPtr<CoinStore>::at_offset(0)
-    let mut supply: TotalSupply = core::effect_ref::StorPtr<TotalSupply>::at_offset(2)
+    let mut store = core::effect_ref::StorPtr<CoinStore>::at_offset(0)
+    let mut supply = core::effect_ref::StorPtr<TotalSupply>::at_offset(2)
     with (store, supply) {
         let selector = calldataload(0) >> 224
         match selector {
@@ -131,11 +141,7 @@ fn runtime() {
             0x6c65aae5 => {
                 // balance_of(uint256)
                 let who_raw = calldataload(4)
-                let value = match who_raw {
-                    0 => store.alice
-                    1 => store.bob
-                    _ => 0
-                }
+                let value = balance_of_raw(who_raw)
                 abi_encode(value: value)
                 return_data(0, 0)
             }

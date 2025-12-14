@@ -54,17 +54,15 @@ fn init() {
 
 #[contract_runtime(BalanceMap)]
 fn runtime() {
-    let mut balances =
-        core::effect_ref::StorPtr<StorageMap<u256, u256>>::at_offset(0)
-    let mut allowances =
-        core::effect_ref::StorPtr<StorageMap<u256, u256>>::at_offset(1)
+    let mut balances = core::effect_ref::StorPtr<StorageMap<u256, u256>>::at_offset(0)
+    let mut allowances = core::effect_ref::StorPtr<StorageMap<u256, u256>>::at_offset(1)
     let selector = calldataload(0) >> 224
     match selector {
         0x9cc7f708 => {
             // balanceOf(uint256)
             let addr = calldataload(4)
-            with (balances) {
-                let balance = get_balance(addr)
+            let balance = with (balances) {
+                get_balance(addr)
             }
             abi_encode(value: balance)
         }
@@ -82,17 +80,13 @@ fn runtime() {
             let from = calldataload(4)
             let to = calldataload(36)
             let amount = calldataload(68)
-            with (balances) {
-                let result = transfer(from, to, amount)
-            }
+            let result = with (balances) { transfer(from, to, amount) }
             abi_encode(value: result)
         }
         0xc960174e => {
             // getAllowance(uint256)
             let addr = calldataload(4)
-            with (allowances) {
-                let allowance = get_allowance(addr)
-            }
+            let allowance = with (allowances) { get_allowance(addr) }
             abi_encode(value: allowance)
         }
         0x0bca4841 => {

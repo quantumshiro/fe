@@ -363,6 +363,7 @@ impl<'db> FunctionEmitter<'db> {
         let expected = match intr.op {
             IntrinsicOp::Keccak => 2,
             IntrinsicOp::Caller => 0,
+            IntrinsicOp::Calldatasize | IntrinsicOp::Returndatasize => 0,
             _ => 1,
         };
         self.expect_intrinsic_arity(intr.op, &args, expected)?;
@@ -409,6 +410,7 @@ impl<'db> FunctionEmitter<'db> {
         let args = self.lower_intrinsic_args(intr, state)?;
         let expected = match intr.op {
             IntrinsicOp::Codecopy => 3,
+            IntrinsicOp::Calldatacopy | IntrinsicOp::Returndatacopy => 3,
             IntrinsicOp::Mstore | IntrinsicOp::Mstore8 | IntrinsicOp::Sstore => 2,
             IntrinsicOp::ReturnData | IntrinsicOp::Revert => 2,
             IntrinsicOp::Caller => 0,
@@ -422,6 +424,12 @@ impl<'db> FunctionEmitter<'db> {
             IntrinsicOp::ReturnData => format!("return({}, {})", args[0], args[1]),
             IntrinsicOp::Revert => format!("revert({}, {})", args[0], args[1]),
             IntrinsicOp::Codecopy => format!("codecopy({}, {}, {})", args[0], args[1], args[2]),
+            IntrinsicOp::Calldatacopy => {
+                format!("calldatacopy({}, {}, {})", args[0], args[1], args[2])
+            }
+            IntrinsicOp::Returndatacopy => {
+                format!("returndatacopy({}, {}, {})", args[0], args[1], args[2])
+            }
             IntrinsicOp::Caller => String::from("caller()"),
             _ => unreachable!(),
         };
@@ -478,6 +486,10 @@ impl<'db> FunctionEmitter<'db> {
         match op {
             IntrinsicOp::Mload => "mload",
             IntrinsicOp::Calldataload => "calldataload",
+            IntrinsicOp::Calldatacopy => "calldatacopy",
+            IntrinsicOp::Calldatasize => "calldatasize",
+            IntrinsicOp::Returndatacopy => "returndatacopy",
+            IntrinsicOp::Returndatasize => "returndatasize",
             IntrinsicOp::AddrOf => "addr_of",
             IntrinsicOp::Mstore => "mstore",
             IntrinsicOp::Mstore8 => "mstore8",

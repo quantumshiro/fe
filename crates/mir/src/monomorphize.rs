@@ -164,6 +164,7 @@ impl<'db> Monomorphizer<'db> {
     fn resolve_calls(&mut self, func_idx: usize) {
         let call_sites = {
             let function = &self.instances[func_idx];
+            #[allow(clippy::type_complexity)] // TODO: refactor
             let mut sites: Vec<(
                 usize,
                 CallTarget<'db>,
