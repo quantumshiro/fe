@@ -7,7 +7,7 @@ function match_nested_enum(outer) -> ret {
   let v0 := 0
   switch get_discriminant__MemPtr__d0292394fccae3e4(outer)
     case 0 {
-      switch get_discriminant__MemPtr__d0292394fccae3e4(get_variant_field__MemPtr_Inner__c3bdc02ffef57e83(outer, 0))
+      switch get_discriminant__MemPtr__d0292394fccae3e4(mload(add(outer, 32)))
         case 0 {
           v0 := 0
         }
@@ -29,10 +29,6 @@ function match_nested_enum(outer) -> ret {
 }
 function get_discriminant__MemPtr__d0292394fccae3e4(addr) -> ret {
   ret := load__MemPtr__d0292394fccae3e4(addr)
-}
-function get_variant_field__MemPtr_Inner__c3bdc02ffef57e83(addr, field_offset) -> ret {
-  let v0 := add(add(addr, 32), field_offset)
-  ret := from_word__Inner__246339049967f2d0(load__MemPtr__d0292394fccae3e4(v0))
 }
 function load__MemPtr__d0292394fccae3e4(addr) -> ret {
   ret := mload(addr)

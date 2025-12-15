@@ -9,7 +9,7 @@ use crate::core::hir_def::{EnumVariant, IdentId};
 use crate::projection::{Projection as GenericProjection, ProjectionPath as GenericProjectionPath};
 use indexmap::IndexMap;
 
-use std::convert::Infallible;
+use core::convert::Infallible;
 
 /// Type alias for HIR-specific projections.
 ///

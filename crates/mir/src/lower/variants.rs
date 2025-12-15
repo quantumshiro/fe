@@ -1,6 +1,7 @@
 //! Variant lowering helpers for MIR: handles enum constructor calls and unit variant paths.
 
 use super::*;
+use crate::layout;
 use num_bigint::BigUint;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
@@ -54,7 +55,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         for (i, arg_value) in lowered_args.iter().enumerate() {
             let arg_ty = self.typed_body.expr_ty(self.db, call_args[i].expr);
             stores.push((offset, arg_ty, *arg_value));
-            offset += self.ty_size_bytes(arg_ty).unwrap_or(32);
+            offset += layout::ty_size_bytes(self.db, arg_ty).unwrap_or(32);
         }
         let ptr_ty = match self.value_address_space(value_id) {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),

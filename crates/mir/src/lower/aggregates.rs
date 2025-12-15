@@ -2,6 +2,7 @@
 //! synthetic literals used by records and enums.
 
 use super::*;
+use crate::layout;
 use hir::analysis::ty::ty_def::prim_int_bits;
 
 #[derive(Copy, Clone)]
@@ -202,7 +203,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let mut field_offset = 0u64;
         for field_ty in field_types {
             let is_nested_aggregate = field_ty.field_count(self.db) > 0;
-            let field_size = self.ty_size_bytes(field_ty).unwrap_or(32);
+            let field_size = layout::ty_size_bytes(self.db, field_ty).unwrap_or(32);
 
             if is_nested_aggregate {
                 // Recursively handle nested aggregates
@@ -389,11 +390,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return None;
         }
 
-        let mut offset = 0u64;
-        for field_ty in field_types.iter().take(idx) {
-            let size = self.ty_size_bytes(*field_ty)?;
-            offset += size;
-        }
+        let offset = layout::field_offset_bytes(self.db, ty, idx)?;
         Some((field_types[idx], offset))
     }
 
@@ -409,14 +406,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             RecordLike::Type(ty) => *ty,
             RecordLike::EnumVariant(variant) => variant.ty,
         };
-        let field_types = ty.field_types(self.db);
-
-        let mut size = 0u64;
-        for field_ty in field_types {
-            let field_size = self.ty_size_bytes(field_ty)?;
-            size += field_size;
-        }
-        Some(size)
+        layout::ty_size_bytes(self.db, ty)
     }
 
     /// Computes the total byte width of an enum: discriminant plus largest payload.
@@ -440,50 +430,12 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             let mut payload = 0u64;
             for ty in variant.iter_types(self.db) {
                 let field_ty = ty.instantiate(self.db, args);
-                payload += self.ty_size_bytes(field_ty).unwrap_or(32);
+                payload += layout::ty_size_bytes(self.db, field_ty).unwrap_or(32);
             }
             max_payload = max_payload.max(payload);
         }
 
-        Some(super::ENUM_DISCRIMINANT_SIZE_BYTES + max_payload)
-    }
-
-    /// Returns the byte width of primitive integer/bool types we can layout today.
-    ///
-    /// # Parameters
-    /// - `ty`: Type to measure.
-    ///
-    /// # Returns
-    /// Size in bytes when known.
-    pub(super) fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
-        // Handle tuples first (check base type for TyApp cases)
-        if ty.is_tuple(self.db) {
-            let mut size = 0u64;
-            for field_ty in ty.field_types(self.db) {
-                size += self.ty_size_bytes(field_ty)?;
-            }
-            return Some(size);
-        }
-
-        // Handle primitives
-        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db) {
-            if *prim == PrimTy::Bool {
-                return Some(1);
-            }
-            if let Some(bits) = prim_int_bits(*prim) {
-                return Some((bits / 8) as u64);
-            }
-        }
-
-        // Handle ADT types (structs) - use adt_def() which handles TyApp
-        if let Some(adt_def) = ty.adt_def(self.db)
-            && matches!(adt_def.adt_ref(self.db), AdtRef::Struct(_))
-        {
-            let record_like = RecordLike::from_ty(ty);
-            return self.record_size_bytes(&record_like);
-        }
-
-        None
+        Some(layout::DISCRIMINANT_SIZE_BYTES + max_payload)
     }
 
     /// Lowers an assignment to a field target into a `store_field` helper call

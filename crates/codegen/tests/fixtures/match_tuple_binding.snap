@@ -5,13 +5,13 @@ input_file: tests/fixtures/match_tuple_binding.fe
 ---
 function match_tuple_extract(t) -> ret {
   let v0 := 0
-  switch get_field__MemPtr_u8__78f06769553d0434(t, 0)
+  switch and(mload(t), 0xff)
     case 0 {
       let v1 := and(mload(add(t, 1)), 0xff)
       v0 := v1
     }
     default {
-      switch get_field__MemPtr_u8__78f06769553d0434(t, 1)
+      switch and(mload(add(t, 1)), 0xff)
         case 0 {
           let v2 := and(mload(t), 0xff)
           v0 := v2
@@ -27,15 +27,15 @@ function match_tuple_extract(t) -> ret {
 }
 function match_nested_extract(t) -> ret {
   let v0 := 0
-  switch get_field__MemPtr_u8__78f06769553d0434(t, 1)
+  switch and(mload(add(t, 1)), 0xff)
     case 0 {
-      switch get_field__MemPtr_u8__78f06769553d0434(t, 0)
+      switch and(mload(t), 0xff)
         case 0 {
           let v1 := and(mload(add(t, 2)), 0xff)
           v0 := v1
         }
         default {
-          switch get_field__MemPtr_u8__78f06769553d0434(t, 2)
+          switch and(mload(add(t, 2)), 0xff)
             case 0 {
               let v2 := and(mload(add(t, 1)), 0xff)
               let v3 := and(mload(t), 0xff)
@@ -51,7 +51,7 @@ function match_nested_extract(t) -> ret {
       ret := v0
     }
     default {
-      switch get_field__MemPtr_u8__78f06769553d0434(t, 2)
+      switch and(mload(add(t, 2)), 0xff)
         case 0 {
           let v6 := and(mload(add(t, 1)), 0xff)
           let v7 := and(mload(t), 0xff)
@@ -65,14 +65,4 @@ function match_nested_extract(t) -> ret {
       ret := v0
     }
   ret := v0
-}
-function get_field__MemPtr_u8__78f06769553d0434(ptr, offset) -> ret {
-  let v0 := add(ptr, offset)
-  ret := from_word__u8__bc9d6eeaea22ffb5(load__MemPtr__d0292394fccae3e4(v0))
-}
-function load__MemPtr__d0292394fccae3e4(addr) -> ret {
-  ret := mload(addr)
-}
-function from_word__u8__bc9d6eeaea22ffb5(word) -> ret {
-  ret := and(word, 255)
 }

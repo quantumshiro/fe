@@ -10,6 +10,8 @@ use hir::analysis::ty::{
     ty_def::InvalidCause,
 };
 
+use crate::layout;
+
 use super::*;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
@@ -132,7 +134,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             let mut offset: u64 = 0;
             for elem_pat in elem_pats {
                 let elem_ty = self.typed_body.pat_ty(self.db, *elem_pat);
-                let elem_size = self.ty_size_bytes(elem_ty).unwrap_or(32);
+                let elem_size = layout::ty_size_bytes(self.db, elem_ty).unwrap_or(32);
 
                 if let Partial::Present(Pat::Path(elem_path, _)) = elem_pat.data(self.db, self.body)
                     && let Some(elem_path) = elem_path.to_opt()
@@ -496,8 +498,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
     /// Extracts a value from the scrutinee based on a projection path.
     ///
-    /// Handles both Field steps (for tuple/struct access) and VariantField steps
-    /// (for accessing data inside matched enum variants).
+    /// Uses Place with projections - offset computation is deferred to codegen.
+    /// This keeps MIR semantic and enables better analysis.
     fn lower_occurrence(
         &mut self,
         path: &ProjectionPath<'db>,
@@ -505,140 +507,70 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         scrutinee_ty: TyId<'db>,
         match_expr: ExprId,
     ) -> ValueId {
-        // Traverse the projection path, extracting each field in sequence
-        let mut current_value = scrutinee_value;
-        let mut current_ty = scrutinee_ty;
-
-        for step in path.iter() {
-            match step {
-                Projection::Field(field_idx) => {
-                    // Regular field access (tuple/struct)
-                    let record_like = RecordLike::from_ty(current_ty);
-                    let Some((field_ty, offset_bytes)) =
-                        self.field_layout_by_index(&record_like, *field_idx)
-                    else {
-                        break;
-                    };
-
-                    let addr_space = self.value_address_space(current_value);
-                    let is_aggregate = field_ty.field_count(self.db) > 0;
-
-                    if is_aggregate {
-                        if offset_bytes == 0 {
-                            self.value_address_space.insert(current_value, addr_space);
-                        } else {
-                            current_value = self.mir_body.alloc_value(ValueData {
-                                ty: field_ty,
-                                origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
-                                    base: current_value,
-                                    offset_bytes,
-                                }),
-                            });
-                            self.value_address_space.insert(current_value, addr_space);
-                        }
-                    } else {
-                        let ptr_ty = match addr_space {
-                            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-                            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
-                        };
-                        let offset_value = self.synthetic_u256(BigUint::from(offset_bytes));
-                        let callable = self.core.make_callable(
-                            match_expr,
-                            CoreHelper::GetField,
-                            &[ptr_ty, field_ty],
-                        );
-
-                        current_value = self.mir_body.alloc_value(ValueData {
-                            ty: field_ty,
-                            origin: ValueOrigin::Call(CallOrigin {
-                                expr: match_expr,
-                                callable,
-                                args: vec![current_value, offset_value],
-                                receiver_space: None,
-                                resolved_name: None,
-                            }),
-                        });
-                    }
-
-                    current_ty = field_ty;
-                }
-
-                Projection::VariantField {
-                    variant,
-                    enum_ty,
-                    field_idx,
-                } => {
-                    // Variant field access - use GetVariantField
-                    let ctor = ConstructorKind::Variant(*variant, *enum_ty);
-                    let field_types = ctor.field_types(self.db);
-                    let field_ty = field_types
-                        .get(*field_idx)
-                        .copied()
-                        .unwrap_or_else(|| TyId::invalid(self.db, InvalidCause::Other));
-                    let offset_bytes =
-                        self.compute_variant_field_offset_from_types(&field_types, *field_idx);
-
-                    let addr_space = self.value_address_space(current_value);
-                    let is_aggregate = field_ty.field_count(self.db) > 0;
-
-                    if is_aggregate {
-                        // For aggregate variant fields, just compute the offset
-                        if offset_bytes == 0 {
-                            self.value_address_space.insert(current_value, addr_space);
-                        } else {
-                            current_value = self.mir_body.alloc_value(ValueData {
-                                ty: field_ty,
-                                origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
-                                    base: current_value,
-                                    offset_bytes,
-                                }),
-                            });
-                            self.value_address_space.insert(current_value, addr_space);
-                        }
-                    } else {
-                        let ptr_ty = match addr_space {
-                            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-                            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
-                        };
-                        let offset_value = self.synthetic_u256(BigUint::from(offset_bytes));
-                        let callable = self.core.make_callable(
-                            match_expr,
-                            CoreHelper::GetVariantField,
-                            &[ptr_ty, field_ty],
-                        );
-
-                        current_value = self.mir_body.alloc_value(ValueData {
-                            ty: field_ty,
-                            origin: ValueOrigin::Call(CallOrigin {
-                                expr: match_expr,
-                                callable,
-                                args: vec![current_value, offset_value],
-                                receiver_space: None,
-                                resolved_name: None,
-                            }),
-                        });
-                    }
-
-                    current_ty = field_ty;
-                }
-
-                // Index projections use Infallible for the dynamic index type in HIR,
-                // so Dynamic(...) is impossible to construct. Constant index would
-                // require array pattern support which doesn't exist yet.
-                // Use break for error recovery (same as field_layout_by_index failure).
-                Projection::Index(idx_source) => match idx_source {
-                    hir::projection::IndexSource::Constant(_) => break,
-                    hir::projection::IndexSource::Dynamic(infallible) => match *infallible {},
-                },
-                Projection::Deref => break,
+        // Helper to check if a type is an enum
+        fn is_enum_type(db: &dyn HirAnalysisDb, ty: TyId<'_>) -> bool {
+            let (base_ty, _) = ty.decompose_ty_app(db);
+            if let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(db) {
+                matches!(adt_def.adt_ref(db), AdtRef::Enum(_))
+            } else {
+                false
             }
         }
 
+        // Empty path means access the scrutinee directly
+        // But we still need to extract discriminant for enums
+        if path.is_empty() {
+            if !is_enum_type(self.db, scrutinee_ty) {
+                return scrutinee_value;
+            }
+            // Fall through to enum handling below
+            let ptr_ty = match self.value_address_space(scrutinee_value) {
+                AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+                AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+            };
+            let callable =
+                self.core
+                    .make_callable(match_expr, CoreHelper::GetDiscriminant, &[ptr_ty]);
+            let ty = callable.ret_ty(self.db);
+            return self.mir_body.alloc_value(ValueData {
+                ty,
+                origin: ValueOrigin::Call(CallOrigin {
+                    expr: match_expr,
+                    callable,
+                    args: vec![scrutinee_value],
+                    receiver_space: None,
+                    resolved_name: None,
+                }),
+            });
+        }
+
+        // Compute the result type of the projection
+        let result_ty = self.compute_projection_result_type(scrutinee_ty, path);
+        let addr_space = self.value_address_space(scrutinee_value);
+        let is_aggregate = result_ty.field_count(self.db) > 0;
+
+        // Build Place with the full projection path
+        let place = Place {
+            base: scrutinee_value,
+            projection: path.clone(),
+            address_space: addr_space,
+        };
+
+        // Use PlaceRef for aggregates (returns pointer), PlaceLoad for scalars (loads value)
+        let origin = if is_aggregate {
+            ValueOrigin::PlaceRef(place)
+        } else {
+            ValueOrigin::PlaceLoad(place)
+        };
+
+        let current_value = self.mir_body.alloc_value(ValueData {
+            ty: result_ty,
+            origin,
+        });
+        self.value_address_space.insert(current_value, addr_space);
+
         // For enums, extract the discriminant for switching
-        let (base_ty, _) = current_ty.decompose_ty_app(self.db);
-        if let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db)
-            && matches!(adt_def.adt_ref(self.db), AdtRef::Enum(_))
-        {
+        if is_enum_type(self.db, result_ty) {
             let ptr_ty = match self.value_address_space(current_value) {
                 AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
                 AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
@@ -775,21 +707,6 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
 
         current_ty
-    }
-
-    /// Computes the byte offset for a variant's field using pre-computed field types.
-    fn compute_variant_field_offset_from_types(
-        &self,
-        field_types: &[TyId<'db>],
-        field_idx: usize,
-    ) -> u64 {
-        let mut offset = 0u64;
-        for i in 0..field_idx {
-            if let Some(&field_ty) = field_types.get(i) {
-                offset += self.ty_size_bytes(field_ty).unwrap_or(32);
-            }
-        }
-        offset
     }
 
     /// Collects all bindings from decision tree leaves, grouped by arm index.

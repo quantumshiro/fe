@@ -1,16 +1,15 @@
 ---
 source: crates/codegen/tests/yul.rs
-assertion_line: 31
 expression: output
 input_file: tests/fixtures/match_tuple_nested.fe
 ---
 function match_nested_tuple(t) -> ret {
   let v0 := 0
-  switch get_field__MemPtr_bool__f0f4013260504c52(t, 0)
+  switch iszero(eq(mload(t), 0))
     case 1 {
-      switch get_field__MemPtr_bool__f0f4013260504c52(t, 1)
+      switch iszero(eq(mload(add(t, 1)), 0))
         case 1 {
-          switch get_field__MemPtr_bool__f0f4013260504c52(t, 2)
+          switch iszero(eq(mload(add(t, 2)), 0))
             case 1 {
               v0 := 7
             }
@@ -29,7 +28,7 @@ function match_nested_tuple(t) -> ret {
       ret := v0
     }
     case 0 {
-      switch get_field__MemPtr_bool__f0f4013260504c52(t, 2)
+      switch iszero(eq(mload(add(t, 2)), 0))
         case 1 {
           v0 := 2
         }
@@ -46,13 +45,13 @@ function match_nested_tuple(t) -> ret {
 }
 function match_deeply_nested(t) -> ret {
   let v0 := 0
-  switch get_field__MemPtr_bool__f0f4013260504c52(t, 0)
+  switch iszero(eq(mload(t), 0))
     case 1 {
-      switch get_field__MemPtr_bool__f0f4013260504c52(t, 3)
+      switch iszero(eq(mload(add(t, 3)), 0))
         case 1 {
-          switch get_field__MemPtr_bool__f0f4013260504c52(t, 2)
+          switch iszero(eq(mload(add(t, 2)), 0))
             case 1 {
-              switch get_field__MemPtr_bool__f0f4013260504c52(t, 1)
+              switch iszero(eq(mload(add(t, 1)), 0))
                 case 1 {
                   v0 := 15
                 }
@@ -77,14 +76,4 @@ function match_deeply_nested(t) -> ret {
     default {
     }
   ret := v0
-}
-function get_field__MemPtr_bool__f0f4013260504c52(ptr, offset) -> ret {
-  let v0 := add(ptr, offset)
-  ret := from_word__bool__947c0c03c59c6f07(load__MemPtr__d0292394fccae3e4(v0))
-}
-function load__MemPtr__d0292394fccae3e4(addr) -> ret {
-  ret := mload(addr)
-}
-function from_word__bool__947c0c03c59c6f07(word) -> ret {
-  ret := iszero(eq(word, 0))
 }

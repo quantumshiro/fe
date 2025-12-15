@@ -5,9 +5,9 @@ input_file: tests/fixtures/match_struct.fe
 ---
 function match_struct_fields(p) -> ret {
   let v0 := 0
-  switch get_field__MemPtr_u8__78f06769553d0434(p, 1)
+  switch and(mload(add(p, 1)), 0xff)
     case 0 {
-      switch get_field__MemPtr_u8__78f06769553d0434(p, 0)
+      switch and(mload(p), 0xff)
         case 0 {
           v0 := 0
         }
@@ -18,7 +18,7 @@ function match_struct_fields(p) -> ret {
       ret := v0
     }
     default {
-      switch get_field__MemPtr_u8__78f06769553d0434(p, 0)
+      switch and(mload(p), 0xff)
         case 0 {
           let v2 := and(mload(add(p, 1)), 0xff)
           v0 := v2
@@ -34,12 +34,12 @@ function match_struct_fields(p) -> ret {
 }
 function match_struct_wildcard(p) -> ret {
   let v0 := 0
-  switch get_field__MemPtr_u8__78f06769553d0434(p, 0)
+  switch and(mload(p), 0xff)
     case 0 {
       v0 := 1
     }
     default {
-      switch get_field__MemPtr_u8__78f06769553d0434(p, 1)
+      switch and(mload(add(p, 1)), 0xff)
         case 0 {
           v0 := 2
         }
@@ -49,14 +49,4 @@ function match_struct_wildcard(p) -> ret {
       ret := v0
     }
   ret := v0
-}
-function get_field__MemPtr_u8__78f06769553d0434(ptr, offset) -> ret {
-  let v0 := add(ptr, offset)
-  ret := from_word__u8__bc9d6eeaea22ffb5(load__MemPtr__d0292394fccae3e4(v0))
-}
-function load__MemPtr__d0292394fccae3e4(addr) -> ret {
-  ret := mload(addr)
-}
-function from_word__u8__bc9d6eeaea22ffb5(word) -> ret {
-  ret := and(word, 255)
 }

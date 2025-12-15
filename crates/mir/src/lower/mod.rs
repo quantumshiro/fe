@@ -90,8 +90,6 @@ pub(super) struct FieldAccessInfo<'db> {
     pub(super) field_idx: usize,
 }
 
-const ENUM_DISCRIMINANT_SIZE_BYTES: u64 = 32;
-
 /// Lowers every function within the top-level module into MIR.
 ///
 /// # Parameters

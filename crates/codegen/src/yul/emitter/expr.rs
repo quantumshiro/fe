@@ -3,6 +3,7 @@
 use hir::analysis::ty::decision_tree::Projection;
 use hir::analysis::ty::simplified_pattern::ConstructorKind;
 use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId};
+use mir::layout;
 use hir::hir_def::{
     Attr, CallableDef, Expr, ExprId, Func, ItemKind, LitKind, Stmt, StmtId,
     expr::{ArithBinOp, BinOp, CompBinOp, LogicalBinOp, UnOp},
@@ -445,11 +446,18 @@ impl<'db> FunctionEmitter<'db> {
 
     /// Applies the LoadableScalar::from_word conversion for a given type.
     ///
-    /// This mirrors the Fe core library's from_word implementations:
+    /// This mirrors the Fe core library's from_word implementations defined in:
+    /// - `library/core/src/ptr.fe` (LoadableScalar trait)
+    /// - `library/core/src/enum_repr.fe` (enum discriminant handling)
+    ///
+    /// Conversion rules:
     /// - bool: word != 0
     /// - u8/u16/u32/u64/u128: mask to appropriate width
     /// - u256: identity
     /// - i8/i16/i32/i64/i128/i256: sign extension
+    ///
+    /// NOTE: This is a single source of truth for codegen. If the core library
+    /// semantics change, this function must be updated to match.
     fn apply_from_word_conversion(&self, raw_load: &str, ty: TyId<'db>) -> String {
         let base_ty = ty.base_ty(self.db);
         if let TyData::TyBase(TyBase::Prim(prim)) = base_ty.data(self.db) {
@@ -546,7 +554,7 @@ impl<'db> FunctionEmitter<'db> {
                                 field_types.len()
                             ))
                         })?;
-                        total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
+                        total_offset += layout::ty_size_bytes(self.db, *field_ty).unwrap_or(32);
                     }
                     // Update current type to the field's type
                     current_ty = *field_types.get(*field_idx).ok_or_else(|| {
@@ -562,8 +570,8 @@ impl<'db> FunctionEmitter<'db> {
                     enum_ty,
                     field_idx,
                 } => {
-                    // Skip discriminant (32 bytes) then compute field offset
-                    total_offset += 32;
+                    // Skip discriminant then compute field offset
+                    total_offset += layout::DISCRIMINANT_SIZE_BYTES;
                     let ctor = ConstructorKind::Variant(*variant, *enum_ty);
                     let field_types = ctor.field_types(self.db);
                     if field_types.is_empty() {
@@ -576,7 +584,7 @@ impl<'db> FunctionEmitter<'db> {
                         if i >= *field_idx {
                             break;
                         }
-                        total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
+                        total_offset += layout::ty_size_bytes(self.db, *field_ty).unwrap_or(32);
                     }
                     // Update current type to the field's type
                     current_ty = *field_types.get(*field_idx).ok_or_else(|| {
