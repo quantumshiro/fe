@@ -11,10 +11,10 @@
 //! - Structs/tuples pack fields contiguously
 //! - Enums have a 32-byte discriminant followed by payload fields
 
+use crate::analysis::HirAnalysisDb;
 use crate::analysis::ty::adt_def::AdtRef;
 use crate::analysis::ty::simplified_pattern::ConstructorKind;
 use crate::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId, prim_int_bits};
-use crate::analysis::HirAnalysisDb;
 use crate::hir_def::EnumVariant;
 
 /// Size of enum discriminant in bytes.
@@ -24,8 +24,8 @@ pub const DISCRIMINANT_SIZE_BYTES: u64 = 32;
 
 /// Computes the byte size of a type.
 ///
-/// Returns `None` for types with unknown/dynamic size (e.g., unsized types,
-/// unresolved types, enums with variant payloads).
+/// Returns `None` for unsupported types (unsized, unresolved, enums).
+/// For enum sizes, use [`enum_size_bytes`] which handles discriminant + max payload.
 ///
 /// # Supported Types
 /// - Primitives: bool (1), u8-u256/i8-i256 (1-32 bytes)
@@ -114,12 +114,50 @@ pub fn variant_field_offset_bytes(
     Some(offset)
 }
 
+/// Computes the byte size of a variant's payload (sum of field sizes).
+///
+/// # Returns
+/// - `Some(size)` if all field sizes can be computed
+/// - `None` if any field has unknown size
+pub fn variant_payload_size_bytes(
+    db: &dyn HirAnalysisDb,
+    enum_ty: TyId<'_>,
+    variant: EnumVariant<'_>,
+) -> Option<u64> {
+    let ctor = ConstructorKind::Variant(variant, enum_ty);
+    let field_types = ctor.field_types(db);
+
+    let mut size = 0u64;
+    for field_ty in field_types.iter() {
+        size += ty_size_bytes(db, *field_ty)?;
+    }
+    Some(size)
+}
+
+/// Computes the total byte size of an enum (discriminant + max payload).
+///
+/// # Returns
+/// - `Some(size)` if all variant payloads can be computed
+/// - `None` if any variant has unknown field sizes
+pub fn enum_size_bytes(db: &dyn HirAnalysisDb, enum_ty: TyId<'_>) -> Option<u64> {
+    let adt_def = enum_ty.adt_def(db)?;
+    let AdtRef::Enum(enm) = adt_def.adt_ref(db) else {
+        return None;
+    };
+
+    let mut max_payload: u64 = 0;
+    for variant in enm.variants(db) {
+        let ev = EnumVariant::new(enm, variant.idx);
+        let payload = variant_payload_size_bytes(db, enum_ty, ev)?;
+        max_payload = max_payload.max(payload);
+    }
+
+    Some(DISCRIMINANT_SIZE_BYTES + max_payload)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Note: Full integration tests require a database with types.
-    // These would be added as part of the test suite with fixture types.
 
     #[test]
     fn discriminant_size_is_32_bytes() {

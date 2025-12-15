@@ -324,6 +324,7 @@ mod tests {
     use super::*;
 
     // Simple test types - using u32 for all type parameters
+    #[allow(dead_code)]
     type TestProjection = Projection<u32, u32, u32>;
     type TestPath = ProjectionPath<u32, u32, u32>;
 

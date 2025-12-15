@@ -51,7 +51,7 @@ fn format_struct_layout<'db>(db: &'db HirAnalysisTestDb, strct: Struct<'db>) -> 
     let mut total_size: u64 = 0;
     for field_ty_binder in &field_tys {
         let field_ty = *field_ty_binder.skip_binder();
-        total_size += layout::ty_size_bytes(db, field_ty).unwrap_or(0);
+        total_size += layout::ty_size_bytes(db, field_ty).expect("field size known");
     }
     lines.push(format!("  size: {total_size} bytes"));
 
@@ -60,7 +60,7 @@ fn format_struct_layout<'db>(db: &'db HirAnalysisTestDb, strct: Struct<'db>) -> 
     let mut offset: u64 = 0;
     for (idx, field_ty_binder) in field_tys.iter().enumerate() {
         let field_ty = *field_ty_binder.skip_binder();
-        let field_size = layout::ty_size_bytes(db, field_ty).unwrap_or(0);
+        let field_size = layout::ty_size_bytes(db, field_ty).expect("field size known");
 
         lines.push(format!("    [{idx}]: offset={offset}, size={field_size}"));
         offset += field_size;
@@ -86,7 +86,7 @@ fn format_enum_layout<'db>(db: &'db HirAnalysisTestDb, enm: Enum<'db>) -> String
         let mut payload_size: u64 = 0;
         for field_ty_binder in adt_field.iter_types(db) {
             let field_ty = *field_ty_binder.skip_binder();
-            payload_size += layout::ty_size_bytes(db, field_ty).unwrap_or(0);
+            payload_size += layout::ty_size_bytes(db, field_ty).expect("variant field size known");
         }
         max_payload_size = max_payload_size.max(payload_size);
     }
@@ -113,7 +113,8 @@ fn format_enum_layout<'db>(db: &'db HirAnalysisTestDb, enm: Enum<'db>) -> String
             let mut field_offset: u64 = 0;
             for (field_idx, field_ty_binder) in adt_field.iter_types(db).enumerate() {
                 let field_ty = *field_ty_binder.skip_binder();
-                let field_size = layout::ty_size_bytes(db, field_ty).unwrap_or(0);
+                let field_size =
+                    layout::ty_size_bytes(db, field_ty).expect("variant field size known");
 
                 // Absolute offset = discriminant + payload offset
                 let abs_offset = DISCRIMINANT_SIZE_BYTES + field_offset;
