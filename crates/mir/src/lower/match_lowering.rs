@@ -219,8 +219,14 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             .collect();
 
         if patterns.len() != arms.len() {
-            // Some patterns couldn't be resolved - this indicates a malformed AST.
-            // Set scrut_block to unreachable and return no continuation.
+            // Some patterns couldn't be resolved - this indicates a malformed AST
+            // or upstream errors. In a healthy pipeline, we shouldn't reach here.
+            debug_assert!(
+                false,
+                "MIR lowering: {} of {} match arm patterns are Absent",
+                arms.len() - patterns.len(),
+                arms.len()
+            );
             self.set_terminator(scrut_block, Terminator::Unreachable);
             let value = self.ensure_value(match_expr);
             return (None, value);
