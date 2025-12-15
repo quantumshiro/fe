@@ -74,7 +74,7 @@ pub fn ty_size_bytes(db: &dyn HirAnalysisDb, ty: TyId<'_>) -> Option<u64> {
 /// - `None` if field_idx is out of bounds or type has no fields
 pub fn field_offset_bytes(db: &dyn HirAnalysisDb, ty: TyId<'_>, field_idx: usize) -> Option<u64> {
     let field_types = ty.field_types(db);
-    if field_idx > field_types.len() {
+    if field_idx >= field_types.len() {
         return None;
     }
 
@@ -103,7 +103,7 @@ pub fn variant_field_offset_bytes(
     let ctor = ConstructorKind::Variant(variant, enum_ty);
     let field_types = ctor.field_types(db);
 
-    if field_idx > field_types.len() {
+    if field_idx >= field_types.len() {
         return None;
     }
 
