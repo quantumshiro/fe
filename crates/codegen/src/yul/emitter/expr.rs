@@ -554,7 +554,7 @@ impl<'db> FunctionEmitter<'db> {
                                 field_types.len()
                             ))
                         })?;
-                        total_offset += layout::ty_size_bytes(self.db, *field_ty).unwrap_or(32);
+                        total_offset += layout::ty_size_bytes_or_word(self.db, *field_ty);
                     }
                     // Update current type to the field's type
                     current_ty = *field_types.get(*field_idx).ok_or_else(|| {
@@ -584,7 +584,7 @@ impl<'db> FunctionEmitter<'db> {
                         if i >= *field_idx {
                             break;
                         }
-                        total_offset += layout::ty_size_bytes(self.db, *field_ty).unwrap_or(32);
+                        total_offset += layout::ty_size_bytes_or_word(self.db, *field_ty);
                     }
                     // Update current type to the field's type
                     current_ty = *field_types.get(*field_idx).ok_or_else(|| {

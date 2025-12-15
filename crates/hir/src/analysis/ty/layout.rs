@@ -17,10 +17,13 @@ use crate::analysis::ty::simplified_pattern::ConstructorKind;
 use crate::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId, prim_int_bits};
 use crate::hir_def::EnumVariant;
 
+/// Size of an EVM word in bytes (256 bits).
+pub const WORD_SIZE_BYTES: u64 = 32;
+
 /// Size of enum discriminant in bytes.
 ///
 /// All enums use a 256-bit (32-byte) discriminant, matching EVM word size.
-pub const DISCRIMINANT_SIZE_BYTES: u64 = 32;
+pub const DISCRIMINANT_SIZE_BYTES: u64 = WORD_SIZE_BYTES;
 
 /// Computes the byte size of a type.
 ///
@@ -63,6 +66,14 @@ pub fn ty_size_bytes(db: &dyn HirAnalysisDb, ty: TyId<'_>) -> Option<u64> {
     }
 
     None
+}
+
+/// Like [`ty_size_bytes`], but returns [`WORD_SIZE_BYTES`] for unknown types.
+///
+/// This encodes Fe's EVM convention: types with unknown size (enums, pointers,
+/// unresolved types) are stored as 32-byte words.
+pub fn ty_size_bytes_or_word(db: &dyn HirAnalysisDb, ty: TyId<'_>) -> u64 {
+    ty_size_bytes(db, ty).unwrap_or(WORD_SIZE_BYTES)
 }
 
 /// Computes the byte offset to a field within a struct or tuple.
