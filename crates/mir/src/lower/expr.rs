@@ -1,6 +1,8 @@
 //! Expression and statement lowering for MIR: handles blocks, control flow, calls, and dispatches
 //! to specialized lowering helpers.
 
+use hir::analysis::ty::decision_tree::{Projection, ProjectionPath};
+
 use super::*;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
@@ -201,47 +203,28 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let addr_space = self.value_address_space(addr_value);
         let is_aggregate = info.field_ty.field_count(self.db) > 0;
 
-        // For aggregate (struct) fields, emit pointer arithmetic instead of a load
-        if is_aggregate {
-            // Optimization: if offset is 0, reuse the base pointer directly
-            if info.offset_bytes == 0 {
-                // Ensure address space is propagated even when reusing the base pointer
-                self.value_address_space.insert(addr_value, addr_space);
-                return Some(addr_value);
-            }
-            // Emit FieldPtr for non-zero offsets
-            let result = self.mir_body.alloc_value(ValueData {
-                ty: info.field_ty,
-                origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
-                    base: addr_value,
-                    offset_bytes: info.offset_bytes,
-                }),
-            });
-            // Propagate address space to the result
-            self.value_address_space.insert(result, addr_space);
-            return Some(result);
-        }
-
-        // For primitive fields, emit a get_field call to load the value
-        let ptr_ty = match addr_space {
-            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+        // Create Place with single-element projection path
+        let place = Place {
+            base: addr_value,
+            projection: ProjectionPath(vec![Projection::Field(info.field_idx)]),
+            address_space: addr_space,
         };
-        let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
-        let callable =
-            self.core
-                .make_callable(expr, CoreHelper::GetField, &[ptr_ty, info.field_ty]);
 
-        Some(self.mir_body.alloc_value(ValueData {
+        // Use PlaceRef for aggregates (pointer only), PlaceLoad for scalars (load value)
+        let origin = if is_aggregate {
+            ValueOrigin::PlaceRef(place)
+        } else {
+            ValueOrigin::PlaceLoad(place)
+        };
+
+        let result = self.mir_body.alloc_value(ValueData {
             ty: info.field_ty,
-            origin: ValueOrigin::Call(CallOrigin {
-                expr,
-                callable,
-                args: vec![addr_value, offset_value],
-                receiver_space: None,
-                resolved_name: None,
-            }),
-        }))
+            origin,
+        });
+
+        // Propagate address space to the result
+        self.value_address_space.insert(result, addr_space);
+        Some(result)
     }
 
     /// Lowers a statement and returns its continuation and produced value (if any).

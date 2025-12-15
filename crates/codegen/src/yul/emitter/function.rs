@@ -311,7 +311,7 @@ impl<'db> FunctionEmitter<'db> {
     }
 
     /// Best-effort byte size computation for types used as storage effects.
-    fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
+    pub(super) fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
         // Handle tuples first (check base type for TyApp cases)
         if ty.is_tuple(self.db) {
             let mut size = 0u64;

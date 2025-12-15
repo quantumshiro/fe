@@ -363,6 +363,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         Some(FieldAccessInfo {
             field_ty,
             offset_bytes,
+            field_idx: idx,
         })
     }
 

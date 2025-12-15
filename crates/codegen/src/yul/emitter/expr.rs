@@ -1,12 +1,14 @@
 //! Expression and value lowering helpers shared across the Yul emitter.
 
+use hir::analysis::ty::decision_tree::Projection;
+use hir::analysis::ty::simplified_pattern::ConstructorKind;
 use hir::hir_def::{
     Attr, CallableDef, Expr, ExprId, Func, ItemKind, LitKind, Stmt, StmtId,
     expr::{ArithBinOp, BinOp, CompBinOp, LogicalBinOp, UnOp},
 };
 use mir::{
     CallOrigin, ValueId, ValueOrigin,
-    ir::{ContractFunctionKind, FieldPtrOrigin, SyntheticValue},
+    ir::{ContractFunctionKind, FieldPtrOrigin, Place, SyntheticValue},
 };
 
 use crate::yul::{doc::YulDoc, state::BlockState};
@@ -46,6 +48,8 @@ impl<'db> FunctionEmitter<'db> {
             ValueOrigin::Intrinsic(intr) => self.lower_intrinsic_value(intr, state),
             ValueOrigin::Synthetic(synth) => self.lower_synthetic_value(synth),
             ValueOrigin::FieldPtr(field_ptr) => self.lower_field_ptr(field_ptr, state),
+            ValueOrigin::PlaceLoad(place) => self.lower_place_load(place, state),
+            ValueOrigin::PlaceRef(place) => self.lower_place_ref(place, state),
             _ => Err(YulError::Unsupported(
                 "only expression-derived values are supported".into(),
             )),
@@ -81,6 +85,12 @@ impl<'db> FunctionEmitter<'db> {
                 }
                 ValueOrigin::Intrinsic(intr) => {
                     return self.lower_intrinsic_value(intr, state);
+                }
+                ValueOrigin::PlaceLoad(place) => {
+                    return self.lower_place_load(place, state);
+                }
+                ValueOrigin::PlaceRef(place) => {
+                    return self.lower_place_ref(place, state);
                 }
                 // For Expr origins, we just continue to process the expression below
                 // to avoid infinite recursion when expr_values[expr_id] points to Expr(expr_id)
@@ -406,6 +416,98 @@ impl<'db> FunctionEmitter<'db> {
             Ok(base)
         } else {
             Ok(format!("add({}, {})", base, field_ptr.offset_bytes))
+        }
+    }
+
+    /// Lowers a PlaceLoad (load value from a place with projection path).
+    ///
+    /// Walks the projection path to compute the byte offset from the base,
+    /// then emits a load instruction based on the address space.
+    fn lower_place_load(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
+        let addr = self.lower_place_address(place, state)?;
+        match place.address_space {
+            mir::ir::AddressSpaceKind::Memory => Ok(format!("mload({addr})")),
+            mir::ir::AddressSpaceKind::Storage => Ok(format!("sload({addr})")),
+        }
+    }
+
+    /// Lowers a PlaceRef (reference to a place with projection path).
+    ///
+    /// Walks the projection path to compute the byte offset from the base,
+    /// returning the pointer without loading.
+    fn lower_place_ref(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
+        self.lower_place_address(place, state)
+    }
+
+    /// Computes the address for a place by walking the projection path.
+    ///
+    /// Returns a Yul expression representing the memory address.
+    fn lower_place_address(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
+        let base = self.lower_value(place.base, state)?;
+
+        if place.projection.is_empty() {
+            return Ok(base);
+        }
+
+        // Get the base value's type to navigate projections
+        let base_value = self.mir_func.body.value(place.base);
+        let mut current_ty = base_value.ty;
+        let mut total_offset = 0u64;
+
+        for proj in place.projection.iter() {
+            match proj {
+                Projection::Field(field_idx) => {
+                    // Compute offset by summing sizes of fields before this one
+                    let field_types = current_ty.field_types(self.db);
+                    for i in 0..*field_idx {
+                        if let Some(&field_ty) = field_types.get(i) {
+                            total_offset += self.ty_size_bytes(field_ty).unwrap_or(32);
+                        }
+                    }
+                    // Update current type to the field's type
+                    if let Some(&field_ty) = field_types.get(*field_idx) {
+                        current_ty = field_ty;
+                    }
+                }
+                Projection::VariantField {
+                    variant,
+                    enum_ty,
+                    field_idx,
+                } => {
+                    // Skip discriminant (32 bytes) then compute field offset
+                    total_offset += 32;
+                    let ctor = ConstructorKind::Variant(*variant, *enum_ty);
+                    let field_types = ctor.field_types(self.db);
+                    for (i, field_ty) in field_types.iter().enumerate() {
+                        if i >= *field_idx {
+                            break;
+                        }
+                        total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
+                    }
+                    // Update current type to the field's type
+                    if let Some(field_ty) = field_types.get(*field_idx) {
+                        current_ty = *field_ty;
+                    }
+                }
+            }
+        }
+
+        if total_offset == 0 {
+            Ok(base)
+        } else {
+            Ok(format!("add({base}, {total_offset})"))
         }
     }
 }

@@ -30,7 +30,7 @@ use crate::{
         AddressSpaceKind, BasicBlock, BasicBlockId, CallOrigin, CodeRegionRoot, ContractFunction,
         ContractFunctionKind, DecisionTreeBinding, FieldPtrOrigin, IntrinsicOp, IntrinsicValue,
         LoopInfo, MatchArmLowering, MatchArmPattern, MatchLoweringInfo, MirBody, MirFunction,
-        MirInst, MirModule, PatternBinding, SwitchOrigin, SwitchTarget, SwitchValue,
+        MirInst, MirModule, PatternBinding, Place, SwitchOrigin, SwitchTarget, SwitchValue,
         SyntheticValue, Terminator, ValueData, ValueId, ValueOrigin,
     },
     monomorphize::monomorphize_functions,
@@ -87,6 +87,7 @@ pub type MirLowerResult<T> = Result<T, MirLowerError>;
 pub(super) struct FieldAccessInfo<'db> {
     pub(super) field_ty: TyId<'db>,
     pub(super) offset_bytes: u64,
+    pub(super) field_idx: usize,
 }
 
 const ENUM_DISCRIMINANT_SIZE_BYTES: u64 = 32;

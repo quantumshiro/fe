@@ -1,6 +1,5 @@
 ---
 source: crates/codegen/tests/yul.rs
-assertion_line: 31
 expression: output
 input_file: tests/fixtures/match_struct.fe
 ---
@@ -13,7 +12,7 @@ function match_struct_fields(p) -> ret {
           v0 := 0
         }
         default {
-          let v1 := get_field__MemPtr_u8__78f06769553d0434(p, 0)
+          let v1 := mload(p)
           v0 := v1
         }
       ret := v0
@@ -21,12 +20,12 @@ function match_struct_fields(p) -> ret {
     default {
       switch get_field__MemPtr_u8__78f06769553d0434(p, 0)
         case 0 {
-          let v2 := get_field__MemPtr_u8__78f06769553d0434(p, 1)
+          let v2 := mload(add(p, 1))
           v0 := v2
         }
         default {
-          let v3 := get_field__MemPtr_u8__78f06769553d0434(p, 1)
-          let v4 := get_field__MemPtr_u8__78f06769553d0434(p, 0)
+          let v3 := mload(add(p, 1))
+          let v4 := mload(p)
           v0 := add(v4, v3)
         }
       ret := v0

@@ -1,6 +1,5 @@
 ---
 source: crates/codegen/tests/yul.rs
-assertion_line: 31
 expression: output
 input_file: tests/fixtures/match_nested_enum.fe
 ---
@@ -13,7 +12,7 @@ function match_nested_enum(outer) -> ret {
           v0 := 0
         }
         case 1 {
-          let v1 := get_variant_field__MemPtr_u8__78f06769553d0434(get_variant_field__MemPtr_Inner__c3bdc02ffef57e83(outer, 0), 0)
+          let v1 := mload(add(outer, 64))
           v0 := v1
         }
         default {
@@ -21,27 +20,20 @@ function match_nested_enum(outer) -> ret {
       ret := v0
     }
     case 1 {
-      let v2 := get_variant_field__MemPtr_u8__78f06769553d0434(outer, 0)
+      let v2 := mload(add(outer, 32))
       v0 := v2
     }
     default {
     }
   ret := v0
 }
+function get_discriminant__MemPtr__d0292394fccae3e4(addr) -> ret {
+  ret := load__MemPtr__d0292394fccae3e4(addr)
+}
 function get_variant_field__MemPtr_Inner__c3bdc02ffef57e83(addr, field_offset) -> ret {
   let v0 := add(add(addr, 32), field_offset)
   ret := from_word__Inner__246339049967f2d0(load__MemPtr__d0292394fccae3e4(v0))
 }
-function get_variant_field__MemPtr_u8__78f06769553d0434(addr, field_offset) -> ret {
-  let v0 := add(add(addr, 32), field_offset)
-  ret := from_word__u8__bc9d6eeaea22ffb5(load__MemPtr__d0292394fccae3e4(v0))
-}
-function get_discriminant__MemPtr__d0292394fccae3e4(addr) -> ret {
-  ret := load__MemPtr__d0292394fccae3e4(addr)
-}
 function load__MemPtr__d0292394fccae3e4(addr) -> ret {
   ret := mload(addr)
-}
-function from_word__u8__bc9d6eeaea22ffb5(word) -> ret {
-  ret := and(word, 255)
 }

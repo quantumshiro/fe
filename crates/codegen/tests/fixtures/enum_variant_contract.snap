@@ -35,15 +35,8 @@ object "EnumContract" {
           ret := v0
         }
       }
-      function from_word__u256__3271ca15373d4483(word) -> ret {
-        ret := word
-      }
       function get_discriminant__MemPtr__d0292394fccae3e4(addr) -> ret {
         ret := load__MemPtr__d0292394fccae3e4(addr)
-      }
-      function get_variant_field__MemPtr_u256__97fe9178c4597e85(addr, field_offset) -> ret {
-        let v0 := add(add(addr, 32), field_offset)
-        ret := from_word__u256__3271ca15373d4483(load__MemPtr__d0292394fccae3e4(v0))
       }
       function load__MemPtr__d0292394fccae3e4(addr) -> ret {
         ret := mload(addr)
@@ -60,7 +53,7 @@ object "EnumContract" {
           let v5 := 0
           switch get_discriminant__MemPtr__d0292394fccae3e4(v4)
             case 1 {
-              let v6 := get_variant_field__MemPtr_u256__97fe9178c4597e85(v4, 0)
+              let v6 := mload(add(v4, 32))
               v5 := v6
             }
             case 0 {
@@ -81,7 +74,7 @@ object "EnumContract" {
             let v11 := 0
             switch get_discriminant__MemPtr__d0292394fccae3e4(v10)
               case 1 {
-                let v12 := get_variant_field__MemPtr_u256__97fe9178c4597e85(v10, 0)
+                let v12 := mload(add(v10, 32))
                 v11 := v12
               }
               case 0 {
@@ -129,7 +122,10 @@ object "EnumContract" {
       }
       function store_variant_field__MemPtr_u256__97fe9178c4597e85(addr, field_offset, value) {
         let v0 := add(add(addr, 32), field_offset)
-        store__MemPtr__d0292394fccae3e4(v0, from_word__u256__3271ca15373d4483(value))
+        store__MemPtr__d0292394fccae3e4(v0, to_word__deduped(value))
+      }
+      function to_word__deduped(self) -> ret {
+        ret := self
       }
     }
   }

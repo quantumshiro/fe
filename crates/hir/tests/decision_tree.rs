@@ -4,7 +4,7 @@ use std::path::Path;
 use ascii_tree::{Tree, write_tree};
 use dir_test::{Fixture, dir_test};
 use fe_hir::analysis::ty::{
-    decision_tree::{DecisionTree, ProjectionPath, ProjectionStep, build_decision_tree},
+    decision_tree::{DecisionTree, Projection, ProjectionPath, build_decision_tree},
     pattern_analysis::PatternMatrix,
     simplified_pattern::ConstructorKind,
     ty_check::{TypedBody, check_func_body},
@@ -80,13 +80,13 @@ fn render_projection_path<'db>(
         "expr".to_string()
     } else {
         let mut result = "expr".to_string();
-        for step in path.iter() {
+        for proj in path.iter() {
             use std::fmt::Write;
-            match step {
-                ProjectionStep::Field(index) => {
+            match proj {
+                Projection::Field(index) => {
                     write!(&mut result, ".{index}").unwrap();
                 }
-                ProjectionStep::VariantField { variant, field_idx, .. } => {
+                Projection::VariantField { variant, field_idx, .. } => {
                     let variant_name = variant.name(db).unwrap_or("?");
                     write!(&mut result, ".{variant_name}[{field_idx}]").unwrap();
                 }

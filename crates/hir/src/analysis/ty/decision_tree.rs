@@ -49,9 +49,9 @@ pub enum Case<'db> {
     Default,
 }
 
-/// A single step in a projection path.
+/// A single projection operation in a path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ProjectionStep<'db> {
+pub enum Projection<'db> {
     /// Regular field access (tuple/struct field by index)
     Field(usize),
     /// Enum variant field access (requires knowing which variant and enum type)
@@ -63,12 +63,12 @@ pub enum ProjectionStep<'db> {
 }
 
 /// Represents a path to a value in the matched expression via projections.
-/// Each step in the path is either a field access or a variant field access.
+/// Each projection is either a field access or a variant field access.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct ProjectionPath<'db>(pub Vec<ProjectionStep<'db>>);
+pub struct ProjectionPath<'db>(pub Vec<Projection<'db>>);
 
 impl<'db> ProjectionPath<'db> {
-    pub fn iter(&self) -> impl Iterator<Item = &ProjectionStep<'db>> {
+    pub fn iter(&self) -> impl Iterator<Item = &Projection<'db>> {
         self.0.iter()
     }
 
@@ -84,14 +84,14 @@ impl<'db> ProjectionPath<'db> {
                 let mut steps = self.0.clone();
                 let step = match ctor {
                     ConstructorKind::Variant(variant, enum_ty) => {
-                        ProjectionStep::VariantField {
+                        Projection::VariantField {
                             variant,
                             enum_ty,
                             field_idx: i,
                         }
                     }
                     ConstructorKind::Type(_) | ConstructorKind::Literal(_, _) => {
-                        ProjectionStep::Field(i)
+                        Projection::Field(i)
                     }
                 };
                 steps.push(step);
@@ -100,12 +100,12 @@ impl<'db> ProjectionPath<'db> {
             .collect()
     }
 
-    /// Get the last field index if the last step is a Field.
+    /// Get the last field index if the last projection is a Field.
     /// For VariantField, returns the field_idx.
     pub fn last_index(&self) -> Option<usize> {
-        self.0.last().map(|step| match step {
-            ProjectionStep::Field(idx) => *idx,
-            ProjectionStep::VariantField { field_idx, .. } => *field_idx,
+        self.0.last().map(|proj| match proj {
+            Projection::Field(idx) => *idx,
+            Projection::VariantField { field_idx, .. } => *field_idx,
         })
     }
 

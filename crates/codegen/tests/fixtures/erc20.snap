@@ -7,17 +7,13 @@ object "Erc20Contract" {
   code {
     init()
     function erc20_set_owner_once_stor(self, owner) {
-      let v0 := iszero(eq(get_field__StorPtr_u256__2bec36171fad53de(self, 96), 0))
+      let v0 := iszero(eq(sload(add(self, 96)), 0))
       if v0 {
         revert(0, 0)
       }
       if iszero(v0) {
         store_field__StorPtr_u256__2bec36171fad53de(self, 96, owner)
       }
-    }
-    function get_field__StorPtr_u256__2bec36171fad53de(ptr, offset) -> ret {
-      let v0 := add(ptr, offset)
-      ret := to_word__deduped(load__StorPtr__7f7854645e12e266(v0))
     }
     function init() {
       let v0 := 0
@@ -26,9 +22,6 @@ object "Erc20Contract" {
       let v2 := dataoffset("Erc20Contract_deployed")
       codecopy(0, v2, v1)
       return(0, v1)
-    }
-    function load__StorPtr__7f7854645e12e266(addr) -> ret {
-      ret := sload(addr)
     }
     function store__StorPtr__7f7854645e12e266(addr, value) {
       sstore(addr, value)
@@ -70,14 +63,14 @@ object "Erc20Contract" {
         ret := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(self, addr)
       }
       function erc20_mint_stor(self, to, amount) {
-        let v0 := iszero(eq(caller(), get_field__StorPtr_u256__2bec36171fad53de(self, 96)))
+        let v0 := iszero(eq(caller(), sload(add(self, 96))))
         if v0 {
           revert(0, 0)
         }
         if iszero(v0) {
           let v1 := erc20_balance_of_stor(self, to)
           storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(self, to, add(v1, amount))
-          store_field__StorPtr_u256__2bec36171fad53de(self, 64, add(get_field__StorPtr_u256__2bec36171fad53de(self, 64), amount))
+          store_field__StorPtr_u256__2bec36171fad53de(self, 64, add(sload(add(self, 64)), amount))
         }
       }
       function erc20_transfer_from_stor(self, owner, to, amount) {
@@ -103,13 +96,6 @@ object "Erc20Contract" {
           storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(self, from, sub(v0, amount))
           storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(self, to, add(v2, amount))
         }
-      }
-      function get_field__StorPtr_u256__2bec36171fad53de(ptr, offset) -> ret {
-        let v0 := add(ptr, offset)
-        ret := to_word__deduped(load__StorPtr__7f7854645e12e266(v0))
-      }
-      function load__StorPtr__7f7854645e12e266(addr) -> ret {
-        ret := sload(addr)
       }
       function runtime() {
         let v0 := 0

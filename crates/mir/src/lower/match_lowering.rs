@@ -3,7 +3,7 @@
 
 use hir::analysis::ty::{
     decision_tree::{
-        build_decision_tree, Case, DecisionTree, LeafNode, ProjectionPath, ProjectionStep,
+        build_decision_tree, Case, DecisionTree, LeafNode, Projection, ProjectionPath,
         SwitchNode,
     },
     pattern_analysis::PatternMatrix,
@@ -491,7 +491,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         for step in path.iter() {
             match step {
-                ProjectionStep::Field(field_idx) => {
+                Projection::Field(field_idx) => {
                     // Regular field access (tuple/struct)
                     let record_like = RecordLike::from_ty(current_ty);
                     let Some((field_ty, offset_bytes)) =
@@ -543,7 +543,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     current_ty = field_ty;
                 }
 
-                ProjectionStep::VariantField {
+                Projection::VariantField {
                     variant,
                     enum_ty,
                     field_idx,
@@ -650,115 +650,81 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
     /// Extracts a value from the scrutinee for binding purposes.
     ///
-    /// Handles both regular field access (for tuple/struct patterns) and
-    /// variant field access (for enum patterns) using the projection path.
+    /// Creates a Place with the projection path and uses PlaceLoad for scalars
+    /// or PlaceRef for aggregates.
     fn lower_projection_path_for_binding(
         &mut self,
         path: &ProjectionPath<'db>,
         scrutinee_value: ValueId,
         scrutinee_ty: TyId<'db>,
-        match_expr: ExprId,
+        _match_expr: ExprId,
     ) -> ValueId {
-        let mut current_value = scrutinee_value;
-        let mut current_ty = scrutinee_ty;
+        // Empty path means we bind to the scrutinee itself
+        if path.is_empty() {
+            return scrutinee_value;
+        }
 
-        for step in path.iter() {
-            match step {
-                ProjectionStep::Field(field_idx) => {
-                    // Regular field access (tuple/struct)
-                    let record_like = RecordLike::from_ty(current_ty);
-                    let Some((field_ty, offset_bytes)) =
-                        self.field_layout_by_index(&record_like, *field_idx)
-                    else {
-                        break;
-                    };
+        // Compute the final type by walking the projection path
+        let final_ty = self.compute_projection_result_type(scrutinee_ty, path);
+        let is_aggregate = final_ty.field_count(self.db) > 0;
 
-                    let addr_space = self.value_address_space(current_value);
-                    let is_aggregate = field_ty.field_count(self.db) > 0;
+        // Track address space for the result
+        let addr_space = self.value_address_space(scrutinee_value);
 
-                    if is_aggregate {
-                        if offset_bytes == 0 {
-                            self.value_address_space.insert(current_value, addr_space);
-                        } else {
-                            current_value = self.mir_body.alloc_value(ValueData {
-                                ty: field_ty,
-                                origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
-                                    base: current_value,
-                                    offset_bytes,
-                                }),
-                            });
-                            self.value_address_space.insert(current_value, addr_space);
-                        }
-                    } else {
-                        let ptr_ty = match addr_space {
-                            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-                            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
-                        };
-                        let offset_value = self.synthetic_u256(BigUint::from(offset_bytes));
-                        let callable = self.core.make_callable(
-                            match_expr,
-                            CoreHelper::GetField,
-                            &[ptr_ty, field_ty],
-                        );
+        // Create the Place
+        let place = Place {
+            base: scrutinee_value,
+            projection: path.clone(),
+            address_space: addr_space,
+        };
 
-                        current_value = self.mir_body.alloc_value(ValueData {
-                            ty: field_ty,
-                            origin: ValueOrigin::Call(CallOrigin {
-                                expr: match_expr,
-                                callable,
-                                args: vec![current_value, offset_value],
-                                receiver_space: None,
-                                resolved_name: None,
-                            }),
-                        });
+        // Use PlaceRef for aggregates (pointer only), PlaceLoad for scalars (load value)
+        let origin = if is_aggregate {
+            ValueOrigin::PlaceRef(place)
+        } else {
+            ValueOrigin::PlaceLoad(place)
+        };
+
+        let value_id = self.mir_body.alloc_value(ValueData {
+            ty: final_ty,
+            origin,
+        });
+
+        self.value_address_space.insert(value_id, addr_space);
+        value_id
+    }
+
+    /// Computes the result type of applying a projection path to a type.
+    fn compute_projection_result_type(
+        &self,
+        base_ty: TyId<'db>,
+        path: &ProjectionPath<'db>,
+    ) -> TyId<'db> {
+        let mut current_ty = base_ty;
+
+        for proj in path.iter() {
+            match proj {
+                Projection::Field(field_idx) => {
+                    let field_types = current_ty.field_types(self.db);
+                    if let Some(&field_ty) = field_types.get(*field_idx) {
+                        current_ty = field_ty;
                     }
-
-                    current_ty = field_ty;
                 }
-
-                ProjectionStep::VariantField {
+                Projection::VariantField {
                     variant,
                     enum_ty,
                     field_idx,
                 } => {
-                    // Variant field access - use GetVariantField
                     let ctor = ConstructorKind::Variant(*variant, *enum_ty);
                     let field_types = ctor.field_types(self.db);
-                    let field_ty = field_types
-                        .get(*field_idx)
-                        .copied()
-                        .unwrap_or_else(|| TyId::invalid(self.db, InvalidCause::Other));
-                    let offset_bytes = self.compute_variant_field_offset_from_types(&field_types, *field_idx);
-
-                    let addr_space = self.value_address_space(current_value);
-                    let ptr_ty = match addr_space {
-                        AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-                        AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
-                    };
-                    let offset_value = self.synthetic_u256(BigUint::from(offset_bytes));
-                    let callable = self.core.make_callable(
-                        match_expr,
-                        CoreHelper::GetVariantField,
-                        &[ptr_ty, field_ty],
-                    );
-
-                    current_value = self.mir_body.alloc_value(ValueData {
-                        ty: field_ty,
-                        origin: ValueOrigin::Call(CallOrigin {
-                            expr: match_expr,
-                            callable,
-                            args: vec![current_value, offset_value],
-                            receiver_space: None,
-                            resolved_name: None,
-                        }),
-                    });
-
-                    current_ty = field_ty;
+                    if let Some(&field_ty) = field_types.get(*field_idx) {
+                        current_ty = field_ty;
+                    }
                 }
             }
         }
 
-        current_value
+        current_ty
     }
 
     /// Computes the byte offset for a variant's field using pre-computed field types.

@@ -1,5 +1,6 @@
 use std::fmt;
 
+use hir::analysis::ty::decision_tree::ProjectionPath;
 use hir::analysis::ty::ty_check::{Callable, TypedBody};
 use hir::analysis::ty::ty_def::TyId;
 use hir::hir_def::{
@@ -286,6 +287,10 @@ pub enum ValueOrigin<'db> {
     Intrinsic(IntrinsicValue<'db>),
     /// Pointer arithmetic for accessing a nested struct field (no load, just offset).
     FieldPtr(FieldPtrOrigin),
+    /// Load a value from a place (for primitives/scalars).
+    PlaceLoad(Place<'db>),
+    /// Reference to a place (for aggregates - pointer arithmetic only, no load).
+    PlaceRef(Place<'db>),
 }
 
 impl<'db> ValueOrigin<'db> {
@@ -394,6 +399,19 @@ pub struct FieldPtrOrigin {
     pub base: ValueId,
     /// Byte offset to add to the base pointer.
     pub offset_bytes: u64,
+}
+
+/// A place describes a location that can be read from or written to.
+/// Consists of a base value and a projection path describing how to navigate
+/// from the base to the actual location.
+#[derive(Debug, Clone)]
+pub struct Place<'db> {
+    /// The base value (e.g., a local variable, parameter, or allocation).
+    pub base: ValueId,
+    /// Sequence of projections to apply to reach the target location.
+    pub projection: ProjectionPath<'db>,
+    /// Address space where this place resides (memory vs storage).
+    pub address_space: AddressSpaceKind,
 }
 
 #[derive(Debug, Clone)]
