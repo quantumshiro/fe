@@ -180,14 +180,15 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 }
                 Projection::VariantField {
                     variant,
-                    enum_ty: _,
+                    enum_ty,
                     field_idx,
                 } => {
-                    // Include variant index to distinguish different enum variants.
-                    // The enum_ty is not hashed since structurally equivalent code
-                    // operating on different enum types with same layout should match,
-                    // but different variants within the same enum must not be confused.
+                    // Include variant index and enum type identity to distinguish
+                    // operations on different enum types/variants. While structurally
+                    // equivalent code might produce the same Yul, we hash the enum
+                    // type to preserve type system semantics in deduplication.
                     self.write_u8(0x01);
+                    self.write_str(enum_ty.pretty_print(self.db));
                     self.write_usize(variant.idx as usize);
                     self.write_usize(*field_idx);
                 }

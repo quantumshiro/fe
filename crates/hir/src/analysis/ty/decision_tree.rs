@@ -83,13 +83,11 @@ impl<'db> ProjectionPath<'db> {
             .map(|i| {
                 let mut steps = self.0.clone();
                 let step = match ctor {
-                    ConstructorKind::Variant(variant, enum_ty) => {
-                        Projection::VariantField {
-                            variant,
-                            enum_ty,
-                            field_idx: i,
-                        }
-                    }
+                    ConstructorKind::Variant(variant, enum_ty) => Projection::VariantField {
+                        variant,
+                        enum_ty,
+                        field_idx: i,
+                    },
                     ConstructorKind::Type(_) | ConstructorKind::Literal(_, _) => {
                         Projection::Field(i)
                     }
@@ -352,7 +350,10 @@ impl<'db> SimplifiedArm<'db> {
         &self.pat_vec.inner[col]
     }
 
-    fn new_binds(&self, path: &ProjectionPath<'db>) -> IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>> {
+    fn new_binds(
+        &self,
+        path: &ProjectionPath<'db>,
+    ) -> IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>> {
         let mut binds = self.binds.clone();
         if let Some(SimplifiedPatternKind::WildCard(Some(bind))) =
             self.pat_vec.head().map(|pat| &pat.kind)

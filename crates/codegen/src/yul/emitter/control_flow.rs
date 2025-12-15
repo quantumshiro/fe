@@ -332,11 +332,8 @@ impl<'db> FunctionEmitter<'db> {
         ctx.docs.push(YulDoc::line(format!("switch {discr_expr}")));
 
         // Build a map from block ID to arm for looking up arm info from targets.
-        let block_to_arm: FxHashMap<BasicBlockId, &MatchArmLowering> = match_info
-            .arms
-            .iter()
-            .map(|arm| (arm.block, arm))
-            .collect();
+        let block_to_arm: FxHashMap<BasicBlockId, &MatchArmLowering> =
+            match_info.arms.iter().map(|arm| (arm.block, arm)).collect();
 
         let loop_ctx = ctx.loop_ctx;
 
@@ -366,8 +363,12 @@ impl<'db> FunctionEmitter<'db> {
                 )?;
             } else {
                 // Target doesn't map to a direct arm - emit the block (could be nested switch).
-                let block_docs =
-                    self.emit_block_with_stop(target.block, loop_ctx, &mut case_state, merge_block)?;
+                let block_docs = self.emit_block_with_stop(
+                    target.block,
+                    loop_ctx,
+                    &mut case_state,
+                    merge_block,
+                )?;
                 case_docs.extend(block_docs);
             }
 
@@ -393,14 +394,16 @@ impl<'db> FunctionEmitter<'db> {
         // BUT: only do this for enum/literal matches where HIR patterns are meaningful.
         // For tuple/struct matches, all arms are classified as Wildcard, so we can't
         // use this heuristic - instead rely on the decision tree's Default case.
-        let emitted_blocks: std::collections::HashSet<_> = targets.iter().map(|t| t.block).collect();
+        let emitted_blocks: std::collections::HashSet<_> =
+            targets.iter().map(|t| t.block).collect();
         let has_non_wildcard_arms = match_info
             .arms
             .iter()
             .any(|arm| !matches!(arm.pattern, MatchArmPattern::Wildcard));
         let wildcard_arm = if has_non_wildcard_arms {
             match_info.arms.iter().find(|arm| {
-                matches!(arm.pattern, MatchArmPattern::Wildcard) && !emitted_blocks.contains(&arm.block)
+                matches!(arm.pattern, MatchArmPattern::Wildcard)
+                    && !emitted_blocks.contains(&arm.block)
             })
         } else {
             None

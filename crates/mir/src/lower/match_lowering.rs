@@ -3,8 +3,7 @@
 
 use hir::analysis::ty::{
     decision_tree::{
-        build_decision_tree, Case, DecisionTree, LeafNode, Projection, ProjectionPath,
-        SwitchNode,
+        Case, DecisionTree, LeafNode, Projection, ProjectionPath, SwitchNode, build_decision_tree,
     },
     pattern_analysis::PatternMatrix,
     simplified_pattern::ConstructorKind,
@@ -219,11 +218,18 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             .collect();
 
         if patterns.len() != arms.len() {
-            // Some patterns couldn't be resolved - this indicates a malformed AST
-            // or upstream errors. In a healthy pipeline, we shouldn't reach here.
+            // Some patterns couldn't be resolved. This indicates:
+            // 1. Malformed AST from parsing errors, or
+            // 2. Upstream type/name resolution errors that should have emitted diagnostics
+            //
+            // For valid programs, all patterns will be Present. Absent patterns mean the
+            // HIR layer already reported errors, so we produce Unreachable MIR rather than
+            // attempting to lower patterns we can't understand. This prevents cascading
+            // errors from incomplete pattern information.
             debug_assert!(
                 false,
-                "MIR lowering: {} of {} match arm patterns are Absent",
+                "MIR lowering: {} of {} match arm patterns are Absent - \
+                 upstream errors should have been reported",
                 arms.len() - patterns.len(),
                 arms.len()
             );
@@ -232,13 +238,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return (None, value);
         }
 
-        let matrix = PatternMatrix::from_hir_patterns(
-            self.db,
-            &patterns,
-            self.body,
-            scope,
-            scrutinee_ty,
-        );
+        let matrix =
+            PatternMatrix::from_hir_patterns(self.db, &patterns, self.body, scope, scrutinee_ty);
 
         // Build decision tree from pattern matrix
         let tree = build_decision_tree(self.db, &matrix);
@@ -359,19 +360,15 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         merge_block: Option<BasicBlockId>,
     ) -> BasicBlockId {
         match tree {
-            DecisionTree::Leaf(leaf) => {
-                self.lower_leaf_node(leaf, arm_blocks)
-            }
-            DecisionTree::Switch(switch_node) => {
-                self.lower_switch_node(
-                    switch_node,
-                    scrutinee_value,
-                    scrutinee_ty,
-                    arm_blocks,
-                    match_expr,
-                    merge_block,
-                )
-            }
+            DecisionTree::Leaf(leaf) => self.lower_leaf_node(leaf, arm_blocks),
+            DecisionTree::Switch(switch_node) => self.lower_switch_node(
+                switch_node,
+                scrutinee_value,
+                scrutinee_ty,
+                arm_blocks,
+                match_expr,
+                merge_block,
+            ),
         }
     }
 
@@ -400,14 +397,24 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // For Type constructors (tuples/structs), there's no discriminant to switch on.
         // We skip straight to the subtree and let the inner switches handle the actual values.
         let is_structural_only = switch_node.arms.iter().all(|(case, _)| {
-            matches!(case, Case::Constructor(ConstructorKind::Type(_)) | Case::Default)
+            matches!(
+                case,
+                Case::Constructor(ConstructorKind::Type(_)) | Case::Default
+            )
         });
 
         if is_structural_only && !switch_node.arms.is_empty() {
             // Find the structural subtree to descend into
-            let structural_subtree = switch_node.arms.iter()
+            let structural_subtree = switch_node
+                .arms
+                .iter()
                 .find(|(case, _)| matches!(case, Case::Constructor(ConstructorKind::Type(_))))
-                .or_else(|| switch_node.arms.iter().find(|(case, _)| matches!(case, Case::Default)))
+                .or_else(|| {
+                    switch_node
+                        .arms
+                        .iter()
+                        .find(|(case, _)| matches!(case, Case::Default))
+                })
                 .map(|(_, subtree)| subtree);
 
             if let Some(subtree) = structural_subtree {
@@ -426,7 +433,12 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let test_block = self.alloc_block();
 
         // Extract the value to test based on the occurrence path
-        let test_value = self.lower_occurrence(&switch_node.occurrence, scrutinee_value, scrutinee_ty, match_expr);
+        let test_value = self.lower_occurrence(
+            &switch_node.occurrence,
+            scrutinee_value,
+            scrutinee_ty,
+            match_expr,
+        );
 
         // Recursively lower each case
         let mut targets = vec![];
@@ -563,7 +575,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         .get(*field_idx)
                         .copied()
                         .unwrap_or_else(|| TyId::invalid(self.db, InvalidCause::Other));
-                    let offset_bytes = self.compute_variant_field_offset_from_types(&field_types, *field_idx);
+                    let offset_bytes =
+                        self.compute_variant_field_offset_from_types(&field_types, *field_idx);
 
                     let addr_space = self.value_address_space(current_value);
                     let is_aggregate = field_ty.field_count(self.db) > 0;
@@ -620,11 +633,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
                 AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
             };
-            let callable = self.core.make_callable(
-                match_expr,
-                CoreHelper::GetDiscriminant,
-                &[ptr_ty],
-            );
+            let callable =
+                self.core
+                    .make_callable(match_expr, CoreHelper::GetDiscriminant, &[ptr_ty]);
             let ty = callable.ret_ty(self.db);
             return self.mir_body.alloc_value(ValueData {
                 ty,
@@ -644,9 +655,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// Converts a constructor to a switch value for MIR.
     fn constructor_to_switch_value(&self, ctor: &ConstructorKind<'db>) -> Option<SwitchValue> {
         match ctor {
-            ConstructorKind::Variant(variant, _) => {
-                Some(SwitchValue::Enum(variant.idx as u64))
-            }
+            ConstructorKind::Variant(variant, _) => Some(SwitchValue::Enum(variant.idx as u64)),
             ConstructorKind::Literal(lit, _) => match lit {
                 LitKind::Int(value) => Some(SwitchValue::Int(value.data(self.db).clone())),
                 LitKind::Bool(value) => Some(SwitchValue::Bool(*value)),
@@ -745,7 +754,11 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     }
 
     /// Computes the byte offset for a variant's field using pre-computed field types.
-    fn compute_variant_field_offset_from_types(&self, field_types: &[TyId<'db>], field_idx: usize) -> u64 {
+    fn compute_variant_field_offset_from_types(
+        &self,
+        field_types: &[TyId<'db>],
+        field_idx: usize,
+    ) -> u64 {
         let mut offset = 0u64;
         for i in 0..field_idx {
             if let Some(&field_ty) = field_types.get(i) {

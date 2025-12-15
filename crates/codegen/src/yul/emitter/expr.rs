@@ -483,9 +483,7 @@ impl<'db> FunctionEmitter<'db> {
                     format!("signextend(7, and({raw_load}, 0xffffffffffffffff))")
                 }
                 PrimTy::I128 => {
-                    format!(
-                        "signextend(15, and({raw_load}, 0xffffffffffffffffffffffffffffffff))"
-                    )
+                    format!("signextend(15, and({raw_load}, 0xffffffffffffffffffffffffffffffff))")
                 }
                 PrimTy::I256 | PrimTy::Isize => {
                     // Full-width signed doesn't need masking, sign is already there
@@ -506,11 +504,7 @@ impl<'db> FunctionEmitter<'db> {
     ///
     /// Walks the projection path to compute the byte offset from the base,
     /// returning the pointer without loading.
-    fn lower_place_ref(
-        &self,
-        place: &Place<'db>,
-        state: &BlockState,
-    ) -> Result<String, YulError> {
+    fn lower_place_ref(&self, place: &Place<'db>, state: &BlockState) -> Result<String, YulError> {
         self.lower_place_address(place, state)
     }
 
@@ -538,27 +532,30 @@ impl<'db> FunctionEmitter<'db> {
                 Projection::Field(field_idx) => {
                     // Compute offset by summing sizes of fields before this one
                     let field_types = current_ty.field_types(self.db);
-                    if field_types.is_empty() && *field_idx > 0 {
-                        // Defensive: type has no field info but we're accessing a field.
-                        // Fall back to 32-byte slots (standard EVM word size).
-                        total_offset += (*field_idx as u64) * 32;
-                    } else {
-                        for i in 0..*field_idx {
-                            if let Some(&field_ty) = field_types.get(i) {
-                                total_offset += self.ty_size_bytes(field_ty).unwrap_or(32);
-                            } else {
-                                // Field index out of bounds - use default slot size
-                                total_offset += 32;
-                            }
-                        }
+                    if field_types.is_empty() {
+                        return Err(YulError::Unsupported(format!(
+                            "place projection: no field types for type but accessing field {}",
+                            field_idx
+                        )));
+                    }
+                    for i in 0..*field_idx {
+                        let field_ty = field_types.get(i).ok_or_else(|| {
+                            YulError::Unsupported(format!(
+                                "place projection: field index {} out of bounds (have {} fields)",
+                                i,
+                                field_types.len()
+                            ))
+                        })?;
+                        total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
                     }
                     // Update current type to the field's type
-                    if let Some(&field_ty) = field_types.get(*field_idx) {
-                        current_ty = field_ty;
-                    }
-                    // Note: if field_types doesn't have the target field, current_ty
-                    // remains unchanged. This is acceptable since the type info is
-                    // only used for subsequent projections.
+                    current_ty = *field_types.get(*field_idx).ok_or_else(|| {
+                        YulError::Unsupported(format!(
+                            "place projection: target field {} out of bounds (have {} fields)",
+                            field_idx,
+                            field_types.len()
+                        ))
+                    })?;
                 }
                 Projection::VariantField {
                     variant,
@@ -569,21 +566,26 @@ impl<'db> FunctionEmitter<'db> {
                     total_offset += 32;
                     let ctor = ConstructorKind::Variant(*variant, *enum_ty);
                     let field_types = ctor.field_types(self.db);
-                    if field_types.is_empty() && *field_idx > 0 {
-                        // Defensive: variant has no field info but we're accessing a field.
-                        total_offset += (*field_idx as u64) * 32;
-                    } else {
-                        for (i, field_ty) in field_types.iter().enumerate() {
-                            if i >= *field_idx {
-                                break;
-                            }
-                            total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
+                    if field_types.is_empty() {
+                        return Err(YulError::Unsupported(format!(
+                            "place projection: no variant field types but accessing field {}",
+                            field_idx
+                        )));
+                    }
+                    for (i, field_ty) in field_types.iter().enumerate() {
+                        if i >= *field_idx {
+                            break;
                         }
+                        total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
                     }
                     // Update current type to the field's type
-                    if let Some(field_ty) = field_types.get(*field_idx) {
-                        current_ty = *field_ty;
-                    }
+                    current_ty = *field_types.get(*field_idx).ok_or_else(|| {
+                        YulError::Unsupported(format!(
+                            "place projection: target variant field {} out of bounds (have {} fields)",
+                            field_idx,
+                            field_types.len()
+                        ))
+                    })?;
                 }
             }
         }

@@ -65,7 +65,10 @@ fn convert_to_ascii_tree<'db>(
             }
 
             Tree::Node(
-                format!("Switch on {}", render_projection_path(db, &switch_node.occurrence)),
+                format!(
+                    "Switch on {}",
+                    render_projection_path(db, &switch_node.occurrence)
+                ),
                 children,
             )
         }
@@ -86,7 +89,9 @@ fn render_projection_path<'db>(
                 Projection::Field(index) => {
                     write!(&mut result, ".{index}").unwrap();
                 }
-                Projection::VariantField { variant, field_idx, .. } => {
+                Projection::VariantField {
+                    variant, field_idx, ..
+                } => {
                     let variant_name = variant.name(db).unwrap_or("?");
                     write!(&mut result, ".{variant_name}[{field_idx}]").unwrap();
                 }
