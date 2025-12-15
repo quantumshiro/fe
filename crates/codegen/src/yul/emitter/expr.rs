@@ -1,9 +1,9 @@
 //! Expression and value lowering helpers shared across the Yul emitter.
 
 use hir::analysis::ty::decision_tree::Projection;
+use hir::analysis::ty::layout;
 use hir::analysis::ty::simplified_pattern::ConstructorKind;
 use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId};
-use mir::layout;
 use hir::hir_def::{
     Attr, CallableDef, Expr, ExprId, Func, ItemKind, LitKind, Stmt, StmtId,
     expr::{ArithBinOp, BinOp, CompBinOp, LogicalBinOp, UnOp},

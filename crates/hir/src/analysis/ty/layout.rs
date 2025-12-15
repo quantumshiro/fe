@@ -11,11 +11,11 @@
 //! - Structs/tuples pack fields contiguously
 //! - Enums have a 32-byte discriminant followed by payload fields
 
-use hir::analysis::ty::adt_def::AdtRef;
-use hir::analysis::ty::simplified_pattern::ConstructorKind;
-use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId, prim_int_bits};
-use hir::analysis::HirAnalysisDb;
-use hir::hir_def::EnumVariant;
+use crate::analysis::ty::adt_def::AdtRef;
+use crate::analysis::ty::simplified_pattern::ConstructorKind;
+use crate::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId, prim_int_bits};
+use crate::analysis::HirAnalysisDb;
+use crate::hir_def::EnumVariant;
 
 /// Size of enum discriminant in bytes.
 ///

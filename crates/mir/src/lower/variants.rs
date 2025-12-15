@@ -1,7 +1,7 @@
 //! Variant lowering helpers for MIR: handles enum constructor calls and unit variant paths.
 
 use super::*;
-use crate::layout;
+use hir::analysis::ty::layout;
 use num_bigint::BigUint;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {

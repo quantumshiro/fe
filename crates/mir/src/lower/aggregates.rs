@@ -2,7 +2,7 @@
 //! synthetic literals used by records and enums.
 
 use super::*;
-use crate::layout;
+use hir::analysis::ty::layout;
 use hir::analysis::ty::ty_def::prim_int_bits;
 
 #[derive(Copy, Clone)]

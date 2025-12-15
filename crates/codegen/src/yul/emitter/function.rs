@@ -2,11 +2,10 @@ use driver::DriverDataBase;
 use hir::{
     analysis::{
         name_resolution::{PathRes, resolve_path},
-        ty::trait_resolution::PredicateListId,
+        ty::{layout, trait_resolution::PredicateListId},
     },
     hir_def::{Body, Expr, ExprId, Partial, Pat, PatId, PathId, Stmt, StmtId},
 };
-use mir::layout;
 use mir::MirFunction;
 use rustc_hash::FxHashMap;
 

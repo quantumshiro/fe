@@ -10,7 +10,7 @@ use hir::analysis::ty::{
     ty_def::InvalidCause,
 };
 
-use crate::layout;
+use hir::analysis::ty::layout;
 
 use super::*;
 

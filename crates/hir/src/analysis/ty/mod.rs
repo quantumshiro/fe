@@ -24,6 +24,7 @@ pub mod corelib;
 
 pub mod decision_tree;
 pub mod diagnostics;
+pub mod layout;
 pub mod fold;
 pub(crate) mod method_cmp;
 pub mod method_table;
