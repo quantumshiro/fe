@@ -3,8 +3,9 @@
 
 use super::pattern_analysis::{PatternMatrix, PatternRowVec, SigmaSet};
 use super::simplified_pattern::{ConstructorKind, SimplifiedPattern, SimplifiedPatternKind};
+use super::ty_def::TyId;
 use crate::analysis::HirAnalysisDb;
-use crate::core::hir_def::IdentId;
+use crate::core::hir_def::{EnumVariant, IdentId};
 use indexmap::IndexMap;
 
 /// A decision tree for pattern matching compilation
@@ -20,11 +21,11 @@ pub enum DecisionTree<'db> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeafNode<'db> {
     pub arm_index: usize,
-    pub bindings: IndexMap<(IdentId<'db>, usize), Occurrence>,
+    pub bindings: IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>>,
 }
 
 impl<'db> LeafNode<'db> {
-    fn new(arm: SimplifiedArm<'db>, occurrences: &[Occurrence]) -> Self {
+    fn new(arm: SimplifiedArm<'db>, occurrences: &[ProjectionPath<'db>]) -> Self {
         let arm_index = arm.body;
         let bindings = arm.finalize_binds(occurrences);
         Self {
@@ -37,7 +38,7 @@ impl<'db> LeafNode<'db> {
 /// A switch node in the decision tree
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchNode<'db> {
-    pub occurrence: Occurrence,
+    pub occurrence: ProjectionPath<'db>,
     pub arms: Vec<(Case<'db>, DecisionTree<'db>)>,
 }
 
@@ -48,34 +49,72 @@ pub enum Case<'db> {
     Default,
 }
 
-/// Represents a path to a value in the matched expression
-/// e.g., expr.0.1 would be Occurrence(vec![0, 1])
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Occurrence(pub Vec<usize>);
+/// A single step in a projection path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ProjectionStep<'db> {
+    /// Regular field access (tuple/struct field by index)
+    Field(usize),
+    /// Enum variant field access (requires knowing which variant and enum type)
+    VariantField {
+        variant: EnumVariant<'db>,
+        enum_ty: TyId<'db>,
+        field_idx: usize,
+    },
+}
 
-impl Occurrence {
-    pub fn iter(&self) -> impl Iterator<Item = &usize> {
+/// Represents a path to a value in the matched expression via projections.
+/// Each step in the path is either a field access or a variant field access.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct ProjectionPath<'db>(pub Vec<ProjectionStep<'db>>);
+
+impl<'db> ProjectionPath<'db> {
+    pub fn iter(&self) -> impl Iterator<Item = &ProjectionStep<'db>> {
         self.0.iter()
     }
 
-    pub fn parent(&self) -> Option<Occurrence> {
-        let mut inner = self.0.clone();
-        inner.pop().map(|_| Occurrence(inner))
+    pub fn parent(&self) -> Option<ProjectionPath<'db>> {
+        let mut steps = self.0.clone();
+        steps.pop().map(|_| ProjectionPath(steps))
     }
 
-    fn phi_specialize(&self, db: &dyn HirAnalysisDb, ctor: ConstructorKind) -> Vec<Self> {
+    fn phi_specialize(&self, db: &dyn HirAnalysisDb, ctor: ConstructorKind<'db>) -> Vec<Self> {
         let arity = ctor.arity(db);
         (0..arity)
             .map(|i| {
-                let mut inner = self.0.clone();
-                inner.push(i);
-                Self(inner)
+                let mut steps = self.0.clone();
+                let step = match ctor {
+                    ConstructorKind::Variant(variant, enum_ty) => {
+                        ProjectionStep::VariantField {
+                            variant,
+                            enum_ty,
+                            field_idx: i,
+                        }
+                    }
+                    ConstructorKind::Type(_) | ConstructorKind::Literal(_, _) => {
+                        ProjectionStep::Field(i)
+                    }
+                };
+                steps.push(step);
+                Self(steps)
             })
             .collect()
     }
 
+    /// Get the last field index if the last step is a Field.
+    /// For VariantField, returns the field_idx.
     pub fn last_index(&self) -> Option<usize> {
-        self.0.last().copied()
+        self.0.last().map(|step| match step {
+            ProjectionStep::Field(idx) => *idx,
+            ProjectionStep::VariantField { field_idx, .. } => *field_idx,
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -295,7 +334,7 @@ impl DecisionTreeBuilder {
 struct SimplifiedArm<'db> {
     pat_vec: PatternRowVec<'db>,
     body: usize,
-    binds: IndexMap<(IdentId<'db>, usize), Occurrence>,
+    binds: IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>>,
 }
 
 impl<'db> SimplifiedArm<'db> {
@@ -313,28 +352,28 @@ impl<'db> SimplifiedArm<'db> {
         &self.pat_vec.inner[col]
     }
 
-    fn new_binds(&self, occurrence: &Occurrence) -> IndexMap<(IdentId<'db>, usize), Occurrence> {
+    fn new_binds(&self, path: &ProjectionPath<'db>) -> IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>> {
         let mut binds = self.binds.clone();
         if let Some(SimplifiedPatternKind::WildCard(Some(bind))) =
             self.pat_vec.head().map(|pat| &pat.kind)
         {
-            binds.entry(*bind).or_insert(occurrence.clone());
+            binds.entry(*bind).or_insert(path.clone());
         }
         binds
     }
 
     fn finalize_binds(
         &self,
-        occurrences: &[Occurrence],
-    ) -> IndexMap<(IdentId<'db>, usize), Occurrence> {
+        paths: &[ProjectionPath<'db>],
+    ) -> IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>> {
         use super::simplified_pattern::SimplifiedPatternKind;
 
         let mut binds = self.binds.clone();
 
         // Extract bindings from current patterns
-        for (pat, occurrence) in self.pat_vec.inner.iter().zip(occurrences.iter()) {
+        for (pat, path) in self.pat_vec.inner.iter().zip(paths.iter()) {
             if let SimplifiedPatternKind::WildCard(Some(bind)) = &pat.kind {
-                binds.entry(*bind).or_insert_with(|| occurrence.clone());
+                binds.entry(*bind).or_insert_with(|| path.clone());
             }
         }
 
@@ -346,7 +385,7 @@ impl<'db> SimplifiedArm<'db> {
 #[derive(Clone, Debug)]
 struct SimplifiedArmMatrix<'db> {
     arms: Vec<SimplifiedArm<'db>>,
-    occurrences: Vec<Occurrence>,
+    occurrences: Vec<ProjectionPath<'db>>,
 }
 
 impl<'db> SimplifiedArmMatrix<'db> {
@@ -358,7 +397,7 @@ impl<'db> SimplifiedArmMatrix<'db> {
             .enumerate()
             .map(|(body, pat)| SimplifiedArm::new(pat, body))
             .collect();
-        let occurrences = vec![Occurrence::default(); cols];
+        let occurrences = vec![ProjectionPath::default(); cols];
 
         SimplifiedArmMatrix { arms, occurrences }
     }
@@ -425,12 +464,12 @@ impl<'db> SimplifiedArmMatrix<'db> {
         &self,
         db: &'db dyn HirAnalysisDb,
         ctor: ConstructorKind<'db>,
-        occurrence: &Occurrence,
+        path: &ProjectionPath<'db>,
     ) -> Self {
         let mut new_arms = Vec::new();
 
         for arm in &self.arms {
-            let binds = arm.new_binds(occurrence);
+            let binds = arm.new_binds(path);
             new_arms.extend(
                 arm.pat_vec
                     .phi_specialize(db, ctor)
@@ -452,11 +491,11 @@ impl<'db> SimplifiedArmMatrix<'db> {
         }
     }
 
-    pub fn d_specialize(&self, occurrence: &Occurrence) -> Self {
+    pub fn d_specialize(&self, path: &ProjectionPath<'db>) -> Self {
         let mut new_arms = Vec::new();
 
         for arm in &self.arms {
-            let binds = arm.new_binds(occurrence);
+            let binds = arm.new_binds(path);
 
             new_arms.extend(
                 arm.pat_vec

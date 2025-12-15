@@ -2,7 +2,7 @@
 
 use hir::hir_def::ExprId;
 use mir::{
-    BasicBlockId, DecisionTreeBinding, LoopInfo, Terminator, ValueId, ValueOrigin,
+    BasicBlockId, LoopInfo, Terminator, ValueId, ValueOrigin,
     ir::{
         MatchArmLowering, MatchArmPattern, MatchLoweringInfo, SwitchOrigin, SwitchTarget,
         SwitchValue,
@@ -349,25 +349,7 @@ impl<'db> FunctionEmitter<'db> {
 
             // If this target block corresponds to a match arm, emit bindings and body.
             if let Some(arm) = block_to_arm.get(&target.block) {
-                // Emit enum variant bindings if present.
-                if let MatchArmPattern::Enum { bindings, .. } = &arm.pattern
-                    && !bindings.is_empty()
-                {
-                    for binding in bindings {
-                        let binding_name = self.pattern_ident(binding.pat_id)?;
-                        let value_id = binding.value.ok_or_else(|| {
-                            YulError::Unsupported(
-                                "enum binding missing lowered get_variant_field load".into(),
-                            )
-                        })?;
-                        let load_expr = self.lower_value(value_id, &case_state)?;
-                        let temp_name = case_state.alloc_local();
-                        case_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
-                        case_state.insert_binding(binding_name, temp_name);
-                    }
-                }
-
-                // Emit decision tree bindings (for tuple/struct patterns).
+                // Emit decision tree bindings (handles tuple/struct/enum patterns uniformly).
                 for binding in &arm.decision_tree_bindings {
                     let load_expr = self.lower_value(binding.value, &case_state)?;
                     let temp_name = case_state.alloc_local();
@@ -434,25 +416,8 @@ impl<'db> FunctionEmitter<'db> {
         let default_docs = if let Some(arm) = default_arm {
             // Emit arm body for default case.
             let mut arm_docs = Vec::new();
-            // Emit enum bindings if present.
-            if let MatchArmPattern::Enum { bindings, .. } = &arm.pattern
-                && !bindings.is_empty()
-            {
-                for binding in bindings {
-                    let binding_name = self.pattern_ident(binding.pat_id)?;
-                    let value_id = binding.value.ok_or_else(|| {
-                        YulError::Unsupported(
-                            "enum binding missing lowered get_variant_field load".into(),
-                        )
-                    })?;
-                    let load_expr = self.lower_value(value_id, &default_state)?;
-                    let temp_name = default_state.alloc_local();
-                    arm_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
-                    default_state.insert_binding(binding_name, temp_name);
-                }
-            }
 
-            // Emit decision tree bindings (for tuple/struct patterns).
+            // Emit decision tree bindings (handles tuple/struct/enum patterns uniformly).
             for binding in &arm.decision_tree_bindings {
                 let load_expr = self.lower_value(binding.value, &default_state)?;
                 let temp_name = default_state.alloc_local();

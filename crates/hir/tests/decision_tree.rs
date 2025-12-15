@@ -4,7 +4,7 @@ use std::path::Path;
 use ascii_tree::{Tree, write_tree};
 use dir_test::{Fixture, dir_test};
 use fe_hir::analysis::ty::{
-    decision_tree::{DecisionTree, Occurrence, build_decision_tree},
+    decision_tree::{DecisionTree, ProjectionPath, ProjectionStep, build_decision_tree},
     pattern_analysis::PatternMatrix,
     simplified_pattern::ConstructorKind,
     ty_check::{TypedBody, check_func_body},
@@ -40,11 +40,11 @@ fn convert_to_ascii_tree<'db>(
             lines.push(format!("Execute arm #{}", leaf_node.arm_index));
 
             // Add bindings if present
-            for ((name, _idx), occurrence) in &leaf_node.bindings {
+            for ((name, _idx), path) in &leaf_node.bindings {
                 lines.push(format!(
                     "  {} ← {}",
                     name.data(db),
-                    render_occurrence(occurrence)
+                    render_projection_path(db, path)
                 ));
             }
 
@@ -65,21 +65,32 @@ fn convert_to_ascii_tree<'db>(
             }
 
             Tree::Node(
-                format!("Switch on {}", render_occurrence(&switch_node.occurrence)),
+                format!("Switch on {}", render_projection_path(db, &switch_node.occurrence)),
                 children,
             )
         }
     }
 }
 
-fn render_occurrence(occurrence: &Occurrence) -> String {
-    if occurrence.0.is_empty() {
+fn render_projection_path<'db>(
+    db: &'db dyn fe_hir::analysis::HirAnalysisDb,
+    path: &ProjectionPath<'db>,
+) -> String {
+    if path.is_empty() {
         "expr".to_string()
     } else {
         let mut result = "expr".to_string();
-        for &index in &occurrence.0 {
+        for step in path.iter() {
             use std::fmt::Write;
-            write!(&mut result, ".{index}").unwrap();
+            match step {
+                ProjectionStep::Field(index) => {
+                    write!(&mut result, ".{index}").unwrap();
+                }
+                ProjectionStep::VariantField { variant, field_idx, .. } => {
+                    let variant_name = variant.name(db).unwrap_or("?");
+                    write!(&mut result, ".{variant_name}[{field_idx}]").unwrap();
+                }
+            }
         }
         result
     }
