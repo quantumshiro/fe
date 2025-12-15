@@ -1,0 +1,79 @@
+---
+source: crates/codegen/tests/yul.rs
+assertion_line: 31
+expression: output
+input_file: tests/fixtures/match_tuple_binding.fe
+---
+function match_tuple_extract(t) -> ret {
+  let v0 := 0
+  switch get_field__MemPtr_u8__78f06769553d0434(t, 0)
+    case 0 {
+      let v1 := get_field__MemPtr_u8__78f06769553d0434(t, 1)
+      v0 := v1
+    }
+    default {
+      switch get_field__MemPtr_u8__78f06769553d0434(t, 1)
+        case 0 {
+          let v2 := get_field__MemPtr_u8__78f06769553d0434(t, 0)
+          v0 := v2
+        }
+        default {
+          let v3 := get_field__MemPtr_u8__78f06769553d0434(t, 0)
+          let v4 := get_field__MemPtr_u8__78f06769553d0434(t, 1)
+          v0 := add(v3, v4)
+        }
+      ret := v0
+    }
+  ret := v0
+}
+function match_nested_extract(t) -> ret {
+  let v0 := 0
+  switch get_field__MemPtr_u8__78f06769553d0434(t, 1)
+    case 0 {
+      switch get_field__MemPtr_u8__78f06769553d0434(t, 0)
+        case 0 {
+          let v1 := get_field__MemPtr_u8__78f06769553d0434(t, 2)
+          v0 := v1
+        }
+        default {
+          switch get_field__MemPtr_u8__78f06769553d0434(t, 2)
+            case 0 {
+              let v2 := get_field__MemPtr_u8__78f06769553d0434(t, 1)
+              let v3 := get_field__MemPtr_u8__78f06769553d0434(t, 0)
+              v0 := add(v3, v2)
+            }
+            default {
+              let v4 := get_field__MemPtr_u8__78f06769553d0434(t, 0)
+              let v5 := get_field__MemPtr_u8__78f06769553d0434(t, 2)
+              v0 := add(v4, v5)
+            }
+          ret := v0
+        }
+      ret := v0
+    }
+    default {
+      switch get_field__MemPtr_u8__78f06769553d0434(t, 2)
+        case 0 {
+          let v6 := get_field__MemPtr_u8__78f06769553d0434(t, 1)
+          let v7 := get_field__MemPtr_u8__78f06769553d0434(t, 0)
+          v0 := add(v7, v6)
+        }
+        default {
+          let v8 := get_field__MemPtr_u8__78f06769553d0434(t, 0)
+          let v9 := get_field__MemPtr_u8__78f06769553d0434(t, 2)
+          v0 := add(v8, v9)
+        }
+      ret := v0
+    }
+  ret := v0
+}
+function get_field__MemPtr_u8__78f06769553d0434(ptr, offset) -> ret {
+  let v0 := add(ptr, offset)
+  ret := from_word__u8__bc9d6eeaea22ffb5(load__MemPtr__d0292394fccae3e4(v0))
+}
+function load__MemPtr__d0292394fccae3e4(addr) -> ret {
+  ret := mload(addr)
+}
+function from_word__u8__bc9d6eeaea22ffb5(word) -> ret {
+  ret := and(word, 255)
+}

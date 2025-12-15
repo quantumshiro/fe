@@ -28,10 +28,10 @@ use crate::{
     core_lib::{CoreHelper, CoreHelperTy, CoreLib, CoreLibError},
     ir::{
         AddressSpaceKind, BasicBlock, BasicBlockId, CallOrigin, CodeRegionRoot, ContractFunction,
-        ContractFunctionKind, FieldPtrOrigin, IntrinsicOp, IntrinsicValue, LoopInfo,
-        MatchArmLowering, MatchArmPattern, MatchLoweringInfo, MirBody, MirFunction, MirInst,
-        MirModule, PatternBinding, SwitchOrigin, SwitchTarget, SwitchValue, SyntheticValue,
-        Terminator, ValueData, ValueId, ValueOrigin,
+        ContractFunctionKind, DecisionTreeBinding, FieldPtrOrigin, IntrinsicOp, IntrinsicValue,
+        LoopInfo, MatchArmLowering, MatchArmPattern, MatchLoweringInfo, MirBody, MirFunction,
+        MirInst, MirModule, PatternBinding, SwitchOrigin, SwitchTarget, SwitchValue,
+        SyntheticValue, Terminator, ValueData, ValueId, ValueOrigin,
     },
     monomorphize::monomorphize_functions,
 };

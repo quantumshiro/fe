@@ -330,6 +330,19 @@ pub struct MatchArmLowering {
     pub body: ExprId,
     pub block: BasicBlockId,
     pub terminates: bool,
+    /// Bindings from decision tree pattern matching (for tuple/struct patterns).
+    /// These map variable names to MIR values extracted from the scrutinee.
+    pub decision_tree_bindings: Vec<DecisionTreeBinding>,
+}
+
+/// A binding from decision tree pattern matching.
+/// Maps a variable name to the MIR value representing its extracted value.
+#[derive(Debug, Clone)]
+pub struct DecisionTreeBinding {
+    /// The variable name (e.g., "x", "y").
+    pub name: String,
+    /// MIR value for the extracted field (computed via lower_occurrence).
+    pub value: ValueId,
 }
 
 /// Information about a variable binding extracted from a pattern.

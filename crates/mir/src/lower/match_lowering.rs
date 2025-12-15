@@ -202,6 +202,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 if let Partial::Present(pat) = arm.pat.data(self.db, self.body) {
                     Some(pat.clone())
                 } else {
+                    eprintln!("DEBUG: Pattern {:?} is Absent", arm.pat);
                     None
                 }
             })
@@ -209,6 +210,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         if patterns.len() != arms.len() {
             // Some patterns couldn't be resolved, fall back to old behavior
+            eprintln!("DEBUG: pattern count {} != arm count {}, arms: {:?}",
+                      patterns.len(), arms.len(), arms);
             let value = self.ensure_value(match_expr);
             return (Some(scrut_block), value);
         }
@@ -270,6 +273,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     body: arm.body,
                     block: *block_id,
                     terminates: *terminates,
+                    decision_tree_bindings: Vec::new(),
                 }
             })
             .collect();
@@ -308,6 +312,34 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         }),
                     });
                     binding.value = Some(load_value);
+                }
+            }
+        }
+
+        // Populate decision tree bindings for tuple/struct patterns.
+        // Skip arms that already have enum bindings - those use GetVariantField instead.
+        let leaf_bindings = self.collect_leaf_bindings(&tree);
+        for (arm_idx, arm_info) in arms_info.iter_mut().enumerate() {
+            // Skip enum arms - they have their own binding mechanism via GetVariantField
+            if matches!(arm_info.pattern, MatchArmPattern::Enum { .. }) {
+                continue;
+            }
+            if let Some(bindings) = leaf_bindings.get(&arm_idx) {
+                for (name, occurrence) in bindings {
+                    // Skip bindings that traverse through an enum - those need variant-specific handling
+                    if self.occurrence_passes_through_enum(occurrence, scrutinee_ty) {
+                        continue;
+                    }
+                    let value = self.lower_occurrence_for_binding(
+                        occurrence,
+                        scrutinee_value,
+                        scrutinee_ty,
+                        match_expr,
+                    );
+                    arm_info.decision_tree_bindings.push(DecisionTreeBinding {
+                        name: name.clone(),
+                        value,
+                    });
                 }
             }
         }
@@ -399,6 +431,32 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         match_expr: ExprId,
         merge_block: Option<BasicBlockId>,
     ) -> BasicBlockId {
+        // For Type constructors (tuples/structs), there's no discriminant to switch on.
+        // We skip straight to the subtree and let the inner switches handle the actual values.
+        let is_structural_only = switch_node.arms.iter().all(|(case, _)| {
+            matches!(case, Case::Constructor(ConstructorKind::Type(_)) | Case::Default)
+        });
+
+        if is_structural_only && !switch_node.arms.is_empty() {
+            // Find the structural subtree to descend into
+            let structural_subtree = switch_node.arms.iter()
+                .find(|(case, _)| matches!(case, Case::Constructor(ConstructorKind::Type(_))))
+                .or_else(|| switch_node.arms.iter().find(|(case, _)| matches!(case, Case::Default)))
+                .map(|(_, subtree)| subtree);
+
+            if let Some(subtree) = structural_subtree {
+                // For structural types, directly lower the subtree - no switch needed at this level
+                return self.lower_decision_tree(
+                    subtree,
+                    scrutinee_value,
+                    scrutinee_ty,
+                    arm_blocks,
+                    match_expr,
+                    merge_block,
+                );
+            }
+        }
+
         let test_block = self.alloc_block();
 
         // Extract the value to test based on the occurrence path
@@ -439,12 +497,11 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             unreachable
         });
 
-        // Use MatchExpr origin only for the root switch (when occurrence is empty)
-        let origin = if switch_node.occurrence.0.is_empty() {
-            SwitchOrigin::MatchExpr(match_expr)
-        } else {
-            SwitchOrigin::None
-        };
+        // Always use MatchExpr origin for all switches in a decision tree match.
+        // This ensures emit_match_switch is called, which reuses the same match temp
+        // via match_values.entry(expr_id). All switches in the same match share
+        // the same temp variable for collecting results.
+        let origin = SwitchOrigin::MatchExpr(match_expr);
 
         self.set_terminator(
             test_block,
@@ -469,40 +526,89 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         scrutinee_ty: TyId<'db>,
         match_expr: ExprId,
     ) -> ValueId {
-        if occurrence.0.is_empty() {
-            // Root occurrence - for enums, always switch on the in-memory discriminant
-            // instead of the heap pointer, even for payload-less enums.
-            let (base_ty, _) = scrutinee_ty.decompose_ty_app(self.db);
-            if let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db) {
-                if matches!(adt_def.adt_ref(self.db), AdtRef::Enum(_)) {
-                    let ptr_ty = match self.value_address_space(scrutinee_value) {
-                        AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-                        AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
-                    };
-                    let callable = self.core.make_callable(
-                        match_expr,
-                        CoreHelper::GetDiscriminant,
-                        &[ptr_ty],
-                    );
-                    let ty = callable.ret_ty(self.db);
-                    return self.mir_body.alloc_value(ValueData {
-                        ty,
-                        origin: ValueOrigin::Call(CallOrigin {
-                            expr: match_expr,
-                            callable,
-                            args: vec![scrutinee_value],
-                            receiver_space: None,
-                            resolved_name: None,
+        // Traverse the occurrence path, extracting each field in sequence
+        let mut current_value = scrutinee_value;
+        let mut current_ty = scrutinee_ty;
+
+        for &field_idx in &occurrence.0 {
+            // Get field type and offset for this index
+            let record_like = RecordLike::from_ty(current_ty);
+            let Some((field_ty, offset_bytes)) = self.field_layout_by_index(&record_like, field_idx) else {
+                // Fall back to current value if layout lookup fails
+                break;
+            };
+
+            let addr_space = self.value_address_space(current_value);
+            let is_aggregate = field_ty.field_count(self.db) > 0;
+
+            if is_aggregate {
+                // For aggregate (struct/tuple) fields, emit pointer arithmetic
+                if offset_bytes == 0 {
+                    // Optimization: if offset is 0, reuse the base pointer
+                    self.value_address_space.insert(current_value, addr_space);
+                } else {
+                    // Emit FieldPtr for non-zero offsets
+                    current_value = self.mir_body.alloc_value(ValueData {
+                        ty: field_ty,
+                        origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
+                            base: current_value,
+                            offset_bytes,
                         }),
                     });
+                    self.value_address_space.insert(current_value, addr_space);
                 }
+            } else {
+                // For primitive fields, emit a get_field call to load the value
+                let ptr_ty = match addr_space {
+                    AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+                    AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+                };
+                let offset_value = self.synthetic_u256(BigUint::from(offset_bytes));
+                let callable = self.core.make_callable(match_expr, CoreHelper::GetField, &[ptr_ty, field_ty]);
+
+                current_value = self.mir_body.alloc_value(ValueData {
+                    ty: field_ty,
+                    origin: ValueOrigin::Call(CallOrigin {
+                        expr: match_expr,
+                        callable,
+                        args: vec![current_value, offset_value],
+                        receiver_space: None,
+                        resolved_name: None,
+                    }),
+                });
             }
-            return scrutinee_value;
+
+            current_ty = field_ty;
         }
 
-        // TODO: Implement field traversal for nested occurrences
-        // For now, just return the scrutinee (this will only work for simple cases)
-        scrutinee_value
+        // For enums, extract the discriminant for switching
+        let (base_ty, _) = current_ty.decompose_ty_app(self.db);
+        if let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db) {
+            if matches!(adt_def.adt_ref(self.db), AdtRef::Enum(_)) {
+                let ptr_ty = match self.value_address_space(current_value) {
+                    AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+                    AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+                };
+                let callable = self.core.make_callable(
+                    match_expr,
+                    CoreHelper::GetDiscriminant,
+                    &[ptr_ty],
+                );
+                let ty = callable.ret_ty(self.db);
+                return self.mir_body.alloc_value(ValueData {
+                    ty,
+                    origin: ValueOrigin::Call(CallOrigin {
+                        expr: match_expr,
+                        callable,
+                        args: vec![current_value],
+                        receiver_space: None,
+                        resolved_name: None,
+                    }),
+                });
+            }
+        }
+
+        current_value
     }
 
     /// Converts a constructor to a switch value for MIR.
@@ -517,6 +623,134 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 _ => None,
             },
             ConstructorKind::Type(_) => None,
+        }
+    }
+
+    /// Extracts a value from the scrutinee for binding purposes.
+    ///
+    /// This is used for pattern bindings in tuple/struct patterns where we want
+    /// the actual field value. Enum paths should be filtered out before calling
+    /// this function (via `occurrence_passes_through_enum`).
+    fn lower_occurrence_for_binding(
+        &mut self,
+        occurrence: &Occurrence,
+        scrutinee_value: ValueId,
+        scrutinee_ty: TyId<'db>,
+        match_expr: ExprId,
+    ) -> ValueId {
+        let mut current_value = scrutinee_value;
+        let mut current_ty = scrutinee_ty;
+
+        for &field_idx in &occurrence.0 {
+            let record_like = RecordLike::from_ty(current_ty);
+            let Some((field_ty, offset_bytes)) = self.field_layout_by_index(&record_like, field_idx) else {
+                break;
+            };
+
+            let addr_space = self.value_address_space(current_value);
+            let is_aggregate = field_ty.field_count(self.db) > 0;
+
+            if is_aggregate {
+                if offset_bytes == 0 {
+                    self.value_address_space.insert(current_value, addr_space);
+                } else {
+                    current_value = self.mir_body.alloc_value(ValueData {
+                        ty: field_ty,
+                        origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
+                            base: current_value,
+                            offset_bytes,
+                        }),
+                    });
+                    self.value_address_space.insert(current_value, addr_space);
+                }
+            } else {
+                let ptr_ty = match addr_space {
+                    AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+                    AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+                };
+                let offset_value = self.synthetic_u256(BigUint::from(offset_bytes));
+                let callable = self.core.make_callable(match_expr, CoreHelper::GetField, &[ptr_ty, field_ty]);
+
+                current_value = self.mir_body.alloc_value(ValueData {
+                    ty: field_ty,
+                    origin: ValueOrigin::Call(CallOrigin {
+                        expr: match_expr,
+                        callable,
+                        args: vec![current_value, offset_value],
+                        receiver_space: None,
+                        resolved_name: None,
+                    }),
+                });
+            }
+
+            current_ty = field_ty;
+        }
+
+        current_value
+    }
+
+    /// Checks if an occurrence path would traverse through an enum type.
+    ///
+    /// If true, the binding requires variant-specific handling and can't use the
+    /// generic decision tree binding mechanism.
+    fn occurrence_passes_through_enum(&self, occurrence: &Occurrence, root_ty: TyId<'db>) -> bool {
+        let mut current_ty = root_ty;
+
+        // Check each step except the last (the last step is the bound value itself)
+        for &field_idx in occurrence.0.iter().take(occurrence.0.len().saturating_sub(1)) {
+            let (base_ty, _) = current_ty.decompose_ty_app(self.db);
+            if matches!(
+                base_ty.data(self.db),
+                TyData::TyBase(TyBase::Adt(adt_def)) if matches!(adt_def.adt_ref(self.db), AdtRef::Enum(_))
+            ) {
+                return true;
+            }
+
+            let record_like = RecordLike::from_ty(current_ty);
+            if let Some((field_ty, _)) = self.field_layout_by_index(&record_like, field_idx) {
+                current_ty = field_ty;
+            } else {
+                // Can't determine field type - be conservative and skip
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Collects all bindings from decision tree leaves, grouped by arm index.
+    ///
+    /// Returns a map from arm_index to a list of (variable_name, occurrence) pairs.
+    fn collect_leaf_bindings(
+        &self,
+        tree: &DecisionTree<'db>,
+    ) -> FxHashMap<usize, Vec<(String, Occurrence)>> {
+        let mut bindings_by_arm: FxHashMap<usize, Vec<(String, Occurrence)>> = FxHashMap::default();
+        self.collect_leaf_bindings_recursive(tree, &mut bindings_by_arm);
+        bindings_by_arm
+    }
+
+    fn collect_leaf_bindings_recursive(
+        &self,
+        tree: &DecisionTree<'db>,
+        bindings_by_arm: &mut FxHashMap<usize, Vec<(String, Occurrence)>>,
+    ) {
+        match tree {
+            DecisionTree::Leaf(leaf) => {
+                let arm_bindings = bindings_by_arm.entry(leaf.arm_index).or_default();
+                for ((ident_id, _), occurrence) in &leaf.bindings {
+                    let name = ident_id.data(self.db).to_string();
+                    // Only add if we don't already have this name for this arm
+                    if !arm_bindings.iter().any(|(n, _)| n == &name) {
+                        arm_bindings.push((name, occurrence.clone()));
+                    }
+                }
+            }
+            DecisionTree::Switch(switch_node) => {
+                for (_, subtree) in &switch_node.arms {
+                    self.collect_leaf_bindings_recursive(subtree, bindings_by_arm);
+                }
+            }
         }
     }
 }

@@ -2,12 +2,13 @@
 
 use hir::hir_def::ExprId;
 use mir::{
-    BasicBlockId, LoopInfo, Terminator, ValueId, ValueOrigin,
+    BasicBlockId, DecisionTreeBinding, LoopInfo, Terminator, ValueId, ValueOrigin,
     ir::{
         MatchArmLowering, MatchArmPattern, MatchLoweringInfo, SwitchOrigin, SwitchTarget,
         SwitchValue,
     },
 };
+use rustc_hash::FxHashMap;
 
 use crate::yul::{doc::YulDoc, errors::YulError, state::BlockState};
 
@@ -108,17 +109,6 @@ impl<'db> FunctionEmitter<'db> {
             .blocks
             .get(block_id.index())
             .ok_or_else(|| YulError::Unsupported("invalid block".into()))?;
-
-        if let Terminator::Switch {
-            origin: SwitchOrigin::MatchExpr(expr_id),
-            ..
-        } = &block.terminator
-            && !self.expr_is_unit(*expr_id)
-        {
-            self.match_values
-                .entry(*expr_id)
-                .or_insert_with(|| state.alloc_local());
-        }
 
         let mut docs = self.render_statements(&block.insts, state)?;
         {
@@ -326,6 +316,9 @@ impl<'db> FunctionEmitter<'db> {
             return Ok(());
         }
 
+        // For decision tree matches, multiple switches share the same temp variable.
+        // Only emit `let` for the first switch; nested switches reuse the existing temp.
+        let is_first_switch = !self.match_values.contains_key(&expr_id);
         let temp = merge_block.map(|_| {
             self.match_values
                 .entry(expr_id)
@@ -333,17 +326,115 @@ impl<'db> FunctionEmitter<'db> {
                 .to_owned()
         });
 
-        if let Some(temp_name) = temp.as_ref() {
-            ctx.docs.push(YulDoc::line(format!("let {temp_name} := 0")));
+        if is_first_switch {
+            if let Some(temp_name) = temp.as_ref() {
+                ctx.docs.push(YulDoc::line(format!("let {temp_name} := 0")));
+            }
         }
         ctx.docs.push(YulDoc::line(format!("switch {discr_expr}")));
 
-        let mut default_body = None;
-        for arm in &match_info.arms {
-            let mut arm_state = ctx.cloned_state();
-            let mut arm_docs = Vec::new();
+        // Build a map from block ID to arm for looking up arm info from targets.
+        let block_to_arm: FxHashMap<BasicBlockId, &MatchArmLowering> = match_info
+            .arms
+            .iter()
+            .map(|arm| (arm.block, arm))
+            .collect();
 
-            // Emit enum variant bindings if present.
+        let loop_ctx = ctx.loop_ctx;
+
+        // Emit each switch target as a case.
+        for target in targets {
+            let mut case_state = ctx.cloned_state();
+            let mut case_docs = Vec::new();
+
+            // If this target block corresponds to a match arm, emit bindings and body.
+            if let Some(arm) = block_to_arm.get(&target.block) {
+                // Emit enum variant bindings if present.
+                if let MatchArmPattern::Enum { bindings, .. } = &arm.pattern
+                    && !bindings.is_empty()
+                {
+                    for binding in bindings {
+                        let binding_name = self.pattern_ident(binding.pat_id)?;
+                        let value_id = binding.value.ok_or_else(|| {
+                            YulError::Unsupported(
+                                "enum binding missing lowered get_variant_field load".into(),
+                            )
+                        })?;
+                        let load_expr = self.lower_value(value_id, &case_state)?;
+                        let temp_name = case_state.alloc_local();
+                        case_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
+                        case_state.insert_binding(binding_name, temp_name);
+                    }
+                }
+
+                // Emit decision tree bindings (for tuple/struct patterns).
+                for binding in &arm.decision_tree_bindings {
+                    let load_expr = self.lower_value(binding.value, &case_state)?;
+                    let temp_name = case_state.alloc_local();
+                    case_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
+                    case_state.insert_binding(binding.name.clone(), temp_name);
+                }
+
+                // Emit arm body - either as a terminating block or as a value assignment.
+                case_docs = self.emit_match_arm_body(
+                    arm,
+                    temp.as_ref(),
+                    merge_block,
+                    loop_ctx,
+                    &mut case_state,
+                    case_docs,
+                )?;
+            } else {
+                // Target doesn't map to a direct arm - emit the block (could be nested switch).
+                let block_docs =
+                    self.emit_block_with_stop(target.block, loop_ctx, &mut case_state, merge_block)?;
+                case_docs.extend(block_docs);
+            }
+
+            let literal = switch_value_literal(&target.value);
+            ctx.docs
+                .push(YulDoc::wide_block(format!("  case {literal} "), case_docs));
+        }
+
+        // Emit default block.
+        let default_block_data = self
+            .mir_func
+            .body
+            .blocks
+            .get(default.index())
+            .ok_or_else(|| YulError::Unsupported("invalid block in match lowering".into()))?;
+
+        // Check if default corresponds to an arm, or if there's a wildcard arm that should go to default.
+        // For complete enum matches, the decision tree may not have a Default case even if
+        // there's a wildcard pattern in the source, so we look for wildcard arms explicitly.
+        let mut default_state = ctx.cloned_state();
+
+        // Find any wildcard arm that wasn't emitted as a case (it should go to default).
+        // BUT: only do this for enum/literal matches where HIR patterns are meaningful.
+        // For tuple/struct matches, all arms are classified as Wildcard, so we can't
+        // use this heuristic - instead rely on the decision tree's Default case.
+        let emitted_blocks: std::collections::HashSet<_> = targets.iter().map(|t| t.block).collect();
+        let has_non_wildcard_arms = match_info
+            .arms
+            .iter()
+            .any(|arm| !matches!(arm.pattern, MatchArmPattern::Wildcard));
+        let wildcard_arm = if has_non_wildcard_arms {
+            match_info.arms.iter().find(|arm| {
+                matches!(arm.pattern, MatchArmPattern::Wildcard) && !emitted_blocks.contains(&arm.block)
+            })
+        } else {
+            None
+        };
+
+        // First priority: wildcard arm that wasn't already emitted as a case.
+        // Second priority: default block directly maps to an arm (decision tree has Default case).
+        // Third priority: unreachable default or block emission.
+        let default_arm = wildcard_arm.or_else(|| block_to_arm.get(&default).copied());
+
+        let default_docs = if let Some(arm) = default_arm {
+            // Emit arm body for default case.
+            let mut arm_docs = Vec::new();
+            // Emit enum bindings if present.
             if let MatchArmPattern::Enum { bindings, .. } = &arm.pattern
                 && !bindings.is_empty()
             {
@@ -354,63 +445,39 @@ impl<'db> FunctionEmitter<'db> {
                             "enum binding missing lowered get_variant_field load".into(),
                         )
                     })?;
-                    let load_expr = self.lower_value(value_id, &arm_state)?;
-                    let temp_name = arm_state.alloc_local();
+                    let load_expr = self.lower_value(value_id, &default_state)?;
+                    let temp_name = default_state.alloc_local();
                     arm_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
-                    arm_state.insert_binding(binding_name, temp_name);
+                    default_state.insert_binding(binding_name, temp_name);
                 }
             }
 
-            // Emit arm body - either as a terminating block or as a value assignment.
-            let case_docs = self.emit_match_arm_body(
+            // Emit decision tree bindings (for tuple/struct patterns).
+            for binding in &arm.decision_tree_bindings {
+                let load_expr = self.lower_value(binding.value, &default_state)?;
+                let temp_name = default_state.alloc_local();
+                arm_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
+                default_state.insert_binding(binding.name.clone(), temp_name);
+            }
+
+            self.emit_match_arm_body(
                 arm,
                 temp.as_ref(),
                 merge_block,
-                ctx.loop_ctx,
-                &mut arm_state,
+                loop_ctx,
+                &mut default_state,
                 arm_docs,
-            )?;
-
-            // Route to either a numbered case or the default arm.
-            match &arm.pattern {
-                MatchArmPattern::Literal(value) => {
-                    let literal = switch_value_literal(value);
-                    ctx.docs
-                        .push(YulDoc::wide_block(format!("  case {literal} "), case_docs));
-                }
-                MatchArmPattern::Enum { variant_index, .. } => {
-                    let literal = switch_value_literal(&SwitchValue::Enum(*variant_index));
-                    ctx.docs
-                        .push(YulDoc::wide_block(format!("  case {literal} "), case_docs));
-                }
-                MatchArmPattern::Wildcard => {
-                    default_body = Some(case_docs);
-                }
-            }
-        }
-
-        let loop_ctx = ctx.loop_ctx;
-        if let Some(default_docs) = default_body {
-            ctx.docs
-                .push(YulDoc::wide_block("  default ", default_docs));
+            )?
+        } else if matches!(default_block_data.terminator, Terminator::Unreachable) {
+            // Unreachable default - emit empty block.
+            Vec::new()
         } else {
-            let default_block = self
-                .mir_func
-                .body
-                .blocks
-                .get(default.index())
-                .ok_or_else(|| YulError::Unsupported("invalid block in match lowering".into()))?;
-            if !matches!(default_block.terminator, Terminator::Unreachable) {
-                return Err(YulError::Unsupported(
-                    "match lowering missing wildcard arm".into(),
-                ));
-            }
-            let mut default_state = ctx.cloned_state();
-            let default_docs =
-                self.emit_block_with_stop(default, loop_ctx, &mut default_state, merge_block)?;
-            ctx.docs
-                .push(YulDoc::wide_block("  default ", default_docs));
-        }
+            // Default leads to another block (e.g., nested switch).
+            self.emit_block_with_stop(default, loop_ctx, &mut default_state, merge_block)?
+        };
+        ctx.docs
+            .push(YulDoc::wide_block("  default ", default_docs));
+
         if let Some(merge_block) = merge_block {
             let next_docs = self.emit_block_with_ctx(merge_block, loop_ctx, ctx.state)?;
             ctx.docs.extend(next_docs);
