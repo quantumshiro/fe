@@ -2,6 +2,7 @@
 
 use hir::analysis::ty::decision_tree::Projection;
 use hir::analysis::ty::simplified_pattern::ConstructorKind;
+use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId};
 use hir::hir_def::{
     Attr, CallableDef, Expr, ExprId, Func, ItemKind, LitKind, Stmt, StmtId,
     expr::{ArithBinOp, BinOp, CompBinOp, LogicalBinOp, UnOp},
@@ -36,6 +37,7 @@ impl<'db> FunctionEmitter<'db> {
             return Ok(temp.clone());
         }
         let value = self.mir_func.body.value(value_id);
+        let value_ty = value.ty;
         match &value.origin {
             ValueOrigin::Expr(expr_id) => {
                 if let Some(temp) = self.match_values.get(expr_id) {
@@ -48,7 +50,7 @@ impl<'db> FunctionEmitter<'db> {
             ValueOrigin::Intrinsic(intr) => self.lower_intrinsic_value(intr, state),
             ValueOrigin::Synthetic(synth) => self.lower_synthetic_value(synth),
             ValueOrigin::FieldPtr(field_ptr) => self.lower_field_ptr(field_ptr, state),
-            ValueOrigin::PlaceLoad(place) => self.lower_place_load(place, state),
+            ValueOrigin::PlaceLoad(place) => self.lower_place_load(place, value_ty, state),
             ValueOrigin::PlaceRef(place) => self.lower_place_ref(place, state),
             _ => Err(YulError::Unsupported(
                 "only expression-derived values are supported".into(),
@@ -75,6 +77,7 @@ impl<'db> FunctionEmitter<'db> {
         }
         if let Some(value_id) = self.mir_func.body.expr_values.get(&expr_id) {
             let value = self.mir_func.body.value(*value_id);
+            let value_ty = value.ty;
             match &value.origin {
                 ValueOrigin::Call(call) => return self.lower_call_value(call, state),
                 ValueOrigin::Synthetic(synth) => {
@@ -87,7 +90,7 @@ impl<'db> FunctionEmitter<'db> {
                     return self.lower_intrinsic_value(intr, state);
                 }
                 ValueOrigin::PlaceLoad(place) => {
-                    return self.lower_place_load(place, state);
+                    return self.lower_place_load(place, value_ty, state);
                 }
                 ValueOrigin::PlaceRef(place) => {
                     return self.lower_place_ref(place, state);
@@ -422,16 +425,80 @@ impl<'db> FunctionEmitter<'db> {
     /// Lowers a PlaceLoad (load value from a place with projection path).
     ///
     /// Walks the projection path to compute the byte offset from the base,
-    /// then emits a load instruction based on the address space.
+    /// then emits a load instruction based on the address space, applying
+    /// the appropriate type conversion (masking, sign extension, etc.).
     fn lower_place_load(
         &self,
         place: &Place<'db>,
+        loaded_ty: TyId<'db>,
         state: &BlockState,
     ) -> Result<String, YulError> {
         let addr = self.lower_place_address(place, state)?;
-        match place.address_space {
-            mir::ir::AddressSpaceKind::Memory => Ok(format!("mload({addr})")),
-            mir::ir::AddressSpaceKind::Storage => Ok(format!("sload({addr})")),
+        let raw_load = match place.address_space {
+            mir::ir::AddressSpaceKind::Memory => format!("mload({addr})"),
+            mir::ir::AddressSpaceKind::Storage => format!("sload({addr})"),
+        };
+
+        // Apply type-specific conversion (LoadableScalar::from_word equivalent)
+        Ok(self.apply_from_word_conversion(&raw_load, loaded_ty))
+    }
+
+    /// Applies the LoadableScalar::from_word conversion for a given type.
+    ///
+    /// This mirrors the Fe core library's from_word implementations:
+    /// - bool: word != 0
+    /// - u8/u16/u32/u64/u128: mask to appropriate width
+    /// - u256: identity
+    /// - i8/i16/i32/i64/i128/i256: sign extension
+    fn apply_from_word_conversion(&self, raw_load: &str, ty: TyId<'db>) -> String {
+        let base_ty = ty.base_ty(self.db);
+        if let TyData::TyBase(TyBase::Prim(prim)) = base_ty.data(self.db) {
+            match prim {
+                PrimTy::Bool => {
+                    // bool: iszero(eq(word, 0)) which is equivalent to word != 0
+                    format!("iszero(eq({raw_load}, 0))")
+                }
+                PrimTy::U8 => format!("and({raw_load}, 0xff)"),
+                PrimTy::U16 => format!("and({raw_load}, 0xffff)"),
+                PrimTy::U32 => format!("and({raw_load}, 0xffffffff)"),
+                PrimTy::U64 => format!("and({raw_load}, 0xffffffffffffffff)"),
+                PrimTy::U128 => {
+                    format!("and({raw_load}, 0xffffffffffffffffffffffffffffffff)")
+                }
+                PrimTy::U256 | PrimTy::Usize => {
+                    // No conversion needed for full-width unsigned
+                    raw_load.to_string()
+                }
+                PrimTy::I8 => {
+                    // Sign extension for i8
+                    format!("signextend(0, and({raw_load}, 0xff))")
+                }
+                PrimTy::I16 => {
+                    format!("signextend(1, and({raw_load}, 0xffff))")
+                }
+                PrimTy::I32 => {
+                    format!("signextend(3, and({raw_load}, 0xffffffff))")
+                }
+                PrimTy::I64 => {
+                    format!("signextend(7, and({raw_load}, 0xffffffffffffffff))")
+                }
+                PrimTy::I128 => {
+                    format!(
+                        "signextend(15, and({raw_load}, 0xffffffffffffffffffffffffffffffff))"
+                    )
+                }
+                PrimTy::I256 | PrimTy::Isize => {
+                    // Full-width signed doesn't need masking, sign is already there
+                    raw_load.to_string()
+                }
+                // String, Array, Tuple, Ptr are aggregate/pointer types - no conversion
+                PrimTy::String | PrimTy::Array | PrimTy::Tuple(_) | PrimTy::Ptr => {
+                    raw_load.to_string()
+                }
+            }
+        } else {
+            // Non-primitive types (aggregates, etc.) - no conversion
+            raw_load.to_string()
         }
     }
 
@@ -471,15 +538,27 @@ impl<'db> FunctionEmitter<'db> {
                 Projection::Field(field_idx) => {
                     // Compute offset by summing sizes of fields before this one
                     let field_types = current_ty.field_types(self.db);
-                    for i in 0..*field_idx {
-                        if let Some(&field_ty) = field_types.get(i) {
-                            total_offset += self.ty_size_bytes(field_ty).unwrap_or(32);
+                    if field_types.is_empty() && *field_idx > 0 {
+                        // Defensive: type has no field info but we're accessing a field.
+                        // Fall back to 32-byte slots (standard EVM word size).
+                        total_offset += (*field_idx as u64) * 32;
+                    } else {
+                        for i in 0..*field_idx {
+                            if let Some(&field_ty) = field_types.get(i) {
+                                total_offset += self.ty_size_bytes(field_ty).unwrap_or(32);
+                            } else {
+                                // Field index out of bounds - use default slot size
+                                total_offset += 32;
+                            }
                         }
                     }
                     // Update current type to the field's type
                     if let Some(&field_ty) = field_types.get(*field_idx) {
                         current_ty = field_ty;
                     }
+                    // Note: if field_types doesn't have the target field, current_ty
+                    // remains unchanged. This is acceptable since the type info is
+                    // only used for subsequent projections.
                 }
                 Projection::VariantField {
                     variant,
@@ -490,11 +569,16 @@ impl<'db> FunctionEmitter<'db> {
                     total_offset += 32;
                     let ctor = ConstructorKind::Variant(*variant, *enum_ty);
                     let field_types = ctor.field_types(self.db);
-                    for (i, field_ty) in field_types.iter().enumerate() {
-                        if i >= *field_idx {
-                            break;
+                    if field_types.is_empty() && *field_idx > 0 {
+                        // Defensive: variant has no field info but we're accessing a field.
+                        total_offset += (*field_idx as u64) * 32;
+                    } else {
+                        for (i, field_ty) in field_types.iter().enumerate() {
+                            if i >= *field_idx {
+                                break;
+                            }
+                            total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
                         }
-                        total_offset += self.ty_size_bytes(*field_ty).unwrap_or(32);
                     }
                     // Update current type to the field's type
                     if let Some(field_ty) = field_types.get(*field_idx) {

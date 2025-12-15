@@ -4,5 +4,5 @@ expression: output
 input_file: tests/fixtures/momo.fe
 ---
 function read_x(val) -> ret {
-  ret := add(mload(val), mload(add(val, 1)))
+  ret := add(and(mload(val), 0xff), and(mload(add(val, 1)), 0xff))
 }

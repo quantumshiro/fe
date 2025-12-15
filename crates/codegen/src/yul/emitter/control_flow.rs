@@ -326,10 +326,8 @@ impl<'db> FunctionEmitter<'db> {
                 .to_owned()
         });
 
-        if is_first_switch {
-            if let Some(temp_name) = temp.as_ref() {
-                ctx.docs.push(YulDoc::line(format!("let {temp_name} := 0")));
-            }
+        if is_first_switch && let Some(temp_name) = temp.as_ref() {
+            ctx.docs.push(YulDoc::line(format!("let {temp_name} := 0")));
         }
         ctx.docs.push(YulDoc::line(format!("switch {discr_expr}")));
 

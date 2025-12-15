@@ -7,18 +7,18 @@ function match_tuple_extract(t) -> ret {
   let v0 := 0
   switch get_field__MemPtr_u8__78f06769553d0434(t, 0)
     case 0 {
-      let v1 := mload(add(t, 1))
+      let v1 := and(mload(add(t, 1)), 0xff)
       v0 := v1
     }
     default {
       switch get_field__MemPtr_u8__78f06769553d0434(t, 1)
         case 0 {
-          let v2 := mload(t)
+          let v2 := and(mload(t), 0xff)
           v0 := v2
         }
         default {
-          let v3 := mload(t)
-          let v4 := mload(add(t, 1))
+          let v3 := and(mload(t), 0xff)
+          let v4 := and(mload(add(t, 1)), 0xff)
           v0 := add(v3, v4)
         }
       ret := v0
@@ -31,19 +31,19 @@ function match_nested_extract(t) -> ret {
     case 0 {
       switch get_field__MemPtr_u8__78f06769553d0434(t, 0)
         case 0 {
-          let v1 := mload(add(t, 2))
+          let v1 := and(mload(add(t, 2)), 0xff)
           v0 := v1
         }
         default {
           switch get_field__MemPtr_u8__78f06769553d0434(t, 2)
             case 0 {
-              let v2 := mload(add(t, 1))
-              let v3 := mload(t)
+              let v2 := and(mload(add(t, 1)), 0xff)
+              let v3 := and(mload(t), 0xff)
               v0 := add(v3, v2)
             }
             default {
-              let v4 := mload(t)
-              let v5 := mload(add(t, 2))
+              let v4 := and(mload(t), 0xff)
+              let v5 := and(mload(add(t, 2)), 0xff)
               v0 := add(v4, v5)
             }
           ret := v0
@@ -53,13 +53,13 @@ function match_nested_extract(t) -> ret {
     default {
       switch get_field__MemPtr_u8__78f06769553d0434(t, 2)
         case 0 {
-          let v6 := mload(add(t, 1))
-          let v7 := mload(t)
+          let v6 := and(mload(add(t, 1)), 0xff)
+          let v7 := and(mload(t), 0xff)
           v0 := add(v7, v6)
         }
         default {
-          let v8 := mload(t)
-          let v9 := mload(add(t, 2))
+          let v8 := and(mload(t), 0xff)
+          let v9 := and(mload(add(t, 2)), 0xff)
           v0 := add(v8, v9)
         }
       ret := v0

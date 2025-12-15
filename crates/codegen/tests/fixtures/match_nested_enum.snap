@@ -12,7 +12,7 @@ function match_nested_enum(outer) -> ret {
           v0 := 0
         }
         case 1 {
-          let v1 := mload(add(outer, 64))
+          let v1 := and(mload(add(outer, 64)), 0xff)
           v0 := v1
         }
         default {
@@ -20,7 +20,7 @@ function match_nested_enum(outer) -> ret {
       ret := v0
     }
     case 1 {
-      let v2 := mload(add(outer, 32))
+      let v2 := and(mload(add(outer, 32)), 0xff)
       v0 := v2
     }
     default {

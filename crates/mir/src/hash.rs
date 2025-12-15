@@ -179,13 +179,16 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     self.write_usize(*idx);
                 }
                 Projection::VariantField {
-                    variant: _,
+                    variant,
                     enum_ty: _,
                     field_idx,
                 } => {
-                    // Hash structurally - variant/enum_ty identity doesn't matter
-                    // for structural equivalence, just the field index
+                    // Include variant index to distinguish different enum variants.
+                    // The enum_ty is not hashed since structurally equivalent code
+                    // operating on different enum types with same layout should match,
+                    // but different variants within the same enum must not be confused.
                     self.write_u8(0x01);
+                    self.write_usize(variant.idx as usize);
                     self.write_usize(*field_idx);
                 }
             }

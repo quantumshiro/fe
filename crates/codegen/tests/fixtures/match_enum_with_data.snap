@@ -13,7 +13,7 @@ function match_option(opt) -> ret {
   let v0 := 0
   switch get_discriminant__MemPtr__d0292394fccae3e4(opt)
     case 1 {
-      let v1 := mload(add(opt, 32))
+      let v1 := and(mload(add(opt, 32)), 0xffffffffffffffff)
       v0 := v1
     }
     case 0 {

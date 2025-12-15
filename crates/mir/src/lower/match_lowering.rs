@@ -96,7 +96,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let Partial::Present(pat_data) = pat.data(self.db, self.body) else {
             return None;
         };
-        let scope = self.typed_body.body().unwrap().scope();
+        let body = self.typed_body.body()?;
+        let scope = body.scope();
 
         if let Pat::Path(path, ..) = pat_data
             && let Some(path) = path.to_opt()
@@ -198,7 +199,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         // Build pattern matrix from match arms
         let scrutinee_ty = self.typed_body.expr_ty(self.db, scrutinee);
-        let scope = self.typed_body.body().unwrap().scope();
+        let Some(body) = self.typed_body.body() else {
+            // No body available - this shouldn't happen for valid code.
+            self.set_terminator(scrut_block, Terminator::Unreachable);
+            let value = self.ensure_value(match_expr);
+            return (None, value);
+        };
+        let scope = body.scope();
 
         let patterns: Vec<Pat> = arms
             .iter()
@@ -206,18 +213,17 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 if let Partial::Present(pat) = arm.pat.data(self.db, self.body) {
                     Some(pat.clone())
                 } else {
-                    eprintln!("DEBUG: Pattern {:?} is Absent", arm.pat);
                     None
                 }
             })
             .collect();
 
         if patterns.len() != arms.len() {
-            // Some patterns couldn't be resolved, fall back to old behavior
-            eprintln!("DEBUG: pattern count {} != arm count {}, arms: {:?}",
-                      patterns.len(), arms.len(), arms);
+            // Some patterns couldn't be resolved - this indicates a malformed AST.
+            // Set scrut_block to unreachable and return no continuation.
+            self.set_terminator(scrut_block, Terminator::Unreachable);
             let value = self.ensure_value(match_expr);
-            return (Some(scrut_block), value);
+            return (None, value);
         }
 
         let matrix = PatternMatrix::from_hir_patterns(
@@ -251,9 +257,6 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             }
             arm_blocks.push((arm_entry, terminates));
         }
-
-        // Ensure we have a merge block even if all arms terminate
-        let merge_block = merge_block.unwrap_or_else(|| self.alloc_block());
 
         // Collect arm info for codegen (needed for match_info)
         let mut arms_info: Vec<MatchArmLowering> = arms
@@ -303,12 +306,11 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
 
         // Store match info for codegen
-        let has_non_terminating = arm_blocks.iter().any(|(_, terminates)| !terminates);
         self.mir_body.match_info.insert(
             match_expr,
             MatchLoweringInfo {
                 scrutinee: scrutinee_value,
-                merge_block: if has_non_terminating { Some(merge_block) } else { None },
+                merge_block,
                 arms: arms_info,
             },
         );
@@ -319,14 +321,14 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             scrutinee_ty,
             &arm_blocks,
             match_expr,
-            if has_non_terminating { Some(merge_block) } else { None },
+            merge_block,
         );
 
         // Set scrut_block to jump to the tree entry
         self.set_terminator(scrut_block, Terminator::Goto { target: tree_entry });
 
         let value_id = self.ensure_value(match_expr);
-        (Some(merge_block), value_id)
+        (merge_block, value_id)
     }
 
     /// Recursively lowers a decision tree to MIR basic blocks.
@@ -605,29 +607,29 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         // For enums, extract the discriminant for switching
         let (base_ty, _) = current_ty.decompose_ty_app(self.db);
-        if let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db) {
-            if matches!(adt_def.adt_ref(self.db), AdtRef::Enum(_)) {
-                let ptr_ty = match self.value_address_space(current_value) {
-                    AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-                    AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
-                };
-                let callable = self.core.make_callable(
-                    match_expr,
-                    CoreHelper::GetDiscriminant,
-                    &[ptr_ty],
-                );
-                let ty = callable.ret_ty(self.db);
-                return self.mir_body.alloc_value(ValueData {
-                    ty,
-                    origin: ValueOrigin::Call(CallOrigin {
-                        expr: match_expr,
-                        callable,
-                        args: vec![current_value],
-                        receiver_space: None,
-                        resolved_name: None,
-                    }),
-                });
-            }
+        if let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db)
+            && matches!(adt_def.adt_ref(self.db), AdtRef::Enum(_))
+        {
+            let ptr_ty = match self.value_address_space(current_value) {
+                AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
+                AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+            };
+            let callable = self.core.make_callable(
+                match_expr,
+                CoreHelper::GetDiscriminant,
+                &[ptr_ty],
+            );
+            let ty = callable.ret_ty(self.db);
+            return self.mir_body.alloc_value(ValueData {
+                ty,
+                origin: ValueOrigin::Call(CallOrigin {
+                    expr: match_expr,
+                    callable,
+                    args: vec![current_value],
+                    receiver_space: None,
+                    resolved_name: None,
+                }),
+            });
         }
 
         current_value
@@ -695,6 +697,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     }
 
     /// Computes the result type of applying a projection path to a type.
+    ///
+    /// Returns an invalid type if any projection step is out of bounds,
+    /// which will cause downstream type errors rather than silent bugs.
     fn compute_projection_result_type(
         &self,
         base_ty: TyId<'db>,
@@ -708,6 +713,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     let field_types = current_ty.field_types(self.db);
                     if let Some(&field_ty) = field_types.get(*field_idx) {
                         current_ty = field_ty;
+                    } else {
+                        // Out of bounds field access - return invalid type
+                        return TyId::invalid(self.db, InvalidCause::Other);
                     }
                 }
                 Projection::VariantField {
@@ -719,6 +727,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     let field_types = ctor.field_types(self.db);
                     if let Some(&field_ty) = field_types.get(*field_idx) {
                         current_ty = field_ty;
+                    } else {
+                        // Out of bounds variant field access - return invalid type
+                        return TyId::invalid(self.db, InvalidCause::Other);
                     }
                 }
             }
@@ -759,9 +770,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         match tree {
             DecisionTree::Leaf(leaf) => {
                 let arm_bindings = bindings_by_arm.entry(leaf.arm_index).or_default();
-                for ((ident_id, _), path) in &leaf.bindings {
+                for ((ident_id, _binding_idx), path) in &leaf.bindings {
                     let name = ident_id.data(self.db).to_string();
-                    // Only add if we don't already have this name for this arm
+                    // Deduplicate by name. The binding_idx in the key distinguishes
+                    // different binding sites in the decision tree, but within a single
+                    // arm all occurrences of a variable name should resolve to the same
+                    // binding. Taking the first occurrence is correct because all paths
+                    // to this leaf will produce the same binding for that name.
                     if !arm_bindings.iter().any(|(n, _)| n == &name) {
                         arm_bindings.push((name, path.clone()));
                     }
