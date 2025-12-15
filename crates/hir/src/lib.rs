@@ -4,6 +4,7 @@ pub use core::lower::{SelectorError, SelectorErrorKind, parse::ParserError};
 pub mod analysis;
 pub mod core;
 pub mod diagnosable;
+pub mod projection;
 // Re-export core modules at crate root for compatibility
 pub use core::{hir_def, lower, semantic, span, visitor};
 

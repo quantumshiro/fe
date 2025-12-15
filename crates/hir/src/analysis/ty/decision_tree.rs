@@ -6,7 +6,22 @@ use super::simplified_pattern::{ConstructorKind, SimplifiedPattern, SimplifiedPa
 use super::ty_def::TyId;
 use crate::analysis::HirAnalysisDb;
 use crate::core::hir_def::{EnumVariant, IdentId};
+use crate::projection::{Projection as GenericProjection, ProjectionPath as GenericProjectionPath};
 use indexmap::IndexMap;
+
+use std::convert::Infallible;
+
+/// Type alias for HIR-specific projections.
+///
+/// Uses `Infallible` for the index type since pattern matching doesn't support
+/// array indexing. This makes `Index(Dynamic(...))` impossible to construct.
+pub type Projection<'db> = GenericProjection<TyId<'db>, EnumVariant<'db>, Infallible>;
+
+/// Type alias for HIR-specific projection paths.
+///
+/// Uses `Infallible` for the index type since pattern matching doesn't support
+/// array indexing. This makes `Index(Dynamic(...))` impossible to construct.
+pub type ProjectionPath<'db> = GenericProjectionPath<TyId<'db>, EnumVariant<'db>, Infallible>;
 
 /// A decision tree for pattern matching compilation
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,39 +64,19 @@ pub enum Case<'db> {
     Default,
 }
 
-/// A single projection operation in a path.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Projection<'db> {
-    /// Regular field access (tuple/struct field by index)
-    Field(usize),
-    /// Enum variant field access (requires knowing which variant and enum type)
-    VariantField {
-        variant: EnumVariant<'db>,
-        enum_ty: TyId<'db>,
-        field_idx: usize,
-    },
+/// Extension trait for HIR-specific projection path operations.
+trait ProjectionPathExt<'db> {
+    fn phi_specialize(&self, db: &dyn HirAnalysisDb, ctor: ConstructorKind<'db>) -> Vec<Self>
+    where
+        Self: Sized;
 }
 
-/// Represents a path to a value in the matched expression via projections.
-/// Each projection is either a field access or a variant field access.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct ProjectionPath<'db>(pub Vec<Projection<'db>>);
-
-impl<'db> ProjectionPath<'db> {
-    pub fn iter(&self) -> impl Iterator<Item = &Projection<'db>> {
-        self.0.iter()
-    }
-
-    pub fn parent(&self) -> Option<ProjectionPath<'db>> {
-        let mut steps = self.0.clone();
-        steps.pop().map(|_| ProjectionPath(steps))
-    }
-
+impl<'db> ProjectionPathExt<'db> for ProjectionPath<'db> {
     fn phi_specialize(&self, db: &dyn HirAnalysisDb, ctor: ConstructorKind<'db>) -> Vec<Self> {
         let arity = ctor.arity(db);
         (0..arity)
             .map(|i| {
-                let mut steps = self.0.clone();
+                let mut path = self.clone();
                 let step = match ctor {
                     ConstructorKind::Variant(variant, enum_ty) => Projection::VariantField {
                         variant,
@@ -92,27 +87,10 @@ impl<'db> ProjectionPath<'db> {
                         Projection::Field(i)
                     }
                 };
-                steps.push(step);
-                Self(steps)
+                path.push(step);
+                path
             })
             .collect()
-    }
-
-    /// Get the last field index if the last projection is a Field.
-    /// For VariantField, returns the field_idx.
-    pub fn last_index(&self) -> Option<usize> {
-        self.0.last().map(|proj| match proj {
-            Projection::Field(idx) => *idx,
-            Projection::VariantField { field_idx, .. } => *field_idx,
-        })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
     }
 }
 

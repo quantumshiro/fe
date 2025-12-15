@@ -587,6 +587,17 @@ impl<'db> FunctionEmitter<'db> {
                         ))
                     })?;
                 }
+                // Index and Deref projections are not yet implemented
+                Projection::Index(_) => {
+                    return Err(YulError::Unsupported(
+                        "place projection: array index access not yet implemented".to_string(),
+                    ));
+                }
+                Projection::Deref => {
+                    return Err(YulError::Unsupported(
+                        "place projection: pointer dereference not yet implemented".to_string(),
+                    ));
+                }
             }
         }
 

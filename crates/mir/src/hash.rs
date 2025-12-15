@@ -192,6 +192,24 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     self.write_usize(variant.idx as usize);
                     self.write_usize(*field_idx);
                 }
+                Projection::Index(idx_source) => {
+                    self.write_u8(0x02);
+                    match idx_source {
+                        hir::projection::IndexSource::Constant(idx) => {
+                            self.write_u8(0x00);
+                            self.write_usize(*idx);
+                        }
+                        hir::projection::IndexSource::Dynamic(infallible) => {
+                            // HIR projections use Infallible for Idx, making Dynamic
+                            // impossible to construct. This match arm is exhaustive
+                            // but can never be reached.
+                            match *infallible {}
+                        }
+                    }
+                }
+                Projection::Deref => {
+                    self.write_u8(0x03);
+                }
             }
         }
     }

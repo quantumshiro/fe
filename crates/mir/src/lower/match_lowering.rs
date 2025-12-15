@@ -621,6 +621,16 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
                     current_ty = field_ty;
                 }
+
+                // Index projections use Infallible for the dynamic index type in HIR,
+                // so Dynamic(...) is impossible to construct. Constant index would
+                // require array pattern support which doesn't exist yet.
+                // Use break for error recovery (same as field_layout_by_index failure).
+                Projection::Index(idx_source) => match idx_source {
+                    hir::projection::IndexSource::Constant(_) => break,
+                    hir::projection::IndexSource::Dynamic(infallible) => match *infallible {},
+                },
+                Projection::Deref => break,
             }
         }
 
@@ -746,6 +756,20 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         // Out of bounds variant field access - return invalid type
                         return TyId::invalid(self.db, InvalidCause::Other);
                     }
+                }
+
+                // Index projections use Infallible for the dynamic index type in HIR,
+                // so Dynamic(...) is impossible to construct. Constant index would
+                // require array pattern support which doesn't exist yet.
+                // Return invalid type for error recovery.
+                Projection::Index(idx_source) => match idx_source {
+                    hir::projection::IndexSource::Constant(_) => {
+                        return TyId::invalid(self.db, InvalidCause::Other);
+                    }
+                    hir::projection::IndexSource::Dynamic(infallible) => match *infallible {},
+                },
+                Projection::Deref => {
+                    return TyId::invalid(self.db, InvalidCause::Other);
                 }
             }
         }

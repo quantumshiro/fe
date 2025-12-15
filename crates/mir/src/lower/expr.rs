@@ -206,7 +206,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // Create Place with single-element projection path
         let place = Place {
             base: addr_value,
-            projection: ProjectionPath(vec![Projection::Field(info.field_idx)]),
+            projection: ProjectionPath::from_projection(Projection::Field(info.field_idx)),
             address_space: addr_space,
         };
 
