@@ -10,8 +10,6 @@ use hir::analysis::ty::{
     ty_def::InvalidCause,
 };
 
-use hir::analysis::ty::layout;
-
 use super::*;
 
 /// Context passed through decision tree lowering recursion.
@@ -126,11 +124,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return Some(MatchArmPattern::Enum {
                 variant_index: variant.variant.idx as u64,
                 enum_name,
-                bindings: Vec::new(),
             });
         }
 
-        if let Pat::PathTuple(path, elem_pats) = pat_data
+        if let Pat::PathTuple(path, _elem_pats) = pat_data
             && let Some(path) = path.to_opt()
             && let Some(variant) = self.resolve_enum_variant(path, scope)
         {
@@ -142,34 +139,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 .data(self.db)
                 .to_string();
 
-            let mut bindings = Vec::new();
-            let enum_ty = variant.ty;
-            let enum_variant = variant.variant;
-            for (field_idx, elem_pat) in elem_pats.iter().enumerate() {
-                if let Partial::Present(Pat::Path(elem_path, _)) = elem_pat.data(self.db, self.body)
-                    && let Some(elem_path) = elem_path.to_opt()
-                    && elem_path.is_bare_ident(self.db)
-                {
-                    let field_offset = layout::variant_field_offset_bytes(
-                        self.db,
-                        enum_ty,
-                        enum_variant,
-                        field_idx,
-                    )
-                    .unwrap_or(layout::WORD_SIZE_BYTES * field_idx as u64);
-
-                    bindings.push(PatternBinding {
-                        pat_id: *elem_pat,
-                        field_offset,
-                        value: None,
-                    });
-                }
-            }
-
             return Some(MatchArmPattern::Enum {
                 variant_index: variant.variant.idx as u64,
                 enum_name,
-                bindings,
             });
         }
 
