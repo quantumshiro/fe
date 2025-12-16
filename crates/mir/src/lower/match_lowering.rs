@@ -267,6 +267,15 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             arm_blocks.push((arm_entry, terminates));
         }
 
+        // Find the wildcard arm block (if any) for use as default fallback.
+        // This ensures that even for complete matches, the default routes to the
+        // wildcard arm rather than unreachable.
+        let wildcard_arm_block = arms
+            .iter()
+            .zip(arm_blocks.iter())
+            .find(|(arm, _)| self.is_wildcard_pat(arm.pat))
+            .map(|(_, (block_id, _))| *block_id);
+
         // Collect arm info for codegen (needed for match_info)
         let mut arms_info: Vec<MatchArmLowering> = arms
             .iter()
@@ -331,6 +340,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             &arm_blocks,
             match_expr,
             merge_block,
+            wildcard_arm_block,
         );
 
         // Set scrut_block to jump to the tree entry
@@ -349,6 +359,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// - `arm_blocks`: Pre-created blocks and termination status for each arm.
     /// - `match_expr`: The match expression id.
     /// - `merge_block`: Optional merge block for match results.
+    /// - `wildcard_arm_block`: Block for the wildcard arm (if any), used as default fallback.
     ///
     /// # Returns
     /// The entry basic block for this tree node.
@@ -360,6 +371,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         arm_blocks: &[(BasicBlockId, bool)],
         match_expr: ExprId,
         merge_block: Option<BasicBlockId>,
+        wildcard_arm_block: Option<BasicBlockId>,
     ) -> BasicBlockId {
         match tree {
             DecisionTree::Leaf(leaf) => self.lower_leaf_node(leaf, arm_blocks),
@@ -370,6 +382,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 arm_blocks,
                 match_expr,
                 merge_block,
+                wildcard_arm_block,
             ),
         }
     }
@@ -395,6 +408,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         arm_blocks: &[(BasicBlockId, bool)],
         match_expr: ExprId,
         merge_block: Option<BasicBlockId>,
+        wildcard_arm_block: Option<BasicBlockId>,
     ) -> BasicBlockId {
         // For Type constructors (tuples/structs), there's no discriminant to switch on.
         // We skip straight to the subtree and let the inner switches handle the actual values.
@@ -428,6 +442,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     arm_blocks,
                     match_expr,
                     merge_block,
+                    wildcard_arm_block,
                 );
             }
         }
@@ -454,6 +469,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 arm_blocks,
                 match_expr,
                 merge_block,
+                wildcard_arm_block,
             );
 
             match case {
@@ -471,11 +487,16 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             }
         }
 
-        let default = default_block.unwrap_or_else(|| {
-            let unreachable = self.alloc_block();
-            self.set_terminator(unreachable, Terminator::Unreachable);
-            unreachable
-        });
+        // Use the decision tree's default, then wildcard arm, then unreachable.
+        // This ensures MIR explicitly routes defaults to the wildcard arm rather than
+        // having codegen rediscover it.
+        let default = default_block
+            .or(wildcard_arm_block)
+            .unwrap_or_else(|| {
+                let unreachable = self.alloc_block();
+                self.set_terminator(unreachable, Terminator::Unreachable);
+                unreachable
+            });
 
         // Always use MatchExpr origin for all switches in a decision tree match.
         // This ensures emit_match_switch is called, which reuses the same match temp
