@@ -14,6 +14,18 @@ use hir::analysis::ty::layout;
 
 use super::*;
 
+/// Context passed through decision tree lowering recursion.
+///
+/// Bundles the invariant data needed at each level of the tree traversal,
+/// keeping the recursive function signatures manageable.
+struct MatchLoweringCtx<'db> {
+    scrutinee_value: ValueId,
+    scrutinee_ty: TyId<'db>,
+    match_expr: ExprId,
+    /// Block for the wildcard arm (if any), used as default fallback.
+    wildcard_arm_block: Option<BasicBlockId>,
+}
+
 impl<'db, 'a> MirBuilder<'db, 'a> {
     /// Extracts a literal `SwitchValue` from a pattern when possible.
     ///
@@ -333,15 +345,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             },
         );
 
-        let tree_entry = self.lower_decision_tree(
-            &tree,
+        let ctx = MatchLoweringCtx {
             scrutinee_value,
             scrutinee_ty,
-            &arm_blocks,
             match_expr,
-            merge_block,
             wildcard_arm_block,
-        );
+        };
+        let tree_entry = self.lower_decision_tree(&tree, &arm_blocks, &ctx);
 
         // Set scrut_block to jump to the tree entry
         self.set_terminator(scrut_block, Terminator::Goto { target: tree_entry });
@@ -354,36 +364,22 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// # Parameters
     /// - `tree`: Decision tree node to lower.
-    /// - `scrutinee_value`: Value representing the root scrutinee.
-    /// - `scrutinee_ty`: Type of the scrutinee.
     /// - `arm_blocks`: Pre-created blocks and termination status for each arm.
-    /// - `match_expr`: The match expression id.
-    /// - `merge_block`: Optional merge block for match results.
-    /// - `wildcard_arm_block`: Block for the wildcard arm (if any), used as default fallback.
+    /// - `ctx`: Match lowering context with scrutinee info and merge block.
     ///
     /// # Returns
     /// The entry basic block for this tree node.
     fn lower_decision_tree(
         &mut self,
         tree: &DecisionTree<'db>,
-        scrutinee_value: ValueId,
-        scrutinee_ty: TyId<'db>,
         arm_blocks: &[(BasicBlockId, bool)],
-        match_expr: ExprId,
-        merge_block: Option<BasicBlockId>,
-        wildcard_arm_block: Option<BasicBlockId>,
+        ctx: &MatchLoweringCtx<'db>,
     ) -> BasicBlockId {
         match tree {
             DecisionTree::Leaf(leaf) => self.lower_leaf_node(leaf, arm_blocks),
-            DecisionTree::Switch(switch_node) => self.lower_switch_node(
-                switch_node,
-                scrutinee_value,
-                scrutinee_ty,
-                arm_blocks,
-                match_expr,
-                merge_block,
-                wildcard_arm_block,
-            ),
+            DecisionTree::Switch(switch_node) => {
+                self.lower_switch_node(switch_node, arm_blocks, ctx)
+            }
         }
     }
 
@@ -403,12 +399,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     fn lower_switch_node(
         &mut self,
         switch_node: &SwitchNode<'db>,
-        scrutinee_value: ValueId,
-        scrutinee_ty: TyId<'db>,
         arm_blocks: &[(BasicBlockId, bool)],
-        match_expr: ExprId,
-        merge_block: Option<BasicBlockId>,
-        wildcard_arm_block: Option<BasicBlockId>,
+        ctx: &MatchLoweringCtx<'db>,
     ) -> BasicBlockId {
         // For Type constructors (tuples/structs), there's no discriminant to switch on.
         // We skip straight to the subtree and let the inner switches handle the actual values.
@@ -435,15 +427,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
             if let Some(subtree) = structural_subtree {
                 // For structural types, directly lower the subtree - no switch needed at this level
-                return self.lower_decision_tree(
-                    subtree,
-                    scrutinee_value,
-                    scrutinee_ty,
-                    arm_blocks,
-                    match_expr,
-                    merge_block,
-                    wildcard_arm_block,
-                );
+                return self.lower_decision_tree(subtree, arm_blocks, ctx);
             }
         }
 
@@ -452,9 +436,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // Extract the value to test based on the occurrence path
         let test_value = self.lower_occurrence(
             &switch_node.occurrence,
-            scrutinee_value,
-            scrutinee_ty,
-            match_expr,
+            ctx.scrutinee_value,
+            ctx.scrutinee_ty,
+            ctx.match_expr,
         );
 
         // Recursively lower each case
@@ -462,15 +446,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let mut default_block = None;
 
         for (case, subtree) in &switch_node.arms {
-            let subtree_entry = self.lower_decision_tree(
-                subtree,
-                scrutinee_value,
-                scrutinee_ty,
-                arm_blocks,
-                match_expr,
-                merge_block,
-                wildcard_arm_block,
-            );
+            let subtree_entry = self.lower_decision_tree(subtree, arm_blocks, ctx);
 
             match case {
                 Case::Constructor(ctor) => {
@@ -490,19 +466,17 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // Use the decision tree's default, then wildcard arm, then unreachable.
         // This ensures MIR explicitly routes defaults to the wildcard arm rather than
         // having codegen rediscover it.
-        let default = default_block
-            .or(wildcard_arm_block)
-            .unwrap_or_else(|| {
-                let unreachable = self.alloc_block();
-                self.set_terminator(unreachable, Terminator::Unreachable);
-                unreachable
-            });
+        let default = default_block.or(ctx.wildcard_arm_block).unwrap_or_else(|| {
+            let unreachable = self.alloc_block();
+            self.set_terminator(unreachable, Terminator::Unreachable);
+            unreachable
+        });
 
         // Always use MatchExpr origin for all switches in a decision tree match.
         // This ensures emit_match_switch is called, which reuses the same match temp
         // via match_values.entry(expr_id). All switches in the same match share
         // the same temp variable for collecting results.
-        let origin = SwitchOrigin::MatchExpr(match_expr);
+        let origin = SwitchOrigin::MatchExpr(ctx.match_expr);
 
         self.set_terminator(
             test_block,

@@ -409,10 +409,15 @@ impl<'db> FunctionEmitter<'db> {
             None
         };
 
-        // First priority: wildcard arm that wasn't already emitted as a case.
-        // Second priority: default block directly maps to an arm (decision tree has Default case).
+        // First priority: default block directly maps to an arm (decision tree has Default case).
+        // Second priority: wildcard arm that wasn't already emitted as a case.
         // Third priority: unreachable default or block emission.
-        let default_arm = wildcard_arm.or_else(|| block_to_arm.get(&default).copied());
+        //
+        // The decision tree already computes the correct default for each switch level,
+        // so we should trust it rather than rediscovering the wildcard arm. The wildcard
+        // heuristic is only a fallback for edge cases where the default block doesn't
+        // directly map to an arm.
+        let default_arm = block_to_arm.get(&default).copied().or(wildcard_arm);
 
         let default_docs = if let Some(arm) = default_arm {
             // Emit arm body for default case.
