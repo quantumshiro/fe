@@ -325,7 +325,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         for (arm_idx, arm_info) in arms_info.iter_mut().enumerate() {
             if let Some(bindings) = leaf_bindings.get(&arm_idx) {
                 for (name, path) in bindings {
-                    let value = self.lower_projection_path_for_binding(
+                    let (place, value) = self.lower_projection_path_for_binding(
                         path,
                         scrutinee_value,
                         scrutinee_ty,
@@ -333,6 +333,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     );
                     arm_info.decision_tree_bindings.push(DecisionTreeBinding {
                         name: name.clone(),
+                        place,
                         value,
                     });
                 }
@@ -608,18 +609,19 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
     /// Extracts a value from the scrutinee for binding purposes.
     ///
-    /// Creates a Place with the projection path and uses PlaceLoad for scalars
-    /// or PlaceRef for aggregates.
+    /// Returns both:
+    /// - a `PlaceRef` value that references the bound location, and
+    /// - the binding's "value" (a `PlaceLoad` for scalars, `PlaceRef` for aggregates).
     fn lower_projection_path_for_binding(
         &mut self,
         path: &ProjectionPath<'db>,
         scrutinee_value: ValueId,
         scrutinee_ty: TyId<'db>,
         _match_expr: ExprId,
-    ) -> ValueId {
+    ) -> (ValueId, ValueId) {
         // Empty path means we bind to the scrutinee itself
         if path.is_empty() {
-            return scrutinee_value;
+            return (scrutinee_value, scrutinee_value);
         }
 
         // Compute the final type by walking the projection path
@@ -636,20 +638,26 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             address_space: addr_space,
         };
 
-        // Use PlaceRef for aggregates (pointer only), PlaceLoad for scalars (load value)
-        let origin = if is_aggregate {
-            ValueOrigin::PlaceRef(place)
+        let place_ref_id = self.mir_body.alloc_value(ValueData {
+            ty: final_ty,
+            origin: ValueOrigin::PlaceRef(place.clone()),
+        });
+        self.value_address_space.insert(place_ref_id, addr_space);
+
+        // Use PlaceRef for aggregates (pointer only), PlaceLoad for scalars (load value).
+        // When aggregate, re-use the place ref as the "value".
+        let value_id = if is_aggregate {
+            place_ref_id
         } else {
-            ValueOrigin::PlaceLoad(place)
+            let loaded_id = self.mir_body.alloc_value(ValueData {
+                ty: final_ty,
+                origin: ValueOrigin::PlaceLoad(place),
+            });
+            self.value_address_space.insert(loaded_id, addr_space);
+            loaded_id
         };
 
-        let value_id = self.mir_body.alloc_value(ValueData {
-            ty: final_ty,
-            origin,
-        });
-
-        self.value_address_space.insert(value_id, addr_space);
-        value_id
+        (place_ref_id, value_id)
     }
 
     /// Computes the result type of applying a projection path to a type.

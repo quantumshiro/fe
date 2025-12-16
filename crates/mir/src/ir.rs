@@ -346,6 +346,12 @@ pub struct MatchArmLowering {
 pub struct DecisionTreeBinding {
     /// The variable name (e.g., "x", "y").
     pub name: String,
+    /// MIR value referencing the bound location (pointer/address expression).
+    ///
+    /// This is emitted as a `PlaceRef` value so downstream passes that care about
+    /// reference semantics can recover the underlying place/projection path even
+    /// when the binding's value is loaded eagerly.
+    pub place: ValueId,
     /// MIR value for the extracted field (computed via lower_occurrence).
     pub value: ValueId,
 }
