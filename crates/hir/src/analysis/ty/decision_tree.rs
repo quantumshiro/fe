@@ -161,7 +161,7 @@ impl ColumnSelectionPolicy {
         // This heuristics corresponds to the R pseudo heuristic in the paper.
         let mut shortest_occurrences = usize::MAX;
         for col in std::mem::take(&mut candidates) {
-            let occurrences = matrix.occurrences[col].0.len();
+            let occurrences = matrix.occurrences[col].len();
             match occurrences.cmp(&shortest_occurrences) {
                 std::cmp::Ordering::Less => {
                     candidates = vec![col];

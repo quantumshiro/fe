@@ -202,8 +202,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
 
         for (field_idx, field_ty) in field_types.iter().enumerate() {
             let is_nested_aggregate = field_ty.field_count(self.db) > 0;
-            let field_offset = layout::field_offset_bytes(self.db, ty, field_idx)
-                .unwrap_or(layout::WORD_SIZE_BYTES * field_idx as u64);
+            let field_offset = layout::field_offset_bytes_or_word_aligned(self.db, ty, field_idx);
 
             if is_nested_aggregate {
                 // Recursively handle nested aggregates

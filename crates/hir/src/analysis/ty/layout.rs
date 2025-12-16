@@ -96,6 +96,18 @@ pub fn field_offset_bytes(db: &dyn HirAnalysisDb, ty: TyId<'_>, field_idx: usize
     Some(offset)
 }
 
+/// Like [`field_offset_bytes`], but falls back to word-aligned offset for unknown layouts.
+///
+/// Returns `field_idx * WORD_SIZE_BYTES` when the precise offset cannot be computed.
+/// This matches Fe's EVM convention where unknown types occupy 32-byte slots.
+pub fn field_offset_bytes_or_word_aligned(
+    db: &dyn HirAnalysisDb,
+    ty: TyId<'_>,
+    field_idx: usize,
+) -> u64 {
+    field_offset_bytes(db, ty, field_idx).unwrap_or(WORD_SIZE_BYTES * field_idx as u64)
+}
+
 /// Computes the byte offset to a field within an enum variant's payload.
 ///
 /// This is the offset **relative to the payload start** (i.e., after the
@@ -123,6 +135,19 @@ pub fn variant_field_offset_bytes(
         offset += ty_size_bytes(db, *field_ty)?;
     }
     Some(offset)
+}
+
+/// Like [`variant_field_offset_bytes`], but falls back to word-aligned offset for unknown layouts.
+///
+/// Returns `field_idx * WORD_SIZE_BYTES` when the precise offset cannot be computed.
+pub fn variant_field_offset_bytes_or_word_aligned(
+    db: &dyn HirAnalysisDb,
+    enum_ty: TyId<'_>,
+    variant: EnumVariant<'_>,
+    field_idx: usize,
+) -> u64 {
+    variant_field_offset_bytes(db, enum_ty, variant, field_idx)
+        .unwrap_or(WORD_SIZE_BYTES * field_idx as u64)
 }
 
 /// Computes the byte size of a variant's payload (sum of field sizes).

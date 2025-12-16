@@ -53,8 +53,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let mut stores = Vec::with_capacity(lowered_args.len());
         for (field_idx, arg_value) in lowered_args.iter().enumerate() {
             let arg_ty = self.typed_body.expr_ty(self.db, call_args[field_idx].expr);
-            let offset = layout::variant_field_offset_bytes(self.db, enum_ty, variant, field_idx)
-                .unwrap_or(layout::WORD_SIZE_BYTES * field_idx as u64);
+            let offset = layout::variant_field_offset_bytes_or_word_aligned(
+                self.db, enum_ty, variant, field_idx,
+            );
             stores.push((offset, arg_ty, *arg_value));
         }
         let ptr_ty = match self.value_address_space(value_id) {

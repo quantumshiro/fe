@@ -78,7 +78,7 @@ pub enum IndexSource<Idx> {
 /// [Field(0), VariantField { ... }, Field(1)]
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProjectionPath<Ty, Var, Idx>(pub SmallVec<Projection<Ty, Var, Idx>, 4>);
+pub struct ProjectionPath<Ty, Var, Idx>(SmallVec<Projection<Ty, Var, Idx>, 4>);
 
 impl<Ty, Var, Idx> Default for ProjectionPath<Ty, Var, Idx> {
     fn default() -> Self {
