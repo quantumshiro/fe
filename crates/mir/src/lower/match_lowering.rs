@@ -522,11 +522,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let is_aggregate = result_ty.field_count(self.db) > 0;
 
         // Build Place with the full projection path
-        let place = Place {
-            base: scrutinee_value,
-            projection: path.clone(),
-            address_space: addr_space,
-        };
+        let place = Place::new(scrutinee_value, path.clone(), addr_space);
 
         // Use PlaceRef for aggregates (returns pointer), PlaceLoad for scalars (loads value)
         let origin = if is_aggregate {
@@ -604,11 +600,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let addr_space = self.value_address_space(scrutinee_value);
 
         // Create the Place
-        let place = Place {
-            base: scrutinee_value,
-            projection: path.clone(),
-            address_space: addr_space,
-        };
+        let place = Place::new(scrutinee_value, path.clone(), addr_space);
 
         let place_ref_id = self.mir_body.alloc_value(ValueData {
             ty: final_ty,

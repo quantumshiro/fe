@@ -407,6 +407,20 @@ pub struct Place<'db> {
     pub address_space: AddressSpaceKind,
 }
 
+impl<'db> Place<'db> {
+    pub fn new(
+        base: ValueId,
+        projection: ProjectionPath<'db>,
+        address_space: AddressSpaceKind,
+    ) -> Self {
+        Self {
+            base,
+            projection,
+            address_space,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IntrinsicValue<'db> {
     /// Which intrinsic operation this value represents.

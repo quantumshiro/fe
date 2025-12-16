@@ -204,11 +204,11 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let is_aggregate = info.field_ty.field_count(self.db) > 0;
 
         // Create Place with single-element projection path
-        let place = Place {
-            base: addr_value,
-            projection: ProjectionPath::from_projection(Projection::Field(info.field_idx)),
-            address_space: addr_space,
-        };
+        let place = Place::new(
+            addr_value,
+            ProjectionPath::from_projection(Projection::Field(info.field_idx)),
+            addr_space,
+        );
 
         // Use PlaceRef for aggregates (pointer only), PlaceLoad for scalars (load value)
         let origin = if is_aggregate {
