@@ -30,8 +30,8 @@ use crate::{
         AddressSpaceKind, BasicBlock, BasicBlockId, CallOrigin, CodeRegionRoot, ContractFunction,
         ContractFunctionKind, DecisionTreeBinding, FieldPtrOrigin, IntrinsicOp, IntrinsicValue,
         LoopInfo, MatchArmLowering, MatchArmPattern, MatchLoweringInfo, MirBody, MirFunction,
-        MirInst, MirModule, Place, SwitchOrigin, SwitchTarget, SwitchValue,
-        SyntheticValue, Terminator, ValueData, ValueId, ValueOrigin,
+        MirInst, MirModule, Place, SwitchOrigin, SwitchTarget, SwitchValue, SyntheticValue,
+        Terminator, ValueData, ValueId, ValueOrigin,
     },
     monomorphize::monomorphize_functions,
 };

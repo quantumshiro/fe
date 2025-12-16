@@ -64,7 +64,7 @@ impl BlockState {
 
     /// Returns the known Yul address expression for a binding, if it exists.
     #[allow(dead_code)]
-    pub(super) fn place_expr(&self, binding: &str) -> Option<String> {
+    pub(super) fn resolve_place(&self, binding: &str) -> Option<String> {
         self.place_exprs.get(binding).cloned()
     }
 
