@@ -3,10 +3,7 @@
 use hir::hir_def::ExprId;
 use mir::{
     BasicBlockId, LoopInfo, Terminator, ValueId, ValueOrigin,
-    ir::{
-        MatchArmLowering, MatchArmPattern, MatchLoweringInfo, SwitchOrigin, SwitchTarget,
-        SwitchValue,
-    },
+    ir::{MatchArmLowering, MatchLoweringInfo, SwitchOrigin, SwitchTarget, SwitchValue},
 };
 use rustc_hash::FxHashMap;
 
@@ -385,39 +382,12 @@ impl<'db> FunctionEmitter<'db> {
             .get(default.index())
             .ok_or_else(|| YulError::Unsupported("invalid block in match lowering".into()))?;
 
-        // Check if default corresponds to an arm, or if there's a wildcard arm that should go to default.
-        // For complete enum matches, the decision tree may not have a Default case even if
-        // there's a wildcard pattern in the source, so we look for wildcard arms explicitly.
         let mut default_state = ctx.cloned_state();
 
-        // Find any wildcard arm that wasn't emitted as a case (it should go to default).
-        // BUT: only do this for enum/literal matches where HIR patterns are meaningful.
-        // For tuple/struct matches, all arms are classified as Wildcard, so we can't
-        // use this heuristic - instead rely on the decision tree's Default case.
-        let emitted_blocks: std::collections::HashSet<_> =
-            targets.iter().map(|t| t.block).collect();
-        let has_non_wildcard_arms = match_info
-            .arms
-            .iter()
-            .any(|arm| !matches!(arm.pattern, MatchArmPattern::Wildcard));
-        let wildcard_arm = if has_non_wildcard_arms {
-            match_info.arms.iter().find(|arm| {
-                matches!(arm.pattern, MatchArmPattern::Wildcard)
-                    && !emitted_blocks.contains(&arm.block)
-            })
-        } else {
-            None
-        };
-
-        // First priority: default block directly maps to an arm (decision tree has Default case).
-        // Second priority: wildcard arm that wasn't already emitted as a case.
-        // Third priority: unreachable default or block emission.
-        //
-        // The decision tree already computes the correct default for each switch level,
-        // so we should trust it rather than rediscovering the wildcard arm. The wildcard
-        // heuristic is only a fallback for edge cases where the default block doesn't
-        // directly map to an arm.
-        let default_arm = block_to_arm.get(&default).copied().or(wildcard_arm);
+        // The decision tree computes the correct default for each switch level,
+        // routing wildcards and defaults appropriately. We trust its default block
+        // rather than rediscovering wildcard arms heuristically.
+        let default_arm = block_to_arm.get(&default).copied();
 
         let default_docs = if let Some(arm) = default_arm {
             // Emit arm body for default case.

@@ -143,23 +143,27 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 .to_string();
 
             let mut bindings = Vec::new();
-            let mut offset: u64 = 0;
-            for elem_pat in elem_pats {
-                let elem_ty = self.typed_body.pat_ty(self.db, *elem_pat);
-                let elem_size = layout::ty_size_bytes(self.db, elem_ty).unwrap_or(32);
-
+            let enum_ty = variant.ty;
+            let enum_variant = variant.variant;
+            for (field_idx, elem_pat) in elem_pats.iter().enumerate() {
                 if let Partial::Present(Pat::Path(elem_path, _)) = elem_pat.data(self.db, self.body)
                     && let Some(elem_path) = elem_path.to_opt()
                     && elem_path.is_bare_ident(self.db)
                 {
+                    let field_offset = layout::variant_field_offset_bytes(
+                        self.db,
+                        enum_ty,
+                        enum_variant,
+                        field_idx,
+                    )
+                    .unwrap_or(layout::WORD_SIZE_BYTES * field_idx as u64);
+
                     bindings.push(PatternBinding {
                         pat_id: *elem_pat,
-                        field_offset: offset,
+                        field_offset,
                         value: None,
                     });
                 }
-
-                offset += elem_size;
             }
 
             return Some(MatchArmPattern::Enum {

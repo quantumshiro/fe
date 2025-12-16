@@ -200,10 +200,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
 
-        let mut field_offset = 0u64;
-        for field_ty in field_types {
+        for (field_idx, field_ty) in field_types.iter().enumerate() {
             let is_nested_aggregate = field_ty.field_count(self.db) > 0;
-            let field_size = layout::ty_size_bytes(self.db, field_ty).unwrap_or(32);
+            let field_offset = layout::field_offset_bytes(self.db, ty, field_idx)
+                .unwrap_or(layout::WORD_SIZE_BYTES * field_idx as u64);
 
             if is_nested_aggregate {
                 // Recursively handle nested aggregates
@@ -212,7 +212,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     src_ptr
                 } else {
                     let ptr = self.mir_body.alloc_value(ValueData {
-                        ty: field_ty,
+                        ty: *field_ty,
                         origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
                             base: src_ptr,
                             offset_bytes: field_offset,
@@ -221,17 +221,17 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     self.value_address_space.insert(ptr, src_space);
                     ptr
                 };
-                self.emit_aggregate_copy(field_ty, src_field_ptr, ctx.with_offset(field_offset));
+                self.emit_aggregate_copy(*field_ty, src_field_ptr, ctx.with_offset(field_offset));
             } else {
                 // Load from source and store to destination
                 let src_offset_value = self.synthetic_u256(BigUint::from(field_offset));
                 let get_callable = self.core.make_callable(
                     ctx.expr,
                     CoreHelper::GetField,
-                    &[src_ptr_ty, field_ty],
+                    &[src_ptr_ty, *field_ty],
                 );
                 let loaded_value = self.mir_body.alloc_value(ValueData {
-                    ty: field_ty,
+                    ty: *field_ty,
                     origin: ValueOrigin::Call(CallOrigin {
                         expr: ctx.expr,
                         callable: get_callable,
@@ -246,7 +246,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     self.synthetic_u256(BigUint::from(ctx.dst_offset + field_offset));
                 let store_callable =
                     self.core
-                        .make_callable(ctx.expr, CoreHelper::StoreField, &[ptr_ty, field_ty]);
+                        .make_callable(ctx.expr, CoreHelper::StoreField, &[ptr_ty, *field_ty]);
                 let store_ret_ty = store_callable.ret_ty(self.db);
                 let store_call = self.mir_body.alloc_value(ValueData {
                     ty: store_ret_ty,
@@ -267,7 +267,6 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     },
                 );
             }
-            field_offset += field_size;
         }
     }
 

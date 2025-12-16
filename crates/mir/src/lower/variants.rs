@@ -50,12 +50,12 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let value_id = self.emit_alloc(expr, curr_block, total_size);
         self.emit_store_discriminant(expr, curr_block, value_id, variant_index);
 
-        let mut offset: u64 = 0;
         let mut stores = Vec::with_capacity(lowered_args.len());
-        for (i, arg_value) in lowered_args.iter().enumerate() {
-            let arg_ty = self.typed_body.expr_ty(self.db, call_args[i].expr);
+        for (field_idx, arg_value) in lowered_args.iter().enumerate() {
+            let arg_ty = self.typed_body.expr_ty(self.db, call_args[field_idx].expr);
+            let offset = layout::variant_field_offset_bytes(self.db, enum_ty, variant, field_idx)
+                .unwrap_or(layout::WORD_SIZE_BYTES * field_idx as u64);
             stores.push((offset, arg_ty, *arg_value));
-            offset += layout::ty_size_bytes(self.db, arg_ty).unwrap_or(32);
         }
         let ptr_ty = match self.value_address_space(value_id) {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
