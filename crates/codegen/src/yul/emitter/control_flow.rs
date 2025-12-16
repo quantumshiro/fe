@@ -343,6 +343,11 @@ impl<'db> FunctionEmitter<'db> {
             if let Some(arm) = block_to_arm.get(&target.block) {
                 // Emit decision tree bindings (handles tuple/struct/enum patterns uniformly).
                 for binding in &arm.decision_tree_bindings {
+                    // Cache the address expression for reference-semantics consumers.
+                    // This does not emit any Yul code today.
+                    if let Ok(place_expr) = self.lower_value(binding.place, &case_state) {
+                        case_state.insert_place_expr(binding.name.clone(), place_expr);
+                    }
                     let load_expr = self.lower_value(binding.value, &case_state)?;
                     let temp_name = case_state.alloc_local();
                     case_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
