@@ -538,7 +538,7 @@ impl<'db> FunctionEmitter<'db> {
         for proj in place.projection.iter() {
             match proj {
                 Projection::Field(field_idx) => {
-                    // Compute offset by summing sizes of fields before this one
+                    // Use centralized layout API for field offset
                     let field_types = current_ty.field_types(self.db);
                     if field_types.is_empty() {
                         return Err(YulError::Unsupported(format!(
@@ -546,16 +546,8 @@ impl<'db> FunctionEmitter<'db> {
                             field_idx
                         )));
                     }
-                    for i in 0..*field_idx {
-                        let field_ty = field_types.get(i).ok_or_else(|| {
-                            YulError::Unsupported(format!(
-                                "place projection: field index {} out of bounds (have {} fields)",
-                                i,
-                                field_types.len()
-                            ))
-                        })?;
-                        total_offset += layout::ty_size_bytes_or_word(self.db, *field_ty);
-                    }
+                    total_offset +=
+                        layout::field_offset_bytes_or_word_aligned(self.db, current_ty, *field_idx);
                     // Update current type to the field's type
                     current_ty = *field_types.get(*field_idx).ok_or_else(|| {
                         YulError::Unsupported(format!(
@@ -570,23 +562,14 @@ impl<'db> FunctionEmitter<'db> {
                     enum_ty,
                     field_idx,
                 } => {
-                    // Skip discriminant then compute field offset
+                    // Skip discriminant then use centralized layout API for field offset
                     total_offset += layout::DISCRIMINANT_SIZE_BYTES;
+                    total_offset += layout::variant_field_offset_bytes_or_word_aligned(
+                        self.db, *enum_ty, *variant, *field_idx,
+                    );
+                    // Update current type to the field's type
                     let ctor = ConstructorKind::Variant(*variant, *enum_ty);
                     let field_types = ctor.field_types(self.db);
-                    if field_types.is_empty() {
-                        return Err(YulError::Unsupported(format!(
-                            "place projection: no variant field types but accessing field {}",
-                            field_idx
-                        )));
-                    }
-                    for (i, field_ty) in field_types.iter().enumerate() {
-                        if i >= *field_idx {
-                            break;
-                        }
-                        total_offset += layout::ty_size_bytes_or_word(self.db, *field_ty);
-                    }
-                    // Update current type to the field's type
                     current_ty = *field_types.get(*field_idx).ok_or_else(|| {
                         YulError::Unsupported(format!(
                             "place projection: target variant field {} out of bounds (have {} fields)",
