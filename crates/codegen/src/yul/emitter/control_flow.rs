@@ -3,7 +3,10 @@
 use hir::hir_def::ExprId;
 use mir::{
     BasicBlockId, LoopInfo, Terminator, ValueId, ValueOrigin,
-    ir::{MatchArmLowering, MatchLoweringInfo, SwitchOrigin, SwitchTarget, SwitchValue},
+    ir::{
+        DecisionTreeBinding, MatchArmLowering, MatchLoweringInfo, SwitchOrigin, SwitchTarget,
+        SwitchValue,
+    },
 };
 use rustc_hash::FxHashMap;
 
@@ -34,6 +37,32 @@ impl<'state, 'docs> BlockEmitCtx<'state, 'docs> {
 }
 
 impl<'db> FunctionEmitter<'db> {
+    /// Emits decision tree bindings into Yul variable declarations.
+    ///
+    /// For each binding:
+    /// 1. Caches the place expression for reference-semantics consumers
+    /// 2. Loads the value and stores it in a fresh temporary
+    /// 3. Records the binding name -> temporary mapping in state
+    fn emit_decision_tree_bindings(
+        &self,
+        bindings: &[DecisionTreeBinding],
+        state: &mut BlockState,
+        docs: &mut Vec<YulDoc>,
+    ) -> Result<(), YulError> {
+        for binding in bindings {
+            // Cache the address expression for reference-semantics consumers.
+            // This does not emit any Yul code today.
+            if let Ok(place_expr) = self.lower_value(binding.place, state) {
+                state.insert_place_expr(binding.name.clone(), place_expr);
+            }
+            let load_expr = self.lower_value(binding.value, state)?;
+            let temp_name = state.alloc_local();
+            docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
+            state.insert_binding(binding.name.clone(), temp_name);
+        }
+        Ok(())
+    }
+
     /// Emits the Yul docs for a basic block starting without any active loop context.
     ///
     /// * `block_id` - Entry block to render.
@@ -341,18 +370,11 @@ impl<'db> FunctionEmitter<'db> {
 
             // If this target block corresponds to a match arm, emit bindings and body.
             if let Some(arm) = block_to_arm.get(&target.block) {
-                // Emit decision tree bindings (handles tuple/struct/enum patterns uniformly).
-                for binding in &arm.decision_tree_bindings {
-                    // Cache the address expression for reference-semantics consumers.
-                    // This does not emit any Yul code today.
-                    if let Ok(place_expr) = self.lower_value(binding.place, &case_state) {
-                        case_state.insert_place_expr(binding.name.clone(), place_expr);
-                    }
-                    let load_expr = self.lower_value(binding.value, &case_state)?;
-                    let temp_name = case_state.alloc_local();
-                    case_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
-                    case_state.insert_binding(binding.name.clone(), temp_name);
-                }
+                self.emit_decision_tree_bindings(
+                    &arm.decision_tree_bindings,
+                    &mut case_state,
+                    &mut case_docs,
+                )?;
 
                 // Emit arm body - either as a terminating block or as a value assignment.
                 case_docs = self.emit_match_arm_body(
@@ -395,21 +417,12 @@ impl<'db> FunctionEmitter<'db> {
         let default_arm = block_to_arm.get(&default).copied();
 
         let default_docs = if let Some(arm) = default_arm {
-            // Emit arm body for default case.
             let mut arm_docs = Vec::new();
-
-            // Emit decision tree bindings (handles tuple/struct/enum patterns uniformly).
-            for binding in &arm.decision_tree_bindings {
-                // Cache the address expression for reference-semantics consumers.
-                // This does not emit any Yul code today.
-                if let Ok(place_expr) = self.lower_value(binding.place, &default_state) {
-                    default_state.insert_place_expr(binding.name.clone(), place_expr);
-                }
-                let load_expr = self.lower_value(binding.value, &default_state)?;
-                let temp_name = default_state.alloc_local();
-                arm_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
-                default_state.insert_binding(binding.name.clone(), temp_name);
-            }
+            self.emit_decision_tree_bindings(
+                &arm.decision_tree_bindings,
+                &mut default_state,
+                &mut arm_docs,
+            )?;
 
             self.emit_match_arm_body(
                 arm,
