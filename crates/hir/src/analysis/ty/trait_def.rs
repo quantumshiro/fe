@@ -90,14 +90,19 @@ pub fn resolve_trait_method<'db>(
     inst: TraitInstId<'db>,
     method: IdentId<'db>,
 ) -> Option<Func<'db>> {
-    let ingot = inst.def(db).ingot(db);
     let canonical = Canonical::new(db, inst);
-    for implementor in impls_for_trait(db, ingot, canonical) {
-        let implementor = implementor.instantiate_identity();
-        if let Some(callable) = implementor.methods(db).get(&method)
-            && let CallableDef::Func(func) = callable
-        {
-            return Some(*func);
+
+    // Search Self's ingot, and the trait's ingot.
+    for ingot in [inst.self_ty(db).ingot(db), Some(inst.def(db).ingot(db))] {
+        let Some(ingot) = ingot else { continue };
+
+        for implementor in impls_for_trait(db, ingot, canonical) {
+            let implementor = implementor.instantiate_identity();
+            if let Some(callable) = implementor.methods(db).get(&method)
+                && let CallableDef::Func(func) = callable
+            {
+                return Some(*func);
+            }
         }
     }
     None
