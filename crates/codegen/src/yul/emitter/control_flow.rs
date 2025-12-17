@@ -40,7 +40,7 @@ impl<'db> FunctionEmitter<'db> {
     /// Emits decision tree bindings into Yul variable declarations.
     ///
     /// For each binding:
-    /// 1. Caches the place expression for reference-semantics consumers
+    /// 1. Caches the place expression (API stub for future reference semantics)
     /// 2. Loads the value and stores it in a fresh temporary
     /// 3. Records the binding name -> temporary mapping in state
     fn emit_decision_tree_bindings(
@@ -50,8 +50,7 @@ impl<'db> FunctionEmitter<'db> {
         docs: &mut Vec<YulDoc>,
     ) -> Result<(), YulError> {
         for binding in bindings {
-            // Cache the address expression for reference-semantics consumers.
-            // This does not emit any Yul code today.
+            // API stub: cache address expression for future reference semantics.
             if let Ok(place_expr) = self.lower_value(binding.place, state) {
                 state.insert_place_expr(binding.name.clone(), place_expr);
             }

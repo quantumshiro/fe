@@ -7,10 +7,8 @@ use std::cell::Cell;
 #[derive(Clone)]
 pub(super) struct BlockState {
     locals: FxHashMap<String, String>,
-    /// Optional mapping from Fe bindings to the Yul expression representing their address.
-    ///
-    /// This is populated opportunistically (e.g. from `PlaceRef` match bindings) to
-    /// support future reference-semantics codegen without changing output today.
+    /// API stub: mapping from Fe bindings to the Yul expression representing their address.
+    /// Populated for future reference semantics support.
     place_exprs: FxHashMap<String, String>,
     next_local: Rc<Cell<usize>>,
     /// Mapping from MIR ValueId index to Yul temp name for values bound in this scope.
@@ -62,7 +60,8 @@ impl BlockState {
         self.locals.get(binding).cloned()
     }
 
-    /// Returns the known Yul address expression for a binding, if it exists.
+    /// API stub: returns the Yul address expression for a binding, if cached.
+    /// For future reference semantics support.
     #[allow(dead_code)]
     pub(super) fn resolve_place(&self, binding: &str) -> Option<String> {
         self.place_exprs.get(binding).cloned()
