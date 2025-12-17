@@ -400,6 +400,11 @@ impl<'db> FunctionEmitter<'db> {
 
             // Emit decision tree bindings (handles tuple/struct/enum patterns uniformly).
             for binding in &arm.decision_tree_bindings {
+                // Cache the address expression for reference-semantics consumers.
+                // This does not emit any Yul code today.
+                if let Ok(place_expr) = self.lower_value(binding.place, &default_state) {
+                    default_state.insert_place_expr(binding.name.clone(), place_expr);
+                }
                 let load_expr = self.lower_value(binding.value, &default_state)?;
                 let temp_name = default_state.alloc_local();
                 arm_docs.push(YulDoc::line(format!("let {temp_name} := {load_expr}")));
