@@ -34,7 +34,10 @@ impl<'db> GenericArgListId<'db> {
                 self.data(db)
                     .iter()
                     .map(|p| match p {
-                        GenericArg::Const(_) => "<const>".into(),
+                        GenericArg::Const(c) => c
+                            .body
+                            .to_opt()
+                            .map_or_else(|| "<missing>".into(), |b| b.pretty_print(db)),
                         GenericArg::Type(t) => {
                             t.ty.to_opt()
                                 .map_or_else(|| "<missing>".into(), |t| t.pretty_print(db))

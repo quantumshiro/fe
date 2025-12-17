@@ -4,12 +4,12 @@ use salsa::Accumulator as _;
 use crate::{
     SelectorError, SelectorErrorKind,
     hir_def::{
-        AssocConstDef, AssocTyDef, Attr, AttrListId, Body, BodyKind, BodySourceMap,
-        EffectParamListId, Expr, ExprId, FieldDef, FieldDefListId, Func, FuncParam,
-        FuncParamListId, FuncParamName, GenericArg, GenericArgListId, GenericParamListId, IdentId,
-        Impl, ImplTrait, IntegerId, ItemModifier, LitKind, MatchArm, Mod, NodeStore, NormalAttr,
-        Partial, Pat, PathId, PathKind, Stmt, StmtId, Struct, TrackedItemVariant, TraitRefId,
-        TupleTypeId, TypeGenericArg, TypeId, TypeKind, Visibility, WhereClauseId,
+        AssocConstDef, AssocTyDef, AttrListId, Body, BodyKind, BodySourceMap, EffectParamListId,
+        Expr, ExprId, FieldDef, FieldDefListId, Func, FuncParam, FuncParamListId, FuncParamName,
+        GenericArg, GenericArgListId, GenericParamListId, IdentId, Impl, ImplTrait, IntegerId,
+        ItemModifier, LitKind, MatchArm, Mod, NodeStore, Partial, Pat, PathId, PathKind, Stmt,
+        StmtId, Struct, TrackedItemVariant, TraitRefId, TupleTypeId, TypeGenericArg, TypeId,
+        TypeKind, Visibility, WhereClauseId,
     },
     lower::{FileLowerCtxt, body::BodyCtxt},
     span::{HirOrigin, MsgDesugared, MsgDesugaredFocus},
@@ -51,21 +51,8 @@ pub(super) fn lower_msg_as_mod<'db>(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Msg
     // Insert `use super::*` so msg modules can see parent types
     ctxt.insert_synthetic_super_use();
 
-    // Create the #[msg] attribute to mark this as a desugared msg module
-    let msg_attr_path = PathId::from_ident(db, IdentId::new(db, "msg".to_string()));
-    let msg_attr = Attr::Normal(NormalAttr {
-        path: Partial::Present(msg_attr_path),
-        args: vec![],
-    });
-
-    // Combine with any existing attributes on the msg block
-    let mut attrs = vec![msg_attr];
-    if let Some(attr_list) = ast.attr_list() {
-        for attr in attr_list {
-            attrs.push(Attr::lower_ast(ctxt, attr));
-        }
-    }
-    let attributes = AttrListId::new(db, attrs);
+    // Lower any existing attributes on the msg block
+    let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
 
     let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
 

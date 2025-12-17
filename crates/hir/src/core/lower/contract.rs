@@ -10,7 +10,8 @@ use crate::{
         FieldDefListId, Func, FuncParam, FuncParamListId, FuncParamName, GenericArg,
         GenericArgListId, GenericParamListId, IdentId, IntegerId, ItemModifier, LitKind, MatchArm,
         NormalAttr, Partial, Pat, PatId, PathId, PathKind, Stmt, StmtId, TrackedItemVariant,
-        TypeGenericArg, TypeId, TypeKind, WhereClauseId,
+        TypeGenericArg, TypeId, TypeKind, Use, Visibility, WhereClauseId,
+        use_tree::{UsePathId, UsePathSegment},
     },
     lower::{FileLowerCtxt, body::BodyCtxt, item::lower_uses_clause_opt},
     span::{
@@ -219,32 +220,32 @@ impl<'a, 'ctxt, 'db> HirBuilder<'a, 'ctxt, 'db> {
         )
     }
 
-    /// Creates a `core::revert(0, 0)` call.
+    /// Creates a `revert(0, 0)` call.
     fn revert_call(&mut self) -> ExprId {
-        let revert = self.path_expr(&["core", "revert"]);
+        let revert = self.path_expr(&["revert"]);
         let z0 = self.int_lit(0);
         let z1 = self.int_lit(0);
         self.call(revert, vec![z0, z1])
     }
 
-    /// Creates `core::return_data(ptr, len)` call.
+    /// Creates `return_data(ptr, len)` call.
     fn return_data_call(&mut self, ptr: ExprId, len: ExprId) -> ExprId {
-        let return_data = self.path_expr(&["core", "return_data"]);
+        let return_data = self.path_expr(&["return_data"]);
         self.call(return_data, vec![ptr, len])
     }
 
-    /// Creates an Ok pattern: `core::Result::Ok(inner_pat)`.
+    /// Creates an Ok pattern: `Result::Ok(inner_pat)`.
     fn ok_pat(&mut self, inner: PatId) -> PatId {
-        let ok_path = self.path(&["core", "Result", "Ok"]);
+        let ok_path = self.path(&["Result", "Ok"]);
         self.body_ctxt.push_pat(
             Pat::PathTuple(Partial::Present(ok_path), vec![inner]),
             self.origin(),
         )
     }
 
-    /// Creates an Err pattern: `core::Result::Err(inner_pat)`.
+    /// Creates an Err pattern: `Result::Err(inner_pat)`.
     fn err_pat(&mut self, inner: PatId) -> PatId {
-        let err_path = self.path(&["core", "Result", "Err"]);
+        let err_path = self.path(&["Result", "Err"]);
         self.body_ctxt.push_pat(
             Pat::PathTuple(Partial::Present(err_path), vec![inner]),
             self.origin(),
@@ -335,9 +336,9 @@ impl<'a, 'ctxt, 'db> HirBuilder<'a, 'ctxt, 'db> {
     /// Creates a path expression with generic type arguments appended.
     /// E.g., `path_with_generic(&["core", "effect_ref"], "StorPtr", ty)` creates
     /// `core::effect_ref::StorPtr<ty>`.
+    /// If base is empty, creates just `StorPtr<ty>`.
     fn path_with_generic(&self, base: &[&str], name: &str, ty: TypeId<'db>) -> PathId<'db> {
         let db = self.db();
-        let base_path = PathId::from_segments(db, base);
         let generic_args = GenericArgListId::new(
             db,
             vec![GenericArg::Type(TypeGenericArg {
@@ -345,13 +346,25 @@ impl<'a, 'ctxt, 'db> HirBuilder<'a, 'ctxt, 'db> {
             })],
             true,
         );
-        base_path.push(
-            db,
-            PathKind::Ident {
-                ident: Partial::Present(IdentId::new(db, name.to_string())),
-                generic_args,
-            },
-        )
+        if base.is_empty() {
+            PathId::new(
+                db,
+                PathKind::Ident {
+                    ident: Partial::Present(IdentId::new(db, name.to_string())),
+                    generic_args,
+                },
+                None,
+            )
+        } else {
+            let base_path = PathId::from_segments(db, base);
+            base_path.push(
+                db,
+                PathKind::Ident {
+                    ident: Partial::Present(IdentId::new(db, name.to_string())),
+                    generic_args,
+                },
+            )
+        }
     }
 
     /// Creates a type from a path.
@@ -542,7 +555,19 @@ fn lower_contract_entrypoints_and_handlers<'db>(
         return;
     }
 
-    // First, synthesize per-arm handler functions so the runtime can call them.
+    // Create the module `mod __ContractName { ... }` to contain all generated functions.
+    let mod_name_str = format!("__{}", contract_name.data(db));
+    let mod_name = Partial::Present(IdentId::new(db, mod_name_str));
+    let mod_id = ctxt.joined_id(TrackedItemVariant::Mod(mod_name));
+    ctxt.enter_item_scope(mod_id, true);
+
+    // Insert `use super::*` to access parent scope items
+    ctxt.insert_synthetic_super_use();
+
+    // Insert use statements for core/std types used in generated code
+    insert_contract_use_statements(ctxt);
+
+    // Synthesize per-arm handler functions so the runtime can call them.
     for (recv_idx, recv_ast) in contract_ast.recvs().enumerate() {
         let msg_path = recv_ast.path().map(|p| PathId::lower_ast(ctxt, p));
 
@@ -563,18 +588,77 @@ fn lower_contract_entrypoints_and_handlers<'db>(
         }
     }
 
-    // Then, synthesize init/runtime entrypoints.
+    // Synthesize init/runtime entrypoints.
     lower_contract_init_entrypoint_func(ctxt, contract, contract_ptr.clone(), contract_name);
     lower_contract_runtime_entrypoint_func(ctxt, contract, contract_name, contract_ast);
+
+    // Create and close the module
+    let desugared = ContractLoweringDesugared {
+        contract: contract_ptr,
+        recv_idx: None,
+        arm_idx: None,
+        focus: ContractLoweringDesugaredFocus::Contract,
+    };
+    let origin = HirOrigin::desugared(desugared);
+    let mod_ = crate::hir_def::Mod::new(
+        db,
+        mod_id,
+        mod_name,
+        AttrListId::new(db, vec![]),
+        Visibility::Private,
+        ctxt.top_mod(),
+        origin,
+    );
+    ctxt.leave_item_scope(mod_);
+}
+
+/// Inserts use statements for common core/std types used in generated contract code.
+fn insert_contract_use_statements(ctxt: &mut FileLowerCtxt<'_>) {
+    let db = ctxt.db();
+
+    // Helper to insert a single use statement
+    let mut insert_use = |segments: &[&str]| {
+        let segs: Vec<_> = segments
+            .iter()
+            .map(|s| Partial::Present(UsePathSegment::Ident(IdentId::new(db, s.to_string()))))
+            .collect();
+        let path = Partial::Present(UsePathId::new(db, segs));
+        let id = ctxt.joined_id(TrackedItemVariant::Use(path));
+        ctxt.enter_item_scope(id, false);
+        let top_mod = ctxt.top_mod();
+        let origin = HirOrigin::synthetic();
+        let use_ = Use::new(db, id, path, None, Visibility::Private, top_mod, origin);
+        ctxt.leave_item_scope(use_);
+    };
+
+    // Core types
+    insert_use(&["core", "effect_ref", "StorPtr"]);
+    insert_use(&["core", "intrinsic", "contract_field_slot"]);
+    insert_use(&["core", "abi", "prefix"]);
+    insert_use(&["core", "abi", "decode_or_revert"]);
+    insert_use(&["core", "codecopy"]);
+    insert_use(&["core", "code_region_len"]);
+    insert_use(&["core", "code_region_offset"]);
+    insert_use(&["core", "return_data"]);
+    insert_use(&["core", "revert"]);
+    insert_use(&["core", "Result"]);
+
+    // Std types
+    insert_use(&["std", "evm", "calldata", "CallData"]);
+    insert_use(&["std", "abi", "Sol"]);
+    insert_use(&["std", "abi", "sol", "SolDecoder"]);
+    insert_use(&["std", "abi", "sol", "SolEncoder"]);
 }
 
 fn mk_contract_attr<'db>(db: &'db dyn HirDb, name: &str, contract_name: IdentId<'db>) -> Attr<'db> {
     let path = PathId::from_ident(db, IdentId::new(db, name.to_string()));
+    // In attribute syntax like `#[attr(Foo)]`, Foo is the "key" (a path), not a value.
+    // The value is only present when there's `= something` after the key.
     Attr::Normal(NormalAttr {
         path: Partial::Present(path),
         args: vec![crate::hir_def::attr::AttrArg {
-            key: Partial::Absent,
-            value: Partial::Present(crate::hir_def::attr::AttrArgValue::Ident(contract_name)),
+            key: Partial::Present(PathId::from_ident(db, contract_name)),
+            value: None,
         }],
     })
 }
@@ -670,12 +754,7 @@ fn lower_contract_recv_arm_handler_func<'db>(
         focus: ContractLoweringDesugaredFocus::RecvArm,
     };
 
-    let fn_name_str = format!(
-        "__{}_recv_{}_{}",
-        contract.name(db).unwrap().data(db),
-        recv_idx,
-        arm_idx
-    );
+    let fn_name_str = format!("recv_{}_{}", recv_idx, arm_idx);
     let fn_name = Partial::Present(IdentId::new(db, fn_name_str));
     let id = ctxt.joined_id(TrackedItemVariant::Func(fn_name));
     ctxt.enter_item_scope(id, false);
@@ -824,10 +903,7 @@ fn lower_contract_init_entrypoint_func<'db>(
         focus: ContractLoweringDesugaredFocus::InitBlock,
     };
 
-    let init_fn_name = Partial::Present(IdentId::new(
-        db,
-        format!("__{}_init", contract_name.data(db)),
-    ));
+    let init_fn_name = Partial::Present(IdentId::new(db, "init".to_string()));
     let init_fn_id = ctxt.joined_id(TrackedItemVariant::Func(init_fn_name));
     ctxt.enter_item_scope(init_fn_id, false);
 
@@ -838,25 +914,25 @@ fn lower_contract_init_entrypoint_func<'db>(
 
     let mut body_ctxt = BodyCtxt::new(ctxt, ctxt.joined_id(TrackedItemVariant::FuncBody));
     let mut stmts = Vec::new();
-    let runtime_fn_name = format!("__{}_runtime", contract_name.data(db));
+    let runtime_fn_name = "runtime".to_string();
 
     {
         let mut b = HirBuilder::new(&mut body_ctxt, desugared.clone());
 
-        // let __len = core::code_region_len(__Contract_runtime)
+        // let __len = code_region_len(runtime)
         let runtime_expr = b.var_expr(&runtime_fn_name);
-        let code_region_len = b.path_expr(&["core", "code_region_len"]);
+        let code_region_len = b.path_expr(&["code_region_len"]);
         let len_call = b.call(code_region_len, vec![runtime_expr]);
         b.let_stmt(&mut stmts, "__len", false, len_call);
 
-        // let __offset = core::code_region_offset(__Contract_runtime)
+        // let __offset = code_region_offset(runtime)
         let runtime_expr2 = b.var_expr(&runtime_fn_name);
-        let code_region_offset = b.path_expr(&["core", "code_region_offset"]);
+        let code_region_offset = b.path_expr(&["code_region_offset"]);
         let offset_call = b.call(code_region_offset, vec![runtime_expr2]);
         b.let_stmt(&mut stmts, "__offset", false, offset_call);
 
-        // core::codecopy(dest: 0, __offset, __len)
-        let codecopy = b.path_expr(&["core", "codecopy"]);
+        // codecopy(dest: 0, __offset, __len)
+        let codecopy = b.path_expr(&["codecopy"]);
         let dest0 = b.int_lit(0);
         let offset_expr = b.var_expr("__offset");
         let len_expr = b.var_expr("__len");
@@ -866,7 +942,7 @@ fn lower_contract_init_entrypoint_func<'db>(
         );
         b.expr_stmt(&mut stmts, codecopy_call);
 
-        // core::return_data(0, __len)
+        // return_data(0, __len)
         let len_expr2 = b.var_expr("__len");
         let dest0b = b.int_lit(0);
         let ret_call = b.return_data_call(dest0b, len_expr2);
@@ -913,10 +989,7 @@ fn lower_contract_runtime_entrypoint_func<'db>(
         focus: ContractLoweringDesugaredFocus::Contract,
     };
 
-    let runtime_fn_name = Partial::Present(IdentId::new(
-        db,
-        format!("__{}_runtime", contract_name.data(db)),
-    ));
+    let runtime_fn_name = Partial::Present(IdentId::new(db, "runtime".to_string()));
     let runtime_fn_id = ctxt.joined_id(TrackedItemVariant::Func(runtime_fn_name));
     ctxt.enter_item_scope(runtime_fn_id, false);
 
@@ -937,15 +1010,13 @@ fn lower_contract_runtime_entrypoint_func<'db>(
                 continue;
             };
 
-            // let field = core::effect_ref::StorPtr<FieldTy>::at_offset(
-            //     core::intrinsic::contract_field_slot(idx)
-            // )
+            // let field = StorPtr<FieldTy>::at_offset(contract_field_slot(idx))
             let slot_idx = b.int_lit(idx);
-            let field_slot = b.path_expr(&["core", "intrinsic", "contract_field_slot"]);
+            let field_slot = b.path_expr(&["contract_field_slot"]);
             let slot_expr = b.call(field_slot, vec![slot_idx]);
 
             let stor_ptr_path = b
-                .path_with_generic(&["core", "effect_ref"], "StorPtr", field_ty)
+                .path_with_generic(&[], "StorPtr", field_ty)
                 .push_ident(db, IdentId::new(db, "at_offset".to_string()));
             let at_offset = b.path_id_expr(stor_ptr_path);
             let ptr_init = b.call(at_offset, vec![slot_expr]);
@@ -962,23 +1033,23 @@ fn lower_contract_runtime_entrypoint_func<'db>(
     }
 
     // let __calldata = CallData {}
-    // let __prefix = core::abi::prefix(__calldata)
-    // let __selector = std::abi::Sol::selector_from_prefix(__prefix.word0)
+    // let __prefix = prefix(__calldata)
+    // let __selector = Sol::selector_from_prefix(__prefix.word0)
     {
         let mut b = HirBuilder::new(&mut body_ctxt, desugared.clone());
 
-        let call_data_path = b.path(&["std", "evm", "calldata", "CallData"]);
+        let call_data_path = b.path(&["CallData"]);
         let call_data_init = b.record_init(call_data_path, vec![]);
         b.let_stmt(&mut stmts, "__calldata", false, call_data_init);
 
         let call_data_expr = b.var_expr("__calldata");
-        let prefix_fn = b.path_expr(&["core", "abi", "prefix"]);
+        let prefix_fn = b.path_expr(&["prefix"]);
         let prefix_call = b.call(prefix_fn, vec![call_data_expr]);
         b.let_stmt(&mut stmts, "__prefix", false, prefix_call);
 
         let prefix_var = b.var_expr("__prefix");
         let word0 = b.field_access(prefix_var, "word0");
-        let sol_selector = b.path_expr(&["std", "abi", "Sol", "selector_from_prefix"]);
+        let sol_selector = b.path_expr(&["Sol", "selector_from_prefix"]);
         let selector_call = b.call(sol_selector, vec![word0]);
         b.let_stmt(&mut stmts, "__selector", false, selector_call);
     }
@@ -995,10 +1066,7 @@ fn lower_contract_runtime_entrypoint_func<'db>(
         };
 
         for (arm_idx, arm_ast) in arms_ast.into_iter().enumerate() {
-            let handler_name = IdentId::new(
-                db,
-                format!("__{}_recv_{}_{}", contract_name.data(db), recv_idx, arm_idx),
-            );
+            let handler_name = IdentId::new(db, format!("recv_{}_{}", recv_idx, arm_idx));
             let arm_desugared = ContractLoweringDesugared {
                 contract: contract_ptr.clone(),
                 recv_idx: Some(recv_idx),
@@ -1109,12 +1177,12 @@ fn lower_contract_runtime_dispatch_arm_body<'ctxt, 'db>(
     let db = body_ctxt.f_ctxt.db();
     let mut stmts: Vec<StmtId> = Vec::new();
 
-    // Build common types used for decoding
+    // Build common types used for decoding (use imported CallData type)
     let call_data_ty = TypeId::new(
         db,
-        TypeKind::Path(Partial::Present(PathId::from_segments(
+        TypeKind::Path(Partial::Present(PathId::from_ident(
             db,
-            &["std", "evm", "calldata", "CallData"],
+            IdentId::new(db, "CallData".to_string()),
         ))),
     );
     let sol_decoder_args = GenericArgListId::new(
@@ -1128,42 +1196,43 @@ fn lower_contract_runtime_dispatch_arm_body<'ctxt, 'db>(
     {
         let mut b = HirBuilder::new(body_ctxt, desugared.clone());
 
-        // let mut __d = std::abi::sol::SolDecoder<CallData>::with_base(__calldata, 4)
+        // let mut __d = SolDecoder<CallData>::with_base(__calldata, 4)
         let call_data_expr = b.body_ctxt.push_expr(
             Expr::Path(Partial::Present(PathId::from_ident(db, call_data_ident))),
             HirOrigin::desugared(desugared.clone()),
         );
-        let sol_decoder_path = PathId::from_segments(db, &["std", "abi", "sol"])
-            .push(
-                db,
-                PathKind::Ident {
-                    ident: Partial::Present(IdentId::new(db, "SolDecoder".to_string())),
-                    generic_args: sol_decoder_args,
-                },
-            )
-            .push_ident(db, IdentId::new(db, "with_base".to_string()));
+        let sol_decoder_path = PathId::new(
+            db,
+            PathKind::Ident {
+                ident: Partial::Present(IdentId::new(db, "SolDecoder".to_string())),
+                generic_args: sol_decoder_args,
+            },
+            None,
+        )
+        .push_ident(db, IdentId::new(db, "with_base".to_string()));
         let sol_decoder = b.path_id_expr(sol_decoder_path);
         let base4 = b.int_lit(4);
         let d_init = b.call(sol_decoder, vec![call_data_expr, base4]);
         b.let_stmt(&mut stmts, "__d", true, d_init);
     }
 
-    // Build types for decode_or_revert generic call
+    // Build types for decode_or_revert generic call (use imported Sol type)
     let args_ty_path = variant_ty_path.push_ident(db, IdentId::new(db, "Args".to_string()));
     let args_ty = TypeId::new(db, TypeKind::Path(Partial::Present(args_ty_path)));
     let sol_ty = TypeId::new(
         db,
-        TypeKind::Path(Partial::Present(PathId::from_segments(
+        TypeKind::Path(Partial::Present(PathId::from_ident(
             db,
-            &["std", "abi", "Sol"],
+            IdentId::new(db, "Sol".to_string()),
         ))),
     );
-    let sol_decoder_ty_path = PathId::from_segments(db, &["std", "abi", "sol"]).push(
+    let sol_decoder_ty_path = PathId::new(
         db,
         PathKind::Ident {
             ident: Partial::Present(IdentId::new(db, "SolDecoder".to_string())),
             generic_args: sol_decoder_args,
         },
+        None,
     );
     let sol_decoder_ty = TypeId::new(db, TypeKind::Path(Partial::Present(sol_decoder_ty_path)));
     let decode_or_revert_args = GenericArgListId::new(
@@ -1185,14 +1254,15 @@ fn lower_contract_runtime_dispatch_arm_body<'ctxt, 'db>(
     {
         let mut b = HirBuilder::new(body_ctxt, desugared.clone());
 
-        // let __args: <Variant>::Args = core::abi::decode_or_revert<Sol, Args, SolDecoder>(__d)
+        // let __args: <Variant>::Args = decode_or_revert<Sol, Args, SolDecoder>(__d)
         let d_expr = b.var_expr("__d");
-        let decode_or_revert_path = PathId::from_segments(db, &["core", "abi"]).push(
+        let decode_or_revert_path = PathId::new(
             db,
             PathKind::Ident {
                 ident: Partial::Present(IdentId::new(db, "decode_or_revert".to_string())),
                 generic_args: decode_or_revert_args,
             },
+            None,
         );
         let decode_or_revert = b.path_id_expr(decode_or_revert_path);
         let args_value = b.call(decode_or_revert, vec![d_expr]);
@@ -1233,8 +1303,8 @@ fn lower_contract_runtime_dispatch_arm_body<'ctxt, 'db>(
         // let __result = handler_call
         b.let_stmt(&mut stmts, "__result", false, handler_call);
 
-        // let mut __enc = std::abi::sol::SolEncoder::new()
-        let sol_encoder = b.path_expr(&["std", "abi", "sol", "SolEncoder", "new"]);
+        // let mut __enc = SolEncoder::new()
+        let sol_encoder = b.path_expr(&["SolEncoder", "new"]);
         let enc_init = b.call(sol_encoder, vec![]);
         b.let_stmt(&mut stmts, "__enc", true, enc_init);
 

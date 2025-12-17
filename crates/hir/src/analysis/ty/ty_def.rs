@@ -170,7 +170,7 @@ impl<'db> TyId<'db> {
                 )
             }
             TyData::TyApp(_, _) => pretty_print_ty_app(db, self),
-            TyData::TyBase(ty_con) => ty_con.pretty_print(db),
+            TyData::TyBase(base) => base.pretty_print(db),
             TyData::ConstTy(const_ty) => const_ty.pretty_print(db),
             TyData::Never => "!".to_string(),
             TyData::Invalid(cause) => format!("invalid({})", cause.pretty_print(db)),
@@ -1277,7 +1277,7 @@ impl HasKind for TyData<'_> {
             TyData::TyParam(ty_param) => ty_param.kind.clone(),
             TyData::AssocTy(_) => Kind::Star,
             TyData::QualifiedTy(_) => Kind::Star,
-            TyData::TyBase(ty_const) => ty_const.kind(db),
+            TyData::TyBase(base) => base.kind(db),
             TyData::TyApp(abs, _) => match abs.kind(db) {
                 // `TyId::app` method handles the kind mismatch, so we don't need to verify it again
                 // here.
