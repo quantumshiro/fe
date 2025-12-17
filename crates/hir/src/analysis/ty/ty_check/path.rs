@@ -163,11 +163,9 @@ pub enum RecordLike<'db> {
 impl<'db> RecordLike<'db> {
     pub fn is_record(&self, db: &'db dyn HirAnalysisDb) -> bool {
         match self {
-            RecordLike::Type(ty) => {
-                ty.adt_ref(db)
-                    .is_some_and(|adt_ref| matches!(adt_ref, AdtRef::Struct(_)))
-                    || ty.as_contract(db).is_some()
-            }
+            RecordLike::Type(ty) => ty
+                .adt_ref(db)
+                .is_some_and(|adt_ref| matches!(adt_ref, AdtRef::Struct(_))),
             RecordLike::EnumVariant(variant) => {
                 matches!(variant.kind(db), HirVariantKind::Record(..))
             }
@@ -181,26 +179,9 @@ impl<'db> RecordLike<'db> {
     ) -> Option<TyId<'db>> {
         match self {
             RecordLike::Type(ty) => {
-                // Check for contract first
-                if let Some(contract) = ty.as_contract(db) {
-                    let field_idx = FieldParent::Contract(contract)
-                        .fields(db)
-                        .position(|v| v.name(db) == Some(name))?;
-                    let field_ty = *FieldParent::Contract(contract)
-                        .as_adt_fields(db)
-                        .ty(db, field_idx)
-                        .skip_binder();
-                    return if field_ty.is_star_kind(db) {
-                        Some(field_ty)
-                    } else {
-                        Some(TyId::invalid(db, InvalidCause::Other))
-                    };
-                }
-
-                // Check for struct/enum ADT
                 let adt_def = ty.adt_def(db)?;
                 let field_idx = match adt_def.adt_ref(db) {
-                    AdtRef::Struct(s) => crate::hir_def::FieldParent::Struct(s)
+                    AdtRef::Struct(s) => FieldParent::Struct(s)
                         .fields(db)
                         .position(|v| v.name(db) == Some(name))?,
                     _ => return None,
@@ -218,11 +199,9 @@ impl<'db> RecordLike<'db> {
             RecordLike::EnumVariant(variant) => {
                 let adt_def = variant.ty.adt_def(db)?;
                 let field_idx = match variant.kind(db) {
-                    HirVariantKind::Record(_) => {
-                        crate::hir_def::FieldParent::Variant(variant.variant)
-                            .fields(db)
-                            .position(|v| v.name(db) == Some(name))?
-                    }
+                    HirVariantKind::Record(_) => FieldParent::Variant(variant.variant)
+                        .fields(db)
+                        .position(|v| v.name(db) == Some(name))?,
                     _ => return None,
                 };
                 let adt_field_list_ref = &adt_def.fields(db)[variant.variant.idx as usize];
@@ -245,15 +224,6 @@ impl<'db> RecordLike<'db> {
     ) -> Option<usize> {
         match self {
             RecordLike::Type(ty) => {
-                // Check for contract first
-                if let Some(contract) = ty.as_contract(db) {
-                    return FieldParent::Contract(contract)
-                        .fields(db)
-                        .enumerate()
-                        .find(|(_, v)| v.name(db) == Some(name))
-                        .map(|(i, _)| i);
-                }
-
                 let adt_def = ty.adt_def(db)?;
                 let parent = match adt_def.adt_ref(db) {
                     AdtRef::Struct(s) => FieldParent::Struct(s),
@@ -287,15 +257,6 @@ impl<'db> RecordLike<'db> {
         match self {
             RecordLike::Type(ty) => {
                 let field_idx = RecordLike::Type(*ty).record_field_idx(db, name)?;
-
-                // Check for contract first
-                if let Some(contract) = ty.as_contract(db) {
-                    return Some(ScopeId::Field(
-                        FieldParent::Contract(contract),
-                        field_idx as u16,
-                    ));
-                }
-
                 let adt_ref = ty.adt_ref(db)?;
                 let parent = match adt_ref {
                     AdtRef::Struct(s) => FieldParent::Struct(s),
@@ -314,14 +275,6 @@ impl<'db> RecordLike<'db> {
     pub fn record_labels(&self, db: &'db dyn HirAnalysisDb) -> Vec<IdentId<'db>> {
         match self {
             RecordLike::Type(ty) => {
-                // Check for contract first
-                if let Some(contract) = ty.as_contract(db) {
-                    return FieldParent::Contract(contract)
-                        .fields(db)
-                        .filter_map(|v| v.name(db))
-                        .collect();
-                }
-
                 let Some(adt_ref) = ty.adt_ref(db) else {
                     return Vec::default();
                 };
@@ -344,22 +297,12 @@ impl<'db> RecordLike<'db> {
     pub fn initializer_hint(&self, db: &'db dyn HirAnalysisDb) -> Option<String> {
         match self {
             RecordLike::Type(ty) => {
-                // Contracts don't have initializer hints
-                if ty.as_contract(db).is_some() {
+                let AdtRef::Struct(s) = ty.adt_ref(db)? else {
                     return None;
-                }
-
-                if ty.adt_ref(db).is_some() {
-                    let AdtRef::Struct(s) = ty.adt_ref(db)? else {
-                        return None;
-                    };
-
-                    let name = s.name(db).unwrap().data(db);
-                    let init_args = s.format_initializer_args(db);
-                    Some(format!("{name}{init_args}"))
-                } else {
-                    None
-                }
+                };
+                let name = s.name(db).unwrap().data(db);
+                let init_args = s.format_initializer_args(db);
+                Some(format!("{name}{init_args}"))
             }
             RecordLike::EnumVariant(variant) => {
                 let expected_sub_pat = variant.variant.format_initializer_args(db);
@@ -372,9 +315,7 @@ impl<'db> RecordLike<'db> {
     pub fn kind_name(&self, db: &'db dyn HirAnalysisDb) -> String {
         match self {
             RecordLike::Type(ty) => {
-                if ty.as_contract(db).is_some() {
-                    "contract".to_string()
-                } else if let Some(adt_ref) = ty.adt_ref(db) {
+                if let Some(adt_ref) = ty.adt_ref(db) {
                     adt_ref.kind_name().to_string()
                 } else if ty.is_func(db) {
                     "fn".to_string()
