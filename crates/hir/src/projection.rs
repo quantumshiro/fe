@@ -11,8 +11,6 @@
 //!   other type representation via the `Ty`, `Var`, and `Idx` type parameters.
 //! - **Graph IR compatible**: Can be used as instruction operands (CFG+SSA) or
 //!   as edge labels (Sea of Nodes) with the same vocabulary.
-//! - **Editability-ready**: Designed to support future refactoring features via
-//!   the `Editable` trait (interface defined, implementation deferred).
 
 use smallvec::SmallVec;
 
@@ -279,44 +277,6 @@ pub enum Aliasing {
     May,
     /// The paths definitely refer to disjoint memory locations.
     No,
-}
-
-// ============================================================================
-// Editability traits - interface only, implementation deferred
-// ============================================================================
-
-/// Interface for projections that can trace back to source locations.
-///
-/// This trait enables future IDE features like "rename field" by allowing
-/// projections to report their source spans. The actual edit generation
-/// is deferred to later implementation.
-pub trait Editable {
-    /// The span type used by this projection (e.g., `LazySpan`, `TextRange`).
-    type Span;
-
-    /// Get the source span for this projection, if it came from source code.
-    ///
-    /// Returns `None` for synthetic projections created by analysis.
-    fn span(&self) -> Option<Self::Span>;
-
-    /// Check if this projection can be edited in source code.
-    fn is_editable(&self) -> bool {
-        self.span().is_some()
-    }
-}
-
-/// Interface for projection paths that support editing operations.
-///
-/// Extends `Editable` with path-specific operations like getting spans
-/// for individual steps and generating edit operations.
-pub trait EditablePath: Editable {
-    /// Get the source spans for each step in the path.
-    fn step_spans(&self) -> Vec<Option<Self::Span>>;
-
-    // Future: edit generation methods
-    // fn replace_edit(&self, new_syntax: &str) -> Option<TextEdit>;
-    // fn replace_step_edit(&self, step: usize, new_syntax: &str) -> Option<TextEdit>;
-    // fn to_syntax(&self) -> String;
 }
 
 #[cfg(test)]
