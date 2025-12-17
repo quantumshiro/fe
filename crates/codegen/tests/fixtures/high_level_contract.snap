@@ -1,13 +1,12 @@
 ---
 source: crates/codegen/tests/yul.rs
-assertion_line: 31
 expression: output
 input_file: tests/fixtures/high_level_contract.fe
 ---
 object "EchoContract" {
   code {
-    __EchoContract_init()
-    function __EchoContract_init() {
+    init()
+    function init() {
       let v0 := datasize("EchoContract_deployed")
       let v1 := dataoffset("EchoContract_deployed")
       codecopy(0, v1, v0)
@@ -17,93 +16,7 @@ object "EchoContract" {
 
   object "EchoContract_deployed" {
     code {
-      __EchoContract_runtime()
-      function __EchoContract_recv_0_0(args) -> ret {
-        ret := 42
-      }
-      function __EchoContract_runtime() {
-        let v0 := alloc(0)
-        let v1 := v0
-        let v2 := prefix__CallData__b9ab8dc8a4b2f9e(v1)
-        let v3 := selector_from_prefix__Sol__c9e55515628bbda1(get_field__MemPtr_u256__97fe9178c4597e85(v2, 32))
-        let v4 := eq(v3, 286331153)
-        if v4 {
-          let v5 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v1, 4)
-          let v6 := decode_or_revert__Sol____SolDecoder_CallData___3c15e327e9fc9ee2(v5)
-          let v7 := __EchoContract_recv_0_0(v6)
-          let v8 := solencoder_new()
-          switch get_discriminant__MemPtr__d0292394fccae3e4(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v8, 32))
-            case 1 {
-              switch get_discriminant__MemPtr__d0292394fccae3e4(encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v7, v8))
-                case 1 {
-                  switch get_discriminant__MemPtr__d0292394fccae3e4(finish__SolEncoder_Sol__822e2f0488b7f288(v8))
-                    case 1 {
-                      return(__ptr, __out_len)
-                      return(0, 0)
-                    }
-                    case 0 {
-                      revert(0, 0)
-                      return(0, 0)
-                    }
-                    default {
-                    }
-                }
-                case 0 {
-                  revert(0, 0)
-                }
-                default {
-                }
-              switch get_discriminant__MemPtr__d0292394fccae3e4(finish__SolEncoder_Sol__822e2f0488b7f288(v8))
-                case 1 {
-                  return(__ptr, __out_len)
-                  return(0, 0)
-                }
-                case 0 {
-                  revert(0, 0)
-                  return(0, 0)
-                }
-                default {
-                }
-            }
-            case 0 {
-              revert(0, 0)
-            }
-            default {
-            }
-          switch get_discriminant__MemPtr__d0292394fccae3e4(encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v7, v8))
-            case 1 {
-              switch get_discriminant__MemPtr__d0292394fccae3e4(finish__SolEncoder_Sol__822e2f0488b7f288(v8))
-                case 1 {
-                  return(__ptr, __out_len)
-                  return(0, 0)
-                }
-                case 0 {
-                  revert(0, 0)
-                  return(0, 0)
-                }
-                default {
-                }
-            }
-            case 0 {
-              revert(0, 0)
-            }
-            default {
-            }
-          switch get_discriminant__MemPtr__d0292394fccae3e4(finish__SolEncoder_Sol__822e2f0488b7f288(v8))
-            case 1 {
-              return(__ptr, __out_len)
-              return(0, 0)
-            }
-            case 0 {
-              revert(0, 0)
-              return(0, 0)
-            }
-            default {
-            }
-        }
-        if iszero(v4) {
-        }
-      }
+      runtime()
       function alloc(size) -> ret {
         let v0 := mload(64)
         let v1 := eq(v0, 0)
@@ -132,31 +45,17 @@ object "EchoContract" {
         ret := v1
       }
       function decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(d) -> ret {
-        let v0 := alloc(64)
-        store_discriminant__MemPtr__d0292394fccae3e4(v0, 1)
-        store_variant_field__MemPtr_____17476855f53bcc2c(v0, 0, tuple())
-        ret := v0
-      }
-      function decode_or_revert__Sol____SolDecoder_CallData___3c15e327e9fc9ee2(d) -> ret {
-        switch get_discriminant__MemPtr__d0292394fccae3e4(decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(d))
-          case 1 {
-            ret := 0
-          }
-          case 0 {
-            revert(0, 0)
-          }
-          default {
-          }
         ret := 0
       }
-      function encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(self, e) -> ret {
-        ret := write_word__Sol_u256__cb19b1dcad253a4a(e, self)
+      function decode___u256__Sol_SolDecoder_CallData___6bbc79d2596eeb59(d) -> ret {
+        let v0 := decode__Sol__u256__SolDecoder_CallData___2b0102c53e22c9ee(d)
+        ret := tuple(v0)
       }
-      function from_word__u256__3271ca15373d4483(word) -> ret {
-        ret := word
+      function encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(self, e) {
+        write_word__Sol_u256__cb19b1dcad253a4a(e, self)
       }
-      function get_discriminant__MemPtr__d0292394fccae3e4(addr) -> ret {
-        ret := load__MemPtr__d0292394fccae3e4(addr)
+      function finish__SolEncoder_Sol__822e2f0488b7f288(self) -> ret {
+        ret := tuple(get_field__MemPtr_u256__97fe9178c4597e85(self, 0), sub(get_field__MemPtr_u256__97fe9178c4597e85(self, 64), get_field__MemPtr_u256__97fe9178c4597e85(self, 0)))
       }
       function get_field__MemPtr_CallData__ffa9a5dacfb131b7(ptr, offset) -> ret {
         let v0 := add(ptr, offset)
@@ -164,22 +63,74 @@ object "EchoContract" {
       }
       function get_field__MemPtr_u256__97fe9178c4597e85(ptr, offset) -> ret {
         let v0 := add(ptr, offset)
-        ret := from_word__u256__3271ca15373d4483(load__MemPtr__d0292394fccae3e4(v0))
-      }
-      function get_variant_field__MemPtr_____17476855f53bcc2c(addr, field_offset) -> ret {
-        let v0 := add(add(addr, 32), field_offset)
-        from_word______2439715d39cd513(load__MemPtr__d0292394fccae3e4(v0))
-        ret := 0
+        ret := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(load__MemPtr__d0292394fccae3e4(v0))
       }
       function load__MemPtr__d0292394fccae3e4(addr) -> ret {
         ret := mload(addr)
       }
-      function prefix__CallData__b9ab8dc8a4b2f9e(input) -> ret {
-        let v0 := alloc(64)
-        store_field__MemPtr_u256__97fe9178c4597e85(v0, 0, len__CallData__b9ab8dc8a4b2f9e(input))
-        store_field__MemPtr_u256__97fe9178c4597e85(v0, 32, word_at__CallData__b9ab8dc8a4b2f9e(input, 0))
+      function recv_EchoMsg_Answer_0_0(args) -> ret {
+        ret := 42
+      }
+      function recv_EchoMsg_Echo_0_1(args) -> ret {
+        let v0 := get_field__MemPtr_u256__97fe9178c4597e85(args, 0)
+        ret := v0
+      }
+      function reserve_head__SolEncoder_Sol__822e2f0488b7f288(self, bytes) -> ret {
+        solencoder_ensure_init_mem(self, bytes)
+        ret := get_field__MemPtr_u256__97fe9178c4597e85(self, 0)
+      }
+      function runtime() {
+        let v0 := alloc(0)
         let v1 := v0
-        ret := v1
+        let v2 := lt(calldatasize(), 4)
+        if v2 {
+          revert(0, 0)
+        }
+        if iszero(v2) {
+          let v3 := selector_from_prefix__Sol__c9e55515628bbda1(calldataload(0))
+          let v4 := eq(v3, 1)
+          if v4 {
+            let v5 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v1, 4)
+            let v6 := lt(calldatasize(), add(4, 0))
+            if v6 {
+              revert(0, 0)
+            }
+            if iszero(v6) {
+              let v7 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v5)
+              let v8 := recv_EchoMsg_Answer_0_0(v7)
+              let v9 := solencoder_new()
+              pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v9, 32))
+              encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v8, v9)
+              let v10 := finish__SolEncoder_Sol__822e2f0488b7f288(v9)
+              return(get_field__MemPtr_u256__97fe9178c4597e85(v10, 0), get_field__MemPtr_u256__97fe9178c4597e85(v10, 32))
+            }
+          }
+          if iszero(v4) {
+            let v11 := eq(v3, 2)
+            if v11 {
+              let v12 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v1, 4)
+              let v13 := lt(calldatasize(), add(4, 32))
+              if v13 {
+                revert(0, 0)
+              }
+              if iszero(v13) {
+                let v14 := decode___u256__Sol_SolDecoder_CallData___6bbc79d2596eeb59(v12)
+                let v15 := recv_EchoMsg_Echo_0_1(v14)
+                let v16 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v16, 32))
+                encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v15, v16)
+                let v17 := finish__SolEncoder_Sol__822e2f0488b7f288(v16)
+                return(get_field__MemPtr_u256__97fe9178c4597e85(v17, 0), get_field__MemPtr_u256__97fe9178c4597e85(v17, 32))
+              }
+            }
+            if iszero(v11) {
+              revert(0, 0)
+            }
+          }
+        }
+      }
+      function selector_from_prefix__Sol__c9e55515628bbda1(prefix) -> ret {
+        ret := shr(224, prefix)
       }
       function soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(input, base) -> ret {
         let v0 := cursor_i__fork_mem__CallData__b9ab8dc8a4b2f9e(cursor_i__new__CallData__b9ab8dc8a4b2f9e(input), base)
@@ -189,6 +140,17 @@ object "EchoContract" {
         store_field__MemPtr_u256__97fe9178c4597e85(v1, 32, base)
         let v2 := v1
         ret := v2
+      }
+      function solencoder_ensure_init_mem(self, bytes) {
+        let v0 := eq(get_field__MemPtr_u256__97fe9178c4597e85(self, 0), 0)
+        if v0 {
+          let v1 := alloc(bytes)
+          store_field__MemPtr_u256__97fe9178c4597e85(self, 0, v1)
+          store_field__MemPtr_u256__97fe9178c4597e85(self, 32, v1)
+          store_field__MemPtr_u256__97fe9178c4597e85(self, 64, add(v1, bytes))
+        }
+        if iszero(v0) {
+        }
       }
       function solencoder_new() -> ret {
         let v0 := alloc(96)
@@ -201,20 +163,13 @@ object "EchoContract" {
       function store__MemPtr__d0292394fccae3e4(addr, value) {
         mstore(addr, value)
       }
-      function store_discriminant__MemPtr__d0292394fccae3e4(addr, discriminant) {
-        store__MemPtr__d0292394fccae3e4(addr, discriminant)
-      }
       function store_field__MemPtr_CallData__ffa9a5dacfb131b7(ptr, offset, value) {
         let v0 := add(ptr, offset)
         store__MemPtr__d0292394fccae3e4(v0, to_word__CallData__b9ab8dc8a4b2f9e(value))
       }
       function store_field__MemPtr_u256__97fe9178c4597e85(ptr, offset, value) {
         let v0 := add(ptr, offset)
-        store__MemPtr__d0292394fccae3e4(v0, from_word__u256__3271ca15373d4483(value))
-      }
-      function store_variant_field__MemPtr_____17476855f53bcc2c(addr, field_offset, value) {
-        let v0 := add(add(addr, 32), field_offset)
-        store__MemPtr__d0292394fccae3e4(v0, to_word______2439715d39cd513(value))
+        store__MemPtr__d0292394fccae3e4(v0, decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(value))
       }
     }
   }

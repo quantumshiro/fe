@@ -23,6 +23,8 @@ pub use intrinsic::{
     mstore,
     mstore8,
     addr_of,
+    size_of,
+    encoded_size,
     returndatacopy,
     returndatasize,
     return_data,

@@ -2,8 +2,42 @@
 //! to specialized lowering helpers.
 
 use super::*;
+use hir::analysis::{
+    place::PlaceBase,
+    ty::ty_check::{EffectArg, EffectPassMode},
+};
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
+    /// Try to lower a `size_of<T>()` or `encoded_size<T>()` call to a constant.
+    fn try_lower_size_intrinsic_call(&mut self, expr: ExprId) -> Option<ValueId> {
+        let callable = self.typed_body.callable_expr(expr)?;
+        if callable.callable_def.ingot(self.db).kind(self.db) != IngotKind::Core {
+            return None;
+        }
+
+        let name = callable.callable_def.name(self.db)?;
+        let is_size_of = name.data(self.db) == "size_of";
+        let is_encoded_size = name.data(self.db) == "encoded_size";
+        if !is_size_of && !is_encoded_size {
+            return None;
+        }
+
+        // Get the type argument from the callable's generic args
+        let ty = *callable.generic_args().first()?;
+
+        let size_bytes = if is_size_of {
+            self.ty_size_bytes(ty)?
+        } else {
+            self.abi_static_size_bytes(ty)?
+        };
+
+        let value_ty = self.typed_body.expr_ty(self.db, expr);
+        Some(self.mir_body.alloc_value(ValueData {
+            ty: value_ty,
+            origin: ValueOrigin::Synthetic(SyntheticValue::Int(BigUint::from(size_bytes))),
+        }))
+    }
+
     fn u256_lit_from_expr(&self, expr: ExprId) -> Option<BigUint> {
         match expr.data(self.db, self.body) {
             Partial::Present(Expr::Lit(LitKind::Int(int_id))) => Some(int_id.data(self.db).clone()),
@@ -233,6 +267,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// # Returns
     /// The allocated `ValueId` for the call result, or `None` if not a call.
     pub(super) fn try_lower_call(&mut self, expr: ExprId) -> Option<ValueId> {
+        if let Some(value_id) = self.try_lower_size_intrinsic_call(expr) {
+            return Some(value_id);
+        }
+
         let callable = self.typed_body.callable_expr(expr)?;
         let (mut args, arg_exprs) = self.collect_call_args(expr)?;
         let mut receiver_space = None;
@@ -310,54 +348,41 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         {
             for resolved_arg in resolved {
                 let kind = match resolved_arg.pass_mode {
-                    hir::analysis::ty::ty_check::EffectPassMode::ByPlace => {
-                        match &resolved_arg.arg {
-                            hir::analysis::ty::ty_check::EffectArg::Place(place) => {
-                                match place.base {
-                                    hir::analysis::place::PlaceBase::Binding(binding) => self
-                                        .effect_provider_kind_for_address_space(
-                                            self.address_space_for_binding(&binding),
-                                        ),
-                                }
-                            }
-                            _ => EffectProviderKind::Storage,
-                        }
-                    }
-                    hir::analysis::ty::ty_check::EffectPassMode::ByTempPlace => {
-                        EffectProviderKind::Memory
-                    }
-                    hir::analysis::ty::ty_check::EffectPassMode::ByValue => match &resolved_arg.arg
-                    {
-                        hir::analysis::ty::ty_check::EffectArg::Value(expr_id) => self
+                    EffectPassMode::ByPlace => match &resolved_arg.arg {
+                        EffectArg::Place(place) => match place.base {
+                            PlaceBase::Binding(binding) => self
+                                .effect_provider_kind_for_address_space(
+                                    self.address_space_for_binding(&binding),
+                                ),
+                        },
+                        _ => EffectProviderKind::Storage,
+                    },
+                    EffectPassMode::ByTempPlace => EffectProviderKind::Memory,
+                    EffectPassMode::ByValue => match &resolved_arg.arg {
+                        EffectArg::Value(expr_id) => self
                             .effect_provider_kind_for_provider_ty(
                                 self.typed_body.expr_ty(self.db, *expr_id),
                             )
                             .unwrap_or(EffectProviderKind::Storage),
-                        hir::analysis::ty::ty_check::EffectArg::Binding(binding) => {
+                        EffectArg::Binding(binding) => {
                             self.effect_provider_kind_for_binding(*binding)
                         }
                         _ => EffectProviderKind::Storage,
                     },
-                    hir::analysis::ty::ty_check::EffectPassMode::Unknown => {
-                        EffectProviderKind::Storage
-                    }
+                    EffectPassMode::Unknown => EffectProviderKind::Storage,
                 };
 
                 let value = match &resolved_arg.arg {
-                    hir::analysis::ty::ty_check::EffectArg::Place(place) => match place.base {
-                        hir::analysis::place::PlaceBase::Binding(binding) => self
+                    EffectArg::Place(place) => match place.base {
+                        PlaceBase::Binding(binding) => self
                             .binding_value(binding)
                             .unwrap_or_else(|| self.synthetic_u256(BigUint::from(0u8))),
                     },
-                    hir::analysis::ty::ty_check::EffectArg::Value(expr_id) => {
-                        self.ensure_value(*expr_id)
-                    }
-                    hir::analysis::ty::ty_check::EffectArg::Binding(binding) => self
+                    EffectArg::Value(expr_id) => self.ensure_value(*expr_id),
+                    EffectArg::Binding(binding) => self
                         .binding_value(*binding)
                         .unwrap_or_else(|| self.synthetic_u256(BigUint::from(0u8))),
-                    hir::analysis::ty::ty_check::EffectArg::Unknown => {
-                        self.synthetic_u256(BigUint::from(0u8))
-                    }
+                    EffectArg::Unknown => self.synthetic_u256(BigUint::from(0u8)),
                 };
                 effect_args.push(value);
                 effect_kinds.push(kind);
@@ -593,6 +618,31 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         (Some(exit_block), None)
     }
 
+    fn lower_expr_as_stmt_in(&mut self, block: BasicBlockId, expr: ExprId) -> Option<BasicBlockId> {
+        let expr_ty = self.typed_body.expr_ty(self.db, expr);
+        if (self.is_unit_ty(expr_ty) || expr_ty.is_never(self.db))
+            && let Partial::Present(Expr::If(cond, then_expr, else_expr)) =
+                expr.data(self.db, self.body)
+        {
+            return self
+                .lower_if_expr(block, expr, *cond, *then_expr, *else_expr)
+                .0;
+        }
+
+        let (next_block, value, push_eval) = self.lower_expr_core(block, expr);
+        if push_eval && let Some(curr_block) = next_block {
+            self.push_inst(
+                curr_block,
+                MirInst::EvalExpr {
+                    expr,
+                    value,
+                    bind_value: false,
+                },
+            );
+        }
+        next_block
+    }
+
     /// Lowers an `if` expression used in statement position.
     ///
     /// # Parameters
@@ -612,7 +662,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         then_expr: ExprId,
         else_expr: Option<ExprId>,
     ) -> (Option<BasicBlockId>, Option<ValueId>) {
-        if !self.is_unit_ty(self.typed_body.expr_ty(self.db, if_expr)) {
+        let if_ty = self.typed_body.expr_ty(self.db, if_expr);
+        if !self.is_unit_ty(if_ty) && !if_ty.is_never(self.db) {
             let value = self.ensure_value(if_expr);
             return (Some(block), Some(value));
         }
@@ -640,7 +691,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             },
         );
 
-        let then_end = self.lower_expr_in(then_block, then_expr).0;
+        let then_end = self.lower_expr_as_stmt_in(then_block, then_expr);
         if let Some(end_block) = then_end {
             self.set_terminator(
                 end_block,
@@ -651,7 +702,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
 
         if let Some(else_expr) = else_expr {
-            let else_end = self.lower_expr_in(else_block, else_expr).0;
+            let else_end = self.lower_expr_as_stmt_in(else_block, else_expr);
             if let Some(end_block) = else_end {
                 self.set_terminator(
                     end_block,

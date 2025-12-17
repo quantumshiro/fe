@@ -7,9 +7,9 @@ use crate::{
         AssocConstDef, AssocTyDef, AttrListId, Body, BodyKind, BodySourceMap, EffectParamListId,
         Expr, ExprId, FieldDef, FieldDefListId, Func, FuncParam, FuncParamListId, FuncParamName,
         GenericArg, GenericArgListId, GenericParamListId, IdentId, Impl, ImplTrait, IntegerId,
-        ItemModifier, LitKind, MatchArm, Mod, NodeStore, Partial, Pat, PathId, PathKind, Stmt,
-        StmtId, Struct, TrackedItemVariant, TraitRefId, TupleTypeId, TypeGenericArg, TypeId,
-        TypeKind, Visibility, WhereClauseId,
+        ItemModifier, LitKind, Mod, NodeStore, Partial, Pat, PathId, PathKind, Stmt, StmtId,
+        Struct, TrackedItemVariant, TraitRefId, TupleTypeId, TypeGenericArg, TypeId, TypeKind,
+        Visibility, WhereClauseId,
     },
     lower::{FileLowerCtxt, body::BodyCtxt},
     span::{HirOrigin, MsgDesugared, MsgDesugaredFocus},
@@ -99,7 +99,7 @@ fn lower_msg_variant<'db>(
         seen_selectors,
     );
 
-    // Create `Variant::decode` helper (reverts on decode failure).
+    // Create `Variant::decode` helper.
     lower_msg_variant_decode_impl(ctxt, msg_ast, variant_idx, &variant, struct_);
 }
 
@@ -406,51 +406,6 @@ fn lower_msg_decode_into<'ctxt, 'db>(
         expr_origin.clone(),
     );
 
-    let ok_path = PathId::from_ident(db, core_root)
-        .push_ident(db, IdentId::new(db, "Result".to_string()))
-        .push_ident(db, IdentId::new(db, "Ok".to_string()));
-    let v_ident = IdentId::new(db, format!("__v{}", *tmp_counter));
-    *tmp_counter += 1;
-    let v_pat = body_ctxt.push_pat(
-        Pat::Path(Partial::Present(PathId::from_ident(db, v_ident)), false),
-        pat_origin.clone(),
-    );
-    let ok_pat = body_ctxt.push_pat(
-        Pat::PathTuple(Partial::Present(ok_path), vec![v_pat]),
-        pat_origin.clone(),
-    );
-    let ok_body = body_ctxt.push_expr(
-        Expr::Path(Partial::Present(PathId::from_ident(db, v_ident))),
-        expr_origin.clone(),
-    );
-
-    let err_path = PathId::from_ident(db, core_root)
-        .push_ident(db, IdentId::new(db, "Result".to_string()))
-        .push_ident(db, IdentId::new(db, "Err".to_string()));
-    let wild_pat = body_ctxt.push_pat(Pat::WildCard, pat_origin.clone());
-    let err_pat = body_ctxt.push_pat(
-        Pat::PathTuple(Partial::Present(err_path), vec![wild_pat]),
-        pat_origin.clone(),
-    );
-    let err_body = lower_revert_call(body_ctxt, core_root, expr_origin.clone());
-
-    let decode_match = body_ctxt.push_expr(
-        Expr::Match(
-            decode_call,
-            Partial::Present(vec![
-                MatchArm {
-                    pat: ok_pat,
-                    body: ok_body,
-                },
-                MatchArm {
-                    pat: err_pat,
-                    body: err_body,
-                },
-            ]),
-        ),
-        expr_origin.clone(),
-    );
-
     let bind_pat = body_ctxt.push_pat(
         Pat::Path(
             Partial::Present(PathId::from_ident(db, target_ident)),
@@ -458,7 +413,7 @@ fn lower_msg_decode_into<'ctxt, 'db>(
         ),
         pat_origin,
     );
-    stmts.push(body_ctxt.push_stmt(Stmt::Let(bind_pat, None, Some(decode_match)), stmt_origin));
+    stmts.push(body_ctxt.push_stmt(Stmt::Let(bind_pat, None, Some(decode_call)), stmt_origin));
 }
 
 /// Creates a struct from a msg variant.

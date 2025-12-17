@@ -1,5 +1,6 @@
 ---
 source: crates/hir/tests/ty_check.rs
+assertion_line: 41
 expression: res
 input_file: test_files/ty_check/contract_effects.fe
 ---
@@ -89,7 +90,7 @@ note:
 12 │ │             balance += amount
 13 │ │             balance
 14 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_effects.fe:11:19
@@ -145,7 +146,7 @@ note:
 18 │ │         {
 19 │ │             withdraw(amount)
 20 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_effects.fe:16:20
@@ -191,7 +192,7 @@ note:
 22 │ ╭         Balance -> u256 uses (balance) {
 23 │ │             balance
 24 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_effects.fe:22:40

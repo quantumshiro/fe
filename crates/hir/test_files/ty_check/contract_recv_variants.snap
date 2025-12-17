@@ -1,5 +1,6 @@
 ---
 source: crates/hir/tests/ty_check.rs
+assertion_line: 41
 expression: res
 input_file: test_files/ty_check/contract_recv_variants.fe
 ---
@@ -97,7 +98,7 @@ note:
 70 │ │             balance += amount
 71 │ │             balance
 72 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_recv_variants.fe:69:19
@@ -155,7 +156,7 @@ note:
    · │
 79 │ │             }
 80 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_recv_variants.fe:73:20
@@ -270,7 +271,7 @@ note:
    · │
 91 │ │             }
 92 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_recv_variants.fe:85:20
@@ -387,7 +388,7 @@ note:
 93 │ ╭         Balance { addr } -> u64 uses (tokens) {
 94 │ │             tokens
 95 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_recv_variants.fe:93:19
@@ -426,7 +427,7 @@ note:
 104 │ │                 tokens
 105 │ │             }
 106 │ │         }
-    │ ╰─────────^ Result<AbiError, (u256, u256)>
+    │ ╰─────────^ (u256, u256)
 
 note: 
     ┌─ contract_recv_variants.fe:100:23

@@ -182,6 +182,7 @@ pub(crate) fn lower_function<'db>(
     let fallthrough = builder.lower_root(entry, body.expr(db));
     builder.ensure_const_expr_values();
     builder.ensure_field_expr_values();
+    builder.ensure_call_expr_values();
     let ret_val = builder.ensure_value(body.expr(db));
     if let Some(block) = fallthrough {
         builder.set_terminator(block, Terminator::Return(Some(ret_val)));

@@ -1614,11 +1614,11 @@ fn print_items_with_extern_blocks<'db>(
 
     for item in items {
         // Check if this is an extern function (function without body at module level)
-        if let ItemKind::Func(func) = item {
-            if func.body(db).is_none() {
-                extern_funcs.push(*func);
-                continue;
-            }
+        if let ItemKind::Func(func) = item
+            && func.body(db).is_none()
+        {
+            extern_funcs.push(*func);
+            continue;
         }
 
         // Flush any accumulated extern functions before printing a regular item
@@ -1627,7 +1627,7 @@ fn print_items_with_extern_blocks<'db>(
         let is_use = matches!(item, ItemKind::Use(_));
 
         // Add blank line unless this is the first item or consecutive use statements
-        if !first && !(prev_was_use && is_use) {
+        if !(first || prev_was_use && is_use) {
             result.push('\n');
         }
         first = false;

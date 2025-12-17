@@ -1,5 +1,6 @@
 ---
 source: crates/hir/tests/ty_check.rs
+assertion_line: 41
 expression: res
 input_file: test_files/ty_check/contract_happy.fe
 ---
@@ -66,7 +67,7 @@ note:
    · │
 17 │ │             }
 18 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_happy.fe:10:20
@@ -178,7 +179,7 @@ note:
 20 │ │             total += amount
 21 │ │             total
 22 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_happy.fe:19:19

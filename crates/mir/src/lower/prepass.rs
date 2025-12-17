@@ -41,6 +41,19 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         );
     }
 
+    /// Forces all call expressions (including method calls) to have associated MIR values.
+    ///
+    /// This is required for codegen, which only supports lowering call targets once they've been
+    /// rewritten into MIR `Call`/`Intrinsic`/`Synthetic` values.
+    pub(super) fn ensure_call_expr_values(&mut self) {
+        self.ensure_expr_values(
+            |expr| matches!(expr, Expr::Call(..) | Expr::MethodCall(..)),
+            |this, expr_id| {
+                this.ensure_value(expr_id);
+            },
+        );
+    }
+
     /// Forces all const path expressions to lower into synthetic literals.
     ///
     /// # Returns

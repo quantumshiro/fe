@@ -157,7 +157,10 @@ impl<'a, 'ctxt, 'db> HirBuilder<'a, 'ctxt, 'db> {
 
     /// Creates a block expression from statements.
     fn block(&mut self, stmts: Vec<StmtId>) -> ExprId {
-        self.body_ctxt.push_expr(Expr::Block(stmts), self.origin())
+        self.body_ctxt.f_ctxt.enter_block_scope();
+        let block = self.body_ctxt.push_expr(Expr::Block(stmts), self.origin());
+        self.body_ctxt.f_ctxt.leave_block_scope(block);
+        block
     }
 
     /// Creates a tuple expression.
@@ -183,6 +186,12 @@ impl<'a, 'ctxt, 'db> HirBuilder<'a, 'ctxt, 'db> {
             .push_expr(Expr::If(cond, then_expr, Some(else_expr)), self.origin())
     }
 
+    /// Creates an if expression with no else branch.
+    fn if_(&mut self, cond: ExprId, then_expr: ExprId) -> ExprId {
+        self.body_ctxt
+            .push_expr(Expr::If(cond, then_expr, None), self.origin())
+    }
+
     /// Creates an equality comparison expression.
     fn eq(&mut self, lhs: ExprId, rhs: ExprId) -> ExprId {
         self.body_ctxt.push_expr(
@@ -190,6 +199,30 @@ impl<'a, 'ctxt, 'db> HirBuilder<'a, 'ctxt, 'db> {
                 lhs,
                 rhs,
                 crate::hir_def::BinOp::Comp(crate::hir_def::CompBinOp::Eq),
+            ),
+            self.origin(),
+        )
+    }
+
+    /// Creates a less-than comparison expression.
+    fn lt(&mut self, lhs: ExprId, rhs: ExprId) -> ExprId {
+        self.body_ctxt.push_expr(
+            Expr::Bin(
+                lhs,
+                rhs,
+                crate::hir_def::BinOp::Comp(crate::hir_def::CompBinOp::Lt),
+            ),
+            self.origin(),
+        )
+    }
+
+    /// Creates an addition expression.
+    fn add(&mut self, lhs: ExprId, rhs: ExprId) -> ExprId {
+        self.body_ctxt.push_expr(
+            Expr::Bin(
+                lhs,
+                rhs,
+                crate::hir_def::BinOp::Arith(crate::hir_def::ArithBinOp::Add),
             ),
             self.origin(),
         )
@@ -373,6 +406,29 @@ impl<'a, 'ctxt, 'db> HirBuilder<'a, 'ctxt, 'db> {
             self.db(),
             TypeKind::Path(Partial::Present(self.path(segments))),
         )
+    }
+
+    /// Creates `size_of<Sol::Selector>()` expression.
+    fn sol_selector_size(&mut self) -> ExprId {
+        let sol_selector_ty = self.path_ty(&["Sol", "Selector"]);
+        let size_of_path = self.path_with_generic(&[], "size_of", sol_selector_ty);
+        let size_of_fn = self.path_id_expr(size_of_path);
+        self.call(size_of_fn, vec![])
+    }
+
+    /// Creates `size_of<T>()` expression for a given type.
+    fn size_of_ty(&mut self, ty: TypeId<'db>) -> ExprId {
+        let size_of_path = self.path_with_generic(&[], "size_of", ty);
+        let size_of_fn = self.path_id_expr(size_of_path);
+        self.call(size_of_fn, vec![])
+    }
+
+    /// Creates `encoded_size<T>()` expression for a given type.
+    /// Returns the Solidity ABI-encoded size of the type.
+    fn encoded_size_of_ty(&mut self, ty: TypeId<'db>) -> ExprId {
+        let encoded_size_path = self.path_with_generic(&[], "encoded_size", ty);
+        let encoded_size_fn = self.path_id_expr(encoded_size_path);
+        self.call(encoded_size_fn, vec![])
     }
 
     /// Creates a let statement with an explicit type annotation.
@@ -634,20 +690,38 @@ fn insert_contract_use_statements(ctxt: &mut FileLowerCtxt<'_>) {
     // Core types
     insert_use(&["core", "effect_ref", "StorPtr"]);
     insert_use(&["core", "intrinsic", "contract_field_slot"]);
-    insert_use(&["core", "abi", "prefix"]);
-    insert_use(&["core", "abi", "decode_or_revert"]);
+    insert_use(&["core", "calldataload"]);
+    insert_use(&["core", "calldatasize"]);
     insert_use(&["core", "codecopy"]);
     insert_use(&["core", "code_region_len"]);
     insert_use(&["core", "code_region_offset"]);
     insert_use(&["core", "return_data"]);
     insert_use(&["core", "revert"]);
-    insert_use(&["core", "Result"]);
+    insert_use(&["core", "size_of"]);
+    insert_use(&["core", "encoded_size"]);
 
     // Std types
     insert_use(&["std", "evm", "calldata", "CallData"]);
     insert_use(&["std", "abi", "Sol"]);
     insert_use(&["std", "abi", "sol", "SolDecoder"]);
     insert_use(&["std", "abi", "sol", "SolEncoder"]);
+}
+
+/// Converts a path to an underscore-separated name string.
+/// E.g., `Erc20::Transfer` becomes `Erc20_Transfer`.
+fn path_to_name<'db>(db: &'db dyn HirDb, path: PathId<'db>) -> String {
+    let this = match path.kind(db) {
+        PathKind::Ident { ident, .. } => ident
+            .to_opt()
+            .map_or("_".to_string(), |id| id.data(db).to_string()),
+        PathKind::QualifiedType { .. } => "_".to_string(),
+    };
+
+    if let Some(parent) = path.parent(db) {
+        path_to_name(db, parent) + "_" + &this
+    } else {
+        this
+    }
 }
 
 fn mk_contract_attr<'db>(db: &'db dyn HirDb, name: &str, contract_name: IdentId<'db>) -> Attr<'db> {
@@ -754,11 +828,6 @@ fn lower_contract_recv_arm_handler_func<'db>(
         focus: ContractLoweringDesugaredFocus::RecvArm,
     };
 
-    let fn_name_str = format!("recv_{}_{}", recv_idx, arm_idx);
-    let fn_name = Partial::Present(IdentId::new(db, fn_name_str));
-    let id = ctxt.joined_id(TrackedItemVariant::Func(fn_name));
-    ctxt.enter_item_scope(id, false);
-
     // Determine the msg variant type for the arm from its pattern.
     let variant_ty_path = match arm_ast.pat().and_then(|p| match p.kind() {
         ast::PatKind::Path(path_pat) => path_pat.path(),
@@ -777,10 +846,16 @@ fn lower_contract_recv_arm_handler_func<'db>(
                 variant_path
             }
         }
-        None => PathId::from_ident(db, IdentId::new(db, "_".to_string())),
+        None => PathId::from_str(db, "_"),
     };
 
-    let args_ty_path = variant_ty_path.push_ident(db, IdentId::new(db, "Args".to_string()));
+    let variant_name = path_to_name(db, variant_ty_path);
+    let fn_name_str = format!("recv_{}_{}_{}", variant_name, recv_idx, arm_idx);
+    let fn_name = Partial::Present(IdentId::new(db, fn_name_str));
+    let id = ctxt.joined_id(TrackedItemVariant::Func(fn_name));
+    ctxt.enter_item_scope(id, false);
+
+    let args_ty_path = variant_ty_path.push_str(db, "Args");
     let args_ty = TypeId::new(db, TypeKind::Path(Partial::Present(args_ty_path)));
     let args_param_name = FuncParamName::Ident(IdentId::new(db, "args".to_string()));
     let params = FuncParamListId::new(
@@ -1017,7 +1092,7 @@ fn lower_contract_runtime_entrypoint_func<'db>(
 
             let stor_ptr_path = b
                 .path_with_generic(&[], "StorPtr", field_ty)
-                .push_ident(db, IdentId::new(db, "at_offset".to_string()));
+                .push_str(db, "at_offset");
             let at_offset = b.path_id_expr(stor_ptr_path);
             let ptr_init = b.call(at_offset, vec![slot_expr]);
 
@@ -1033,8 +1108,8 @@ fn lower_contract_runtime_entrypoint_func<'db>(
     }
 
     // let __calldata = CallData {}
-    // let __prefix = prefix(__calldata)
-    // let __selector = Sol::selector_from_prefix(__prefix.word0)
+    // if calldatasize() < size_of<Sol::Selector>() { revert(0, 0) }
+    // let __selector = Sol::selector_from_prefix(calldataload(0))
     {
         let mut b = HirBuilder::new(&mut body_ctxt, desugared.clone());
 
@@ -1042,13 +1117,22 @@ fn lower_contract_runtime_entrypoint_func<'db>(
         let call_data_init = b.record_init(call_data_path, vec![]);
         b.let_stmt(&mut stmts, "__calldata", false, call_data_init);
 
-        let call_data_expr = b.var_expr("__calldata");
-        let prefix_fn = b.path_expr(&["prefix"]);
-        let prefix_call = b.call(prefix_fn, vec![call_data_expr]);
-        b.let_stmt(&mut stmts, "__prefix", false, prefix_call);
+        let calldatasize_fn = b.path_expr(&["calldatasize"]);
+        let calldata_size = b.call(calldatasize_fn, vec![]);
+        let selector_size = b.sol_selector_size();
+        let is_too_short = b.lt(calldata_size, selector_size);
+        let revert_expr = b.revert_call();
+        let revert_stmt = b.body_ctxt.push_stmt(
+            Stmt::Expr(revert_expr),
+            HirOrigin::desugared(desugared.clone()),
+        );
+        let then_block = b.block(vec![revert_stmt]);
+        let guard = b.if_(is_too_short, then_block);
+        b.expr_stmt(&mut stmts, guard);
 
-        let prefix_var = b.var_expr("__prefix");
-        let word0 = b.field_access(prefix_var, "word0");
+        let calldataload_fn = b.path_expr(&["calldataload"]);
+        let zero = b.int_lit(0);
+        let word0 = b.call(calldataload_fn, vec![zero]);
         let sol_selector = b.path_expr(&["Sol", "selector_from_prefix"]);
         let selector_call = b.call(sol_selector, vec![word0]);
         b.let_stmt(&mut stmts, "__selector", false, selector_call);
@@ -1066,7 +1150,6 @@ fn lower_contract_runtime_entrypoint_func<'db>(
         };
 
         for (arm_idx, arm_ast) in arms_ast.into_iter().enumerate() {
-            let handler_name = IdentId::new(db, format!("recv_{}_{}", recv_idx, arm_idx));
             let arm_desugared = ContractLoweringDesugared {
                 contract: contract_ptr.clone(),
                 recv_idx: Some(recv_idx),
@@ -1094,8 +1177,13 @@ fn lower_contract_runtime_entrypoint_func<'db>(
                 None => continue,
             };
 
-            let selector_const_path =
-                variant_ty_path.push_ident(db, IdentId::new(db, "SELECTOR".to_string()));
+            let variant_name = path_to_name(db, variant_ty_path);
+            let handler_name = IdentId::new(
+                db,
+                format!("recv_{}_{}_{}", variant_name, recv_idx, arm_idx),
+            );
+
+            let selector_const_path = variant_ty_path.push_str(db, "SELECTOR");
 
             let raw_uses = lower_uses_clause_opt(body_ctxt.f_ctxt, arm_ast.uses_clause());
             let with_names: Vec<_> = raw_uses
@@ -1180,92 +1268,53 @@ fn lower_contract_runtime_dispatch_arm_body<'ctxt, 'db>(
     // Build common types used for decoding (use imported CallData type)
     let call_data_ty = TypeId::new(
         db,
-        TypeKind::Path(Partial::Present(PathId::from_ident(
-            db,
-            IdentId::new(db, "CallData".to_string()),
-        ))),
-    );
-    let sol_decoder_args = GenericArgListId::new(
-        db,
-        vec![GenericArg::Type(TypeGenericArg {
-            ty: Partial::Present(call_data_ty),
-        })],
-        true,
+        TypeKind::Path(Partial::Present(PathId::from_str(db, "CallData"))),
     );
 
     {
         let mut b = HirBuilder::new(body_ctxt, desugared.clone());
 
-        // let mut __d = SolDecoder<CallData>::with_base(__calldata, 4)
+        // let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
         let call_data_expr = b.body_ctxt.push_expr(
             Expr::Path(Partial::Present(PathId::from_ident(db, call_data_ident))),
             HirOrigin::desugared(desugared.clone()),
         );
-        let sol_decoder_path = PathId::new(
-            db,
-            PathKind::Ident {
-                ident: Partial::Present(IdentId::new(db, "SolDecoder".to_string())),
-                generic_args: sol_decoder_args,
-            },
-            None,
-        )
-        .push_ident(db, IdentId::new(db, "with_base".to_string()));
+        let sol_decoder_path = b
+            .path_with_generic(&[], "SolDecoder", call_data_ty)
+            .push_str(db, "with_base");
         let sol_decoder = b.path_id_expr(sol_decoder_path);
-        let base4 = b.int_lit(4);
-        let d_init = b.call(sol_decoder, vec![call_data_expr, base4]);
+        let selector_size = b.sol_selector_size();
+        let d_init = b.call(sol_decoder, vec![call_data_expr, selector_size]);
         b.let_stmt(&mut stmts, "__d", true, d_init);
     }
 
-    // Build types for decode_or_revert generic call (use imported Sol type)
-    let args_ty_path = variant_ty_path.push_ident(db, IdentId::new(db, "Args".to_string()));
+    let args_ty_path = variant_ty_path.push_str(db, "Args");
     let args_ty = TypeId::new(db, TypeKind::Path(Partial::Present(args_ty_path)));
-    let sol_ty = TypeId::new(
-        db,
-        TypeKind::Path(Partial::Present(PathId::from_ident(
-            db,
-            IdentId::new(db, "Sol".to_string()),
-        ))),
-    );
-    let sol_decoder_ty_path = PathId::new(
-        db,
-        PathKind::Ident {
-            ident: Partial::Present(IdentId::new(db, "SolDecoder".to_string())),
-            generic_args: sol_decoder_args,
-        },
-        None,
-    );
-    let sol_decoder_ty = TypeId::new(db, TypeKind::Path(Partial::Present(sol_decoder_ty_path)));
-    let decode_or_revert_args = GenericArgListId::new(
-        db,
-        vec![
-            GenericArg::Type(TypeGenericArg {
-                ty: Partial::Present(sol_ty),
-            }),
-            GenericArg::Type(TypeGenericArg {
-                ty: Partial::Present(args_ty),
-            }),
-            GenericArg::Type(TypeGenericArg {
-                ty: Partial::Present(sol_decoder_ty),
-            }),
-        ],
-        true,
-    );
 
     {
         let mut b = HirBuilder::new(body_ctxt, desugared.clone());
 
-        // let __args: <Variant>::Args = decode_or_revert<Sol, Args, SolDecoder>(__d)
-        let d_expr = b.var_expr("__d");
-        let decode_or_revert_path = PathId::new(
-            db,
-            PathKind::Ident {
-                ident: Partial::Present(IdentId::new(db, "decode_or_revert".to_string())),
-                generic_args: decode_or_revert_args,
-            },
-            None,
+        // if calldatasize() < size_of<Sol::Selector>() + encoded_size<Args>() { revert(0, 0) }
+        let calldatasize_fn = b.path_expr(&["calldatasize"]);
+        let calldata_size = b.call(calldatasize_fn, vec![]);
+        let selector_size = b.sol_selector_size();
+        let args_size = b.encoded_size_of_ty(args_ty);
+        let required_size = b.add(selector_size, args_size);
+
+        let is_too_short = b.lt(calldata_size, required_size);
+        let revert_expr = b.revert_call();
+        let revert_stmt = b.body_ctxt.push_stmt(
+            Stmt::Expr(revert_expr),
+            HirOrigin::desugared(desugared.clone()),
         );
-        let decode_or_revert = b.path_id_expr(decode_or_revert_path);
-        let args_value = b.call(decode_or_revert, vec![d_expr]);
+        let then_block = b.block(vec![revert_stmt]);
+        let guard = b.if_(is_too_short, then_block);
+        b.expr_stmt(&mut stmts, guard);
+
+        // let __args: <Variant>::Args = <Variant>::Args::decode(__d)
+        let d_expr = b.var_expr("__d");
+        let decode_fn = b.path_id_expr(args_ty_path.push_str(db, "decode"));
+        let args_value = b.call(decode_fn, vec![d_expr]);
         b.let_stmt_typed(&mut stmts, "__args", false, args_ty, args_value);
     }
 
@@ -1308,44 +1357,30 @@ fn lower_contract_runtime_dispatch_arm_body<'ctxt, 'db>(
         let enc_init = b.call(sol_encoder, vec![]);
         b.let_stmt(&mut stmts, "__enc", true, enc_init);
 
-        // match __enc.reserve_head(32) { Ok(_) => (), Err(_) => revert }
+        // __enc.reserve_head(32)
         let enc_expr = b.var_expr("__enc");
         let head_32 = b.int_lit(32);
         let reserve_head = b.method_call(enc_expr, "reserve_head", vec![head_32]);
-        let ok_unit = b.tuple(vec![]);
-        let reserve_match = b.match_or_revert(reserve_head, ok_unit);
-        b.expr_stmt(&mut stmts, reserve_match);
+        b.expr_stmt(&mut stmts, reserve_head);
 
-        // match __result.encode(__enc) { Ok(_) => (), Err(_) => revert }
+        // __result.encode(__enc)
         let result_expr = b.var_expr("__result");
         let enc_expr2 = b.var_expr("__enc");
         let encode_call = b.method_call(result_expr, "encode", vec![enc_expr2]);
-        let ok2_unit = b.tuple(vec![]);
-        let encode_match = b.match_or_revert(encode_call, ok2_unit);
-        b.expr_stmt(&mut stmts, encode_match);
+        b.expr_stmt(&mut stmts, encode_call);
 
-        // match __enc.finish() { Ok((ptr, len)) => return_data(ptr, len), Err(_) => revert }
+        // let __out = __enc.finish()
         let enc_expr3 = b.var_expr("__enc");
         let finish_call = b.method_call(enc_expr3, "finish", vec![]);
+        b.let_stmt(&mut stmts, "__out", false, finish_call);
 
-        // Build Ok((ptr, len)) pattern
-        let ptr_pat = b.bind_pat("__ptr", false);
-        let len_pat = b.bind_pat("__out_len", false);
-        let tup_pat = b.tuple_pat(vec![ptr_pat, len_pat]);
-        let ok_pat = b.ok_pat(tup_pat);
-
-        // Build Ok body: return_data(__ptr, __out_len)
-        let ptr_expr = b.var_expr("__ptr");
-        let len_expr = b.var_expr("__out_len");
-        let ok_body = b.return_data_call(ptr_expr, len_expr);
-
-        // Build Err pattern and body
-        let err_wild = b.wildcard_pat();
-        let err_pat = b.err_pat(err_wild);
-        let revert = b.revert_call();
-
-        let finish_match = b.match_result(finish_call, ok_pat, ok_body, err_pat, revert);
-        b.expr_stmt(&mut stmts, finish_match);
+        // return_data(__ptr, __out_len)
+        let out_expr = b.var_expr("__out");
+        let ptr_expr = b.field_index(out_expr, 0);
+        let out_expr2 = b.var_expr("__out");
+        let len_expr = b.field_index(out_expr2, 1);
+        let ret_call = b.return_data_call(ptr_expr, len_expr);
+        b.expr_stmt(&mut stmts, ret_call);
     }
 
     body_ctxt.f_ctxt.enter_block_scope();

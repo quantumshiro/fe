@@ -310,10 +310,7 @@ define_lazy_span_node!(
     }
 );
 
-define_lazy_span_node!(
-    LazyTraitItemListSpan,
-    ast::TraitItemList,
-);
+define_lazy_span_node!(LazyTraitItemListSpan, ast::TraitItemList,);
 
 impl<'db> LazyTraitItemListSpan<'db> {
     pub fn assoc_type(mut self, idx: usize) -> LazyTraitTypeSpan<'db> {

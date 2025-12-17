@@ -516,6 +516,30 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         None
     }
 
+    /// Returns the ABI-encoded byte width for statically-sized values.
+    ///
+    /// This matches the head size used by the ABI encoder/decoder: primitive values occupy one
+    /// 32-byte word, while tuples/records are the concatenation of their fields.
+    pub(super) fn abi_static_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
+        if ty.is_tuple(self.db)
+            || ty
+                .adt_ref(self.db)
+                .is_some_and(|adt| matches!(adt, AdtRef::Struct(_)))
+        {
+            let mut size = 0u64;
+            for field_ty in ty.field_types(self.db) {
+                size += self.abi_static_size_bytes(field_ty)?;
+            }
+            return Some(size);
+        }
+
+        if let TyData::TyBase(TyBase::Prim(_)) = ty.base_ty(self.db).data(self.db) {
+            return Some(32);
+        }
+
+        None
+    }
+
     /// Lowers an assignment to a field target into a `store_field` helper call
     /// (for primitives) or a recursive field-by-field copy (for aggregates).
     ///

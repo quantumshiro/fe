@@ -1,5 +1,6 @@
 ---
 source: crates/hir/tests/ty_check.rs
+assertion_line: 41
 expression: res
 input_file: test_files/ty_check/recv_nested_patterns.fe
 ---
@@ -59,7 +60,7 @@ note:
 24 │ │                 0
 25 │ │             }
 26 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:20:25
@@ -150,7 +151,7 @@ note:
 29 │ ╭         SetTriple { triple: (a, b, c) } -> u64 uses () {
 30 │ │             a + b + c
 31 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:29:29
@@ -231,7 +232,7 @@ note:
 38 │ │                 0
 39 │ │             }
 40 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:34:29
@@ -347,7 +348,7 @@ note:
 44 │ │             data = x + y
 45 │ │             p && q
 46 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:43:20
@@ -467,7 +468,7 @@ note:
 56 │ ╭         SetPair { pair: (val, _) } -> u64 uses () {
 57 │ │             val
 58 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:56:25
@@ -514,7 +515,7 @@ note:
 61 │ ╭         SetTriple { triple: (first, _, last) } -> u64 uses () {
 62 │ │             first + last
 63 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:61:29
@@ -579,7 +580,7 @@ note:
 66 │ ╭         SetNested { nested: ((x, _), _) } -> u64 uses () {
 67 │ │             x
 68 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:66:29
@@ -639,7 +640,7 @@ note:
 72 │ │             data = y
 73 │ │             p
 74 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:71:20
@@ -735,7 +736,7 @@ note:
 83 │ ╭         SetPair { pair: (amount, is_valid) } -> u64 uses () {
 84 │ │             if is_valid { amount } else { 0 }
 85 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:83:25
@@ -812,7 +813,7 @@ note:
 87 │ ╭         SetTriple { triple: (x, y, z) } -> u64 uses () {
 88 │ │             x + y + z
 89 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:87:29
@@ -889,7 +890,7 @@ note:
 91 │ ╭         SetNested { nested: ((left, right), enabled) } -> u64 uses () {
 92 │ │             if enabled { left + right } else { 0 }
 93 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:91:29
@@ -991,7 +992,7 @@ note:
 96 │ │             data = ax + ay
 97 │ │             b1 || b2
 98 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ recv_nested_patterns.fe:95:20
@@ -1118,7 +1119,7 @@ note:
 117 │ ╭         TypeMismatch { pair: (a, b) } -> u64 uses () {
 118 │ │             a + b
 119 │ │         }
-    │ ╰─────────^ Result<AbiError, (u256, u256)>
+    │ ╰─────────^ (u256, u256)
 
 note: 
     ┌─ recv_nested_patterns.fe:117:30
@@ -1200,7 +1201,7 @@ note:
 138 │ │                 0
 139 │ │             }
 140 │ │         }
-    │ ╰─────────^ Result<AbiError, (u256, u256)>
+    │ ╰─────────^ (u256, u256)
 
 note: 
     ┌─ recv_nested_patterns.fe:134:24
@@ -1351,7 +1352,7 @@ note:
 149 │ ╭         Deep { nested: (((x, _), _), _) } -> u64 uses () {
 150 │ │             x
 151 │ │         }
-    │ ╰─────────^ Result<AbiError, (u256, u256)>
+    │ ╰─────────^ (u256, u256)
 
 note: 
     ┌─ recv_nested_patterns.fe:149:24

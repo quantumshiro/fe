@@ -14,6 +14,8 @@ pub contract CoolCoin uses (mut ctx: Ctx, mut log: Log) {
         auth.grant(role: MINTER, to: owner)
         auth.grant(role: BURNER, to: owner)
 
+        let foo_addr = ctx.create2<FooContract>(args: (10, "hello"), salt: 0x1234, value: 100000)
+        
         if initial_supply > 0 {
             mint(to: owner, amount: initial_supply)
         }
@@ -260,8 +262,7 @@ extern {
     fn assert(_: bool, _: String<64>)
 }
 
-use core::abi::{Abi, AbiDecoder, AbiError, Decode}
-use core::Result
+use core::abi::{Abi, AbiDecoder, Decode}
 
 pub struct Address { inner: u256 }
 impl Address {
@@ -270,11 +271,8 @@ impl Address {
     }
 }
 impl<A: Abi> Decode<A> for Address {
-    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
-        match d.read_word() {
-            Result::Ok(word) => Result::Ok(Address { inner: word }),
-            Result::Err(e) => Result::Err(e),
-        }
+    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Self {
+        Address { inner: d.read_word() }
     }
 }
 impl core::ops::Eq for Address {

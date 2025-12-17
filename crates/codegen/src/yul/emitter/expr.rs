@@ -181,9 +181,13 @@ impl<'db> FunctionEmitter<'db> {
                 }
             }
             Expr::Path(path) => {
-                let original = self
-                    .path_ident(*path)
-                    .ok_or_else(|| YulError::Unsupported("unsupported path expression".into()))?;
+                let original = self.path_ident(*path).ok_or_else(|| {
+                    let pretty = path
+                        .to_opt()
+                        .map(|path| path.pretty_print(self.db))
+                        .unwrap_or_else(|| "_".to_string());
+                    YulError::Unsupported(format!("unsupported path expression `{pretty}`"))
+                })?;
                 Ok(state.resolve_name(&original))
             }
             Expr::Field(..) => {

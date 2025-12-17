@@ -1,5 +1,6 @@
 ---
 source: crates/hir/tests/ty_check.rs
+assertion_line: 41
 expression: res
 input_file: test_files/ty_check/erc20.fe
 ---
@@ -159,7 +160,7 @@ note:
 24 │ │             transfer(from: ctx.caller(), to, amount)
 25 │ │             true
 26 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:23:20
@@ -238,7 +239,7 @@ note:
 29 │ │             approve(owner: ctx.caller(), spender, amount)
 30 │ │             true
 31 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:28:19
@@ -318,7 +319,7 @@ note:
 35 │ │             transfer(from, to, amount)
 36 │ │             true
 37 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:33:24
@@ -433,7 +434,7 @@ note:
 39 │ ╭         BalanceOf { account } -> u256 uses store {
 40 │ │             store.balances[account]
 41 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:39:21
@@ -486,7 +487,7 @@ note:
 43 │ ╭         Allowance { owner, spender } -> u256 uses (store) {
 44 │ │             store.allowances[(owner, spender)]
 45 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:43:21
@@ -557,7 +558,7 @@ note:
 47 │ ╭         TotalSupply {} -> u256 uses store {
 48 │ │             store.total_supply
 49 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:47:43
@@ -590,7 +591,7 @@ note:
    ┌─ erc20.fe:51:9
    │
 51 │         Name {} -> String<32> { "CoolCoin" }
-   │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Result<AbiError, (u256, u256)>
+   │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:51:31
@@ -614,7 +615,7 @@ note:
    ┌─ erc20.fe:52:9
    │
 52 │         Symbol {} -> String<8> { "COOL" }
-   │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Result<AbiError, (u256, u256)>
+   │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:52:32
@@ -638,7 +639,7 @@ note:
    ┌─ erc20.fe:53:9
    │
 53 │         Decimals {} -> u8 { 18 }
-   │         ^^^^^^^^^^^^^^^^^^^^^^^^ Result<AbiError, (u256, u256)>
+   │         ^^^^^^^^^^^^^^^^^^^^^^^^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:53:27
@@ -666,7 +667,7 @@ note:
 60 │ │             mint(to, amount)
 61 │ │             true
 62 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:58:16
@@ -752,7 +753,7 @@ note:
 66 │ │             burn(from: ctx.caller(), amount)
 67 │ │             true
 68 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:65:16
@@ -820,7 +821,7 @@ note:
 73 │ │             burn(from, amount)
 74 │ │             true
 75 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:71:20
@@ -927,7 +928,7 @@ note:
    · │
 83 │ │             true
 84 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:77:29
@@ -1076,7 +1077,7 @@ note:
    · │
 92 │ │             true
 93 │ │         }
-   │ ╰─────────^ Result<AbiError, (u256, u256)>
+   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ erc20.fe:86:29
@@ -2607,238 +2608,166 @@ note:
     │ ╰──────────────────────────────────────────────────────────────────────────^ u256
 
 note: 
-    ┌─ erc20.fe:268:27
+    ┌─ erc20.fe:267:27
     │  
-268 │       pub fn zero() -> Self {
+267 │       pub fn zero() -> Self {
     │ ╭───────────────────────────^
-269 │ │         Address { inner: 0 }
-270 │ │     }
+268 │ │         Address { inner: 0 }
+269 │ │     }
     │ ╰─────^ Address
 
 note: 
-    ┌─ erc20.fe:269:9
+    ┌─ erc20.fe:268:9
     │
-269 │         Address { inner: 0 }
+268 │         Address { inner: 0 }
     │         ^^^^^^^^^^^^^^^^^^^^ Address
 
 note: 
-    ┌─ erc20.fe:269:26
+    ┌─ erc20.fe:268:26
     │
-269 │         Address { inner: 0 }
+268 │         Address { inner: 0 }
     │                          ^ u256
 
 note: 
-    ┌─ erc20.fe:273:71
+    ┌─ erc20.fe:272:53
     │  
-273 │       fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Result<AbiError, Self> {
-    │ ╭───────────────────────────────────────────────────────────────────────^
-274 │ │         match d.read_word() {
-275 │ │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-276 │ │             Result::Err(e) => Result::Err(e),
-277 │ │         }
-278 │ │     }
-    │ ╰─────^ Result<AbiError, Address>
-
-note: 
-    ┌─ erc20.fe:274:9
-    │  
-274 │ ╭         match d.read_word() {
-275 │ │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-276 │ │             Result::Err(e) => Result::Err(e),
-277 │ │         }
-    │ ╰─────────^ Result<AbiError, Address>
-
-note: 
-    ┌─ erc20.fe:274:15
-    │
-274 │         match d.read_word() {
-    │               ^ D
-
-note: 
-    ┌─ erc20.fe:274:15
-    │
-274 │         match d.read_word() {
-    │               ^^^^^^^^^^^^^ Result<AbiError, u256>
-
-note: 
-    ┌─ erc20.fe:275:13
-    │
-275 │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-    │             ^^^^^^^^^^^^^^^^ Result<AbiError, u256>
-
-note: 
-    ┌─ erc20.fe:275:24
-    │
-275 │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-    │                        ^^^^ u256
-
-note: 
-    ┌─ erc20.fe:275:33
-    │
-275 │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-    │                                 ^^^^^^^^^^ fn Ok<AbiError, Address>
-
-note: 
-    ┌─ erc20.fe:275:33
-    │
-275 │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-    │                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Result<AbiError, Address>
-
-note: 
-    ┌─ erc20.fe:275:44
-    │
-275 │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-    │                                            ^^^^^^^^^^^^^^^^^^^^^^^ Address
-
-note: 
-    ┌─ erc20.fe:275:61
-    │
-275 │             Result::Ok(word) => Result::Ok(Address { inner: word }),
-    │                                                             ^^^^ u256
-
-note: 
-    ┌─ erc20.fe:276:13
-    │
-276 │             Result::Err(e) => Result::Err(e),
-    │             ^^^^^^^^^^^^^^ Result<AbiError, u256>
-
-note: 
-    ┌─ erc20.fe:276:25
-    │
-276 │             Result::Err(e) => Result::Err(e),
-    │                         ^ AbiError
-
-note: 
-    ┌─ erc20.fe:276:31
-    │
-276 │             Result::Err(e) => Result::Err(e),
-    │                               ^^^^^^^^^^^ fn Err<AbiError, Address>
-
-note: 
-    ┌─ erc20.fe:276:31
-    │
-276 │             Result::Err(e) => Result::Err(e),
-    │                               ^^^^^^^^^^^^^^ Result<AbiError, Address>
-
-note: 
-    ┌─ erc20.fe:276:43
-    │
-276 │             Result::Err(e) => Result::Err(e),
-    │                                           ^ AbiError
-
-note: 
-    ┌─ erc20.fe:281:43
-    │  
-281 │       fn eq(self, _ other: Address) -> bool {
-    │ ╭───────────────────────────────────────────^
-282 │ │         self.inner == other.inner
-283 │ │     }
-    │ ╰─────^ bool
-
-note: 
-    ┌─ erc20.fe:282:9
-    │
-282 │         self.inner == other.inner
-    │         ^^^^ Address
-
-note: 
-    ┌─ erc20.fe:282:9
-    │
-282 │         self.inner == other.inner
-    │         ^^^^^^^^^^ u256
-
-note: 
-    ┌─ erc20.fe:282:9
-    │
-282 │         self.inner == other.inner
-    │         ^^^^^^^^^^^^^^^^^^^^^^^^^ bool
-
-note: 
-    ┌─ erc20.fe:282:23
-    │
-282 │         self.inner == other.inner
-    │                       ^^^^^ Address
-
-note: 
-    ┌─ erc20.fe:282:23
-    │
-282 │         self.inner == other.inner
-    │                       ^^^^^^^^^^^ u256
-
-note: 
-    ┌─ erc20.fe:288:26
-    │  
-288 │       pub fn new() -> Self {
-    │ ╭──────────────────────────^
-289 │ │         Map {}
-290 │ │     }
-    │ ╰─────^ Map<K, V>
-
-note: 
-    ┌─ erc20.fe:289:9
-    │
-289 │         Map {}
-    │         ^^^^^^ Map<K, V>
-
-note: 
-    ┌─ erc20.fe:294:35
-    │  
-294 │       fn index(self, _ key: K) -> V {
-    │ ╭───────────────────────────────────^
-295 │ │         todo()
-296 │ │     }
-    │ ╰─────^ V
-
-note: 
-    ┌─ erc20.fe:295:9
-    │
-295 │         todo()
-    │         ^^^^ fn todo
-
-note: 
-    ┌─ erc20.fe:295:9
-    │
-295 │         todo()
-    │         ^^^^^^ V
-
-note: 
-    ┌─ erc20.fe:301:36
-    │  
-301 │       pub fn caller(self) -> Address {
-    │ ╭────────────────────────────────────^
-302 │ │         todo()
-303 │ │     }
+272 │       fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Self {
+    │ ╭─────────────────────────────────────────────────────^
+273 │ │         Address { inner: d.read_word() }
+274 │ │     }
     │ ╰─────^ Address
 
 note: 
-    ┌─ erc20.fe:302:9
+    ┌─ erc20.fe:273:9
     │
-302 │         todo()
+273 │         Address { inner: d.read_word() }
+    │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Address
+
+note: 
+    ┌─ erc20.fe:273:26
+    │
+273 │         Address { inner: d.read_word() }
+    │                          ^ D
+
+note: 
+    ┌─ erc20.fe:273:26
+    │
+273 │         Address { inner: d.read_word() }
+    │                          ^^^^^^^^^^^^^ u256
+
+note: 
+    ┌─ erc20.fe:277:43
+    │  
+277 │       fn eq(self, _ other: Address) -> bool {
+    │ ╭───────────────────────────────────────────^
+278 │ │         self.inner == other.inner
+279 │ │     }
+    │ ╰─────^ bool
+
+note: 
+    ┌─ erc20.fe:278:9
+    │
+278 │         self.inner == other.inner
+    │         ^^^^ Address
+
+note: 
+    ┌─ erc20.fe:278:9
+    │
+278 │         self.inner == other.inner
+    │         ^^^^^^^^^^ u256
+
+note: 
+    ┌─ erc20.fe:278:9
+    │
+278 │         self.inner == other.inner
+    │         ^^^^^^^^^^^^^^^^^^^^^^^^^ bool
+
+note: 
+    ┌─ erc20.fe:278:23
+    │
+278 │         self.inner == other.inner
+    │                       ^^^^^ Address
+
+note: 
+    ┌─ erc20.fe:278:23
+    │
+278 │         self.inner == other.inner
+    │                       ^^^^^^^^^^^ u256
+
+note: 
+    ┌─ erc20.fe:284:26
+    │  
+284 │       pub fn new() -> Self {
+    │ ╭──────────────────────────^
+285 │ │         Map {}
+286 │ │     }
+    │ ╰─────^ Map<K, V>
+
+note: 
+    ┌─ erc20.fe:285:9
+    │
+285 │         Map {}
+    │         ^^^^^^ Map<K, V>
+
+note: 
+    ┌─ erc20.fe:290:35
+    │  
+290 │       fn index(self, _ key: K) -> V {
+    │ ╭───────────────────────────────────^
+291 │ │         todo()
+292 │ │     }
+    │ ╰─────^ V
+
+note: 
+    ┌─ erc20.fe:291:9
+    │
+291 │         todo()
     │         ^^^^ fn todo
 
 note: 
-    ┌─ erc20.fe:302:9
+    ┌─ erc20.fe:291:9
     │
-302 │         todo()
+291 │         todo()
+    │         ^^^^^^ V
+
+note: 
+    ┌─ erc20.fe:297:36
+    │  
+297 │       pub fn caller(self) -> Address {
+    │ ╭────────────────────────────────────^
+298 │ │         todo()
+299 │ │     }
+    │ ╰─────^ Address
+
+note: 
+    ┌─ erc20.fe:298:9
+    │
+298 │         todo()
+    │         ^^^^ fn todo
+
+note: 
+    ┌─ erc20.fe:298:9
+    │
+298 │         todo()
     │         ^^^^^^ Address
 
 note: 
-    ┌─ erc20.fe:308:38
+    ┌─ erc20.fe:304:38
     │  
-308 │       pub fn emit<T>(self, _ event: T) {
+304 │       pub fn emit<T>(self, _ event: T) {
     │ ╭──────────────────────────────────────^
-309 │ │         todo()
-310 │ │     }
+305 │ │         todo()
+306 │ │     }
     │ ╰─────^ ()
 
 note: 
-    ┌─ erc20.fe:309:9
+    ┌─ erc20.fe:305:9
     │
-309 │         todo()
+305 │         todo()
     │         ^^^^ fn todo
 
 note: 
-    ┌─ erc20.fe:309:9
+    ┌─ erc20.fe:305:9
     │
-309 │         todo()
+305 │         todo()
     │         ^^^^^^ ()
