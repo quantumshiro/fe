@@ -1,5 +1,6 @@
 use std::fmt;
 
+use hir::analysis::ty::decision_tree::ProjectionPath;
 use hir::analysis::ty::ty_check::{Callable, TypedBody};
 use hir::analysis::ty::ty_def::TyId;
 use hir::hir_def::{
@@ -286,6 +287,10 @@ pub enum ValueOrigin<'db> {
     Intrinsic(IntrinsicValue<'db>),
     /// Pointer arithmetic for accessing a nested struct field (no load, just offset).
     FieldPtr(FieldPtrOrigin),
+    /// Load a value from a place (for primitives/scalars).
+    PlaceLoad(Place<'db>),
+    /// Reference to a place (for aggregates - pointer arithmetic only, no load).
+    PlaceRef(Place<'db>),
 }
 
 impl<'db> ValueOrigin<'db> {
@@ -330,17 +335,25 @@ pub struct MatchArmLowering {
     pub body: ExprId,
     pub block: BasicBlockId,
     pub terminates: bool,
+    /// Bindings from decision tree pattern matching (for tuple/struct patterns).
+    /// These map variable names to MIR values extracted from the scrutinee.
+    pub decision_tree_bindings: Vec<DecisionTreeBinding>,
 }
 
-/// Information about a variable binding extracted from a pattern.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PatternBinding {
-    /// The pattern ID representing the binding (e.g., `x` in `Some(x)`).
-    pub pat_id: PatId,
-    /// Byte offset of this field within the variant's data region (after discriminant).
-    pub field_offset: u64,
-    /// MIR value representing the lowered load for this binding (if synthesized).
-    pub value: Option<ValueId>,
+/// A binding from decision tree pattern matching.
+/// Maps a variable name to the MIR value representing its extracted value.
+#[derive(Debug, Clone)]
+pub struct DecisionTreeBinding {
+    /// The variable name (e.g., "x", "y").
+    pub name: String,
+    /// MIR value referencing the bound location (pointer/address expression).
+    ///
+    /// This is emitted as a `PlaceRef` value so downstream passes that care about
+    /// reference semantics can recover the underlying place/projection path even
+    /// when the binding's value is loaded eagerly.
+    pub place: ValueId,
+    /// MIR value for the extracted field (computed via lower_occurrence).
+    pub value: ValueId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -350,8 +363,6 @@ pub enum MatchArmPattern {
     Enum {
         variant_index: u64,
         enum_name: String,
-        /// Bindings extracted from the variant's data (empty for unit variants).
-        bindings: Vec<PatternBinding>,
     },
 }
 
@@ -381,6 +392,33 @@ pub struct FieldPtrOrigin {
     pub base: ValueId,
     /// Byte offset to add to the base pointer.
     pub offset_bytes: u64,
+}
+
+/// A place describes a location that can be read from or written to.
+/// Consists of a base value and a projection path describing how to navigate
+/// from the base to the actual location.
+#[derive(Debug, Clone)]
+pub struct Place<'db> {
+    /// The base value (e.g., a local variable, parameter, or allocation).
+    pub base: ValueId,
+    /// Sequence of projections to apply to reach the target location.
+    pub projection: ProjectionPath<'db>,
+    /// Address space where this place resides (memory vs storage).
+    pub address_space: AddressSpaceKind,
+}
+
+impl<'db> Place<'db> {
+    pub fn new(
+        base: ValueId,
+        projection: ProjectionPath<'db>,
+        address_space: AddressSpaceKind,
+    ) -> Self {
+        Self {
+            base,
+            projection,
+            address_space,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

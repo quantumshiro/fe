@@ -2,11 +2,7 @@ use driver::DriverDataBase;
 use hir::{
     analysis::{
         name_resolution::{PathRes, resolve_path},
-        ty::{
-            adt_def::AdtRef,
-            trait_resolution::PredicateListId,
-            ty_def::{PrimTy, TyBase, TyData, TyId, prim_int_bits},
-        },
+        ty::{layout, trait_resolution::PredicateListId},
     },
     hir_def::{Body, Expr, ExprId, Partial, Pat, PatId, PathId, Stmt, StmtId},
 };
@@ -303,45 +299,10 @@ impl<'db> FunctionEmitter<'db> {
                 )));
             }
         };
-        self.ty_size_bytes(ty).ok_or_else(|| {
+        layout::ty_size_bytes(self.db, ty).ok_or_else(|| {
             YulError::Unsupported(format!(
                 "cannot determine storage size for effect `{binding_name}`: unsupported type"
             ))
         })
-    }
-
-    /// Best-effort byte size computation for types used as storage effects.
-    fn ty_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
-        // Handle tuples first (check base type for TyApp cases)
-        if ty.is_tuple(self.db) {
-            let mut size = 0u64;
-            for field_ty in ty.field_types(self.db) {
-                size += self.ty_size_bytes(field_ty)?;
-            }
-            return Some(size);
-        }
-
-        // Handle primitives
-        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db) {
-            if *prim == PrimTy::Bool {
-                return Some(1);
-            }
-            if let Some(bits) = prim_int_bits(*prim) {
-                return Some((bits / 8) as u64);
-            }
-        }
-
-        // Handle ADT types (structs) - use adt_def() which handles TyApp
-        if let Some(adt_def) = ty.adt_def(self.db)
-            && matches!(adt_def.adt_ref(self.db), AdtRef::Struct(_))
-        {
-            let mut size = 0u64;
-            for field_ty in ty.field_types(self.db) {
-                size += self.ty_size_bytes(field_ty)?;
-            }
-            return Some(size);
-        }
-
-        None
     }
 }
