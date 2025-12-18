@@ -1,29 +1,8 @@
 ---
 source: crates/hir/tests/ty_check.rs
-assertion_line: 41
 expression: res
 input_file: test_files/ty_check/contract_happy.fe
 ---
-note: 
-   ┌─ contract_happy.fe:2:1
-   │  
- 2 │ ╭ pub contract Bank {
- 3 │ │     total: u64,
- 4 │ │ 
- 5 │ │     init(start: u64) uses (mut total) {
-   · │
-23 │ │     }
-24 │ │ }
-   │ ╰─^ u32
-
-note: 
-  ┌─ contract_happy.fe:5:5
-  │  
-5 │ ╭     init(start: u64) uses (mut total) {
-6 │ │         total = start
-7 │ │     }
-  │ ╰─────^ u256
-
 note: 
   ┌─ contract_happy.fe:5:39
   │  
@@ -56,18 +35,6 @@ note:
    │
 10 │         Withdraw { amount } -> bool
    │         ^^^^^^^^^^^^^^^^^^^ Withdraw
-
-note: 
-   ┌─ contract_happy.fe:10:9
-   │  
-10 │ ╭         Withdraw { amount } -> bool
-11 │ │           uses (mut total) {
-12 │ │             if amount > total {
-13 │ │                 false
-   · │
-17 │ │             }
-18 │ │         }
-   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_happy.fe:10:20
@@ -171,15 +138,6 @@ note:
    │
 19 │         Deposit { amount } -> u64 uses (mut total) {
    │         ^^^^^^^^^^^^^^^^^^ Deposit
-
-note: 
-   ┌─ contract_happy.fe:19:9
-   │  
-19 │ ╭         Deposit { amount } -> u64 uses (mut total) {
-20 │ │             total += amount
-21 │ │             total
-22 │ │         }
-   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_happy.fe:19:19

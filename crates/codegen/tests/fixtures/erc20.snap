@@ -261,301 +261,262 @@ object "CoolCoin" {
         }
         if iszero(v6) {
           let v7 := selector_from_prefix__Sol__c9e55515628bbda1(calldataload(0))
-          let v8 := eq(v7, 2835717307)
-          if v8 {
-            let v9 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-            let v10 := lt(calldatasize(), add(4, 64))
-            if v10 {
-              revert(0, 0)
-            }
-            if iszero(v10) {
-              let v11 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v9)
-              let v12 := v0
-              let v13 := v2
-              let v14 := v1
-              let v15 := recv_Erc20_Transfer_0_0(v11, v0, v13, v1)
-              let v16 := solencoder_new()
-              pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v16, 32))
-              encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v15, v16)
-              let v17 := finish__SolEncoder_Sol__822e2f0488b7f288(v16)
-              return(mload(v17), mload(add(v17, 32)))
-            }
-          }
-          if iszero(v8) {
-            let v18 := eq(v7, 157198259)
-            if v18 {
-              let v19 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-              let v20 := lt(calldatasize(), add(4, 64))
-              if v20 {
+          switch v7
+            case 2835717307 {
+              let v8 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v9 := lt(calldatasize(), add(4, 64))
+              if v9 {
                 revert(0, 0)
               }
-              if iszero(v20) {
-                let v21 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v19)
-                let v22 := v0
-                let v23 := v2
-                let v24 := v1
-                let v25 := recv_Erc20_Approve_0_1(v21, v0, v23, v1)
-                let v26 := solencoder_new()
-                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v26, 32))
-                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v25, v26)
-                let v27 := finish__SolEncoder_Sol__822e2f0488b7f288(v26)
-                return(mload(v27), mload(add(v27, 32)))
+              if iszero(v9) {
+                let v10 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v8)
+                let v11 := v0
+                let v12 := v2
+                let v13 := v1
+                let v14 := recv_Erc20_Transfer_0_0(v10, v0, v12, v1)
+                let v15 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v15, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v14, v15)
+                let v16 := finish__SolEncoder_Sol__822e2f0488b7f288(v15)
+                return(mload(v16), mload(add(v16, 32)))
               }
             }
-            if iszero(v18) {
-              let v28 := eq(v7, 599290589)
-              if v28 {
-                let v29 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                let v30 := lt(calldatasize(), add(4, 96))
-                if v30 {
-                  revert(0, 0)
-                }
-                if iszero(v30) {
-                  let v31 := decode___Address__Address__u256__Sol_SolDecoder_CallData___16d092d427f220c3(v29)
-                  let v32 := v0
-                  let v33 := v2
-                  let v34 := v1
-                  let v35 := recv_Erc20_TransferFrom_0_2(v31, v0, v33, v1)
-                  let v36 := solencoder_new()
-                  pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v36, 32))
-                  encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v35, v36)
-                  let v37 := finish__SolEncoder_Sol__822e2f0488b7f288(v36)
-                  return(mload(v37), mload(add(v37, 32)))
-                }
+            case 157198259 {
+              let v17 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v18 := lt(calldatasize(), add(4, 64))
+              if v18 {
+                revert(0, 0)
               }
-              if iszero(v28) {
-                let v38 := eq(v7, 1889567281)
-                if v38 {
-                  let v39 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                  let v40 := lt(calldatasize(), add(4, 32))
-                  if v40 {
-                    revert(0, 0)
-                  }
-                  if iszero(v40) {
-                    let v41 := decode___Address__Sol_SolDecoder_CallData___d6e81cef65afc660(v39)
-                    let v42 := v2
-                    let v43 := recv_Erc20_BalanceOf_0_3(v41, v42)
-                    let v44 := solencoder_new()
-                    pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v44, 32))
-                    encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v43, v44)
-                    let v45 := finish__SolEncoder_Sol__822e2f0488b7f288(v44)
-                    return(mload(v45), mload(add(v45, 32)))
-                  }
-                }
-                if iszero(v38) {
-                  let v46 := eq(v7, 3714247998)
-                  if v46 {
-                    let v47 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                    let v48 := lt(calldatasize(), add(4, 64))
-                    if v48 {
-                      revert(0, 0)
-                    }
-                    if iszero(v48) {
-                      let v49 := decode___Address__Address__Sol_SolDecoder_CallData___e31bed4b2a2f8934(v47)
-                      let v50 := v2
-                      let v51 := recv_Erc20_Allowance_0_4(v49, v50)
-                      let v52 := solencoder_new()
-                      pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v52, 32))
-                      encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v51, v52)
-                      let v53 := finish__SolEncoder_Sol__822e2f0488b7f288(v52)
-                      return(mload(v53), mload(add(v53, 32)))
-                    }
-                  }
-                  if iszero(v46) {
-                    let v54 := eq(v7, 404098525)
-                    if v54 {
-                      let v55 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                      let v56 := lt(calldatasize(), add(4, 0))
-                      if v56 {
-                        revert(0, 0)
-                      }
-                      if iszero(v56) {
-                        let v57 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v55)
-                        let v58 := v2
-                        let v59 := recv_Erc20_TotalSupply_0_5(v57, v58)
-                        let v60 := solencoder_new()
-                        pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v60, 32))
-                        encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v59, v60)
-                        let v61 := finish__SolEncoder_Sol__822e2f0488b7f288(v60)
-                        return(mload(v61), mload(add(v61, 32)))
-                      }
-                    }
-                    if iszero(v54) {
-                      let v62 := eq(v7, 117300739)
-                      if v62 {
-                        let v63 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                        let v64 := lt(calldatasize(), add(4, 0))
-                        if v64 {
-                          revert(0, 0)
-                        }
-                        if iszero(v64) {
-                          let v65 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v63)
-                          let v66 := recv_Erc20_Name_0_6(v65)
-                          let v67 := solencoder_new()
-                          pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v67, 32))
-                          encode__String_32__Sol_SolEncoder__fcdbe6cb3c922c20(v66, v67)
-                          let v68 := finish__SolEncoder_Sol__822e2f0488b7f288(v67)
-                          return(mload(v68), mload(add(v68, 32)))
-                        }
-                      }
-                      if iszero(v62) {
-                        let v69 := eq(v7, 2514000705)
-                        if v69 {
-                          let v70 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                          let v71 := lt(calldatasize(), add(4, 0))
-                          if v71 {
-                            revert(0, 0)
-                          }
-                          if iszero(v71) {
-                            let v72 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v70)
-                            let v73 := recv_Erc20_Symbol_0_7(v72)
-                            let v74 := solencoder_new()
-                            pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v74, 32))
-                            encode__String_32__Sol_SolEncoder__fcdbe6cb3c922c20(v73, v74)
-                            let v75 := finish__SolEncoder_Sol__822e2f0488b7f288(v74)
-                            return(mload(v75), mload(add(v75, 32)))
-                          }
-                        }
-                        if iszero(v69) {
-                          let v76 := eq(v7, 826074471)
-                          if v76 {
-                            let v77 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                            let v78 := lt(calldatasize(), add(4, 0))
-                            if v78 {
-                              revert(0, 0)
-                            }
-                            if iszero(v78) {
-                              let v79 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v77)
-                              let v80 := recv_Erc20_Decimals_0_8(v79)
-                              let v81 := solencoder_new()
-                              pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v81, 32))
-                              encode__u8_Sol_SolEncoder__c247f0ed5c0eeb6b(v80, v81)
-                              let v82 := finish__SolEncoder_Sol__822e2f0488b7f288(v81)
-                              return(mload(v82), mload(add(v82, 32)))
-                            }
-                          }
-                          if iszero(v76) {
-                            let v83 := eq(v7, 1086394137)
-                            if v83 {
-                              let v84 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                              let v85 := lt(calldatasize(), add(4, 64))
-                              if v85 {
-                                revert(0, 0)
-                              }
-                              if iszero(v85) {
-                                let v86 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v84)
-                                let v87 := v0
-                                let v88 := v2
-                                let v89 := v1
-                                let v90 := v3
-                                let v91 := recv_Erc20Extended_Mint_1_0(v86, v0, v88, v1, v90)
-                                let v92 := solencoder_new()
-                                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v92, 32))
-                                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v91, v92)
-                                let v93 := finish__SolEncoder_Sol__822e2f0488b7f288(v92)
-                                return(mload(v93), mload(add(v93, 32)))
-                              }
-                            }
-                            if iszero(v83) {
-                              let v94 := eq(v7, 1117154408)
-                              if v94 {
-                                let v95 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                                let v96 := lt(calldatasize(), add(4, 32))
-                                if v96 {
-                                  revert(0, 0)
-                                }
-                                if iszero(v96) {
-                                  let v97 := decode___u256__Sol_SolDecoder_CallData___6bbc79d2596eeb59(v95)
-                                  let v98 := v0
-                                  let v99 := v2
-                                  let v100 := v1
-                                  let v101 := recv_Erc20Extended_Burn_1_1(v97, v0, v99, v1)
-                                  let v102 := solencoder_new()
-                                  pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v102, 32))
-                                  encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v101, v102)
-                                  let v103 := finish__SolEncoder_Sol__822e2f0488b7f288(v102)
-                                  return(mload(v103), mload(add(v103, 32)))
-                                }
-                              }
-                              if iszero(v94) {
-                                let v104 := eq(v7, 2043438992)
-                                if v104 {
-                                  let v105 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                                  let v106 := lt(calldatasize(), add(4, 64))
-                                  if v106 {
-                                    revert(0, 0)
-                                  }
-                                  if iszero(v106) {
-                                    let v107 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v105)
-                                    let v108 := v0
-                                    let v109 := v2
-                                    let v110 := v1
-                                    let v111 := recv_Erc20Extended_BurnFrom_1_2(v107, v0, v109, v1)
-                                    let v112 := solencoder_new()
-                                    pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v112, 32))
-                                    encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v111, v112)
-                                    let v113 := finish__SolEncoder_Sol__822e2f0488b7f288(v112)
-                                    return(mload(v113), mload(add(v113, 32)))
-                                  }
-                                }
-                                if iszero(v104) {
-                                  let v114 := eq(v7, 961581905)
-                                  if v114 {
-                                    let v115 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                                    let v116 := lt(calldatasize(), add(4, 64))
-                                    if v116 {
-                                      revert(0, 0)
-                                    }
-                                    if iszero(v116) {
-                                      let v117 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v115)
-                                      let v118 := v0
-                                      let v119 := v2
-                                      let v120 := v1
-                                      let v121 := recv_Erc20Extended_IncreaseAllowance_1_3(v117, v0, v119, v1)
-                                      let v122 := solencoder_new()
-                                      pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v122, 32))
-                                      encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v121, v122)
-                                      let v123 := finish__SolEncoder_Sol__822e2f0488b7f288(v122)
-                                      return(mload(v123), mload(add(v123, 32)))
-                                    }
-                                  }
-                                  if iszero(v114) {
-                                    let v124 := eq(v7, 2757214935)
-                                    if v124 {
-                                      let v125 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
-                                      let v126 := lt(calldatasize(), add(4, 64))
-                                      if v126 {
-                                        revert(0, 0)
-                                      }
-                                      if iszero(v126) {
-                                        let v127 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v125)
-                                        let v128 := v0
-                                        let v129 := v2
-                                        let v130 := v1
-                                        let v131 := recv_Erc20Extended_DecreaseAllowance_1_4(v127, v0, v129, v1)
-                                        let v132 := solencoder_new()
-                                        pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v132, 32))
-                                        encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v131, v132)
-                                        let v133 := finish__SolEncoder_Sol__822e2f0488b7f288(v132)
-                                        return(mload(v133), mload(add(v133, 32)))
-                                      }
-                                    }
-                                    if iszero(v124) {
-                                      revert(0, 0)
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
+              if iszero(v18) {
+                let v19 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v17)
+                let v20 := v0
+                let v21 := v2
+                let v22 := v1
+                let v23 := recv_Erc20_Approve_0_1(v19, v0, v21, v1)
+                let v24 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v24, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v23, v24)
+                let v25 := finish__SolEncoder_Sol__822e2f0488b7f288(v24)
+                return(mload(v25), mload(add(v25, 32)))
               }
             }
-          }
+            case 599290589 {
+              let v26 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v27 := lt(calldatasize(), add(4, 96))
+              if v27 {
+                revert(0, 0)
+              }
+              if iszero(v27) {
+                let v28 := decode___Address__Address__u256__Sol_SolDecoder_CallData___16d092d427f220c3(v26)
+                let v29 := v0
+                let v30 := v2
+                let v31 := v1
+                let v32 := recv_Erc20_TransferFrom_0_2(v28, v0, v30, v1)
+                let v33 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v33, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v32, v33)
+                let v34 := finish__SolEncoder_Sol__822e2f0488b7f288(v33)
+                return(mload(v34), mload(add(v34, 32)))
+              }
+            }
+            case 1889567281 {
+              let v35 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v36 := lt(calldatasize(), add(4, 32))
+              if v36 {
+                revert(0, 0)
+              }
+              if iszero(v36) {
+                let v37 := decode___Address__Sol_SolDecoder_CallData___d6e81cef65afc660(v35)
+                let v38 := v2
+                let v39 := recv_Erc20_BalanceOf_0_3(v37, v38)
+                let v40 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v40, 32))
+                encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v39, v40)
+                let v41 := finish__SolEncoder_Sol__822e2f0488b7f288(v40)
+                return(mload(v41), mload(add(v41, 32)))
+              }
+            }
+            case 3714247998 {
+              let v42 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v43 := lt(calldatasize(), add(4, 64))
+              if v43 {
+                revert(0, 0)
+              }
+              if iszero(v43) {
+                let v44 := decode___Address__Address__Sol_SolDecoder_CallData___e31bed4b2a2f8934(v42)
+                let v45 := v2
+                let v46 := recv_Erc20_Allowance_0_4(v44, v45)
+                let v47 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v47, 32))
+                encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v46, v47)
+                let v48 := finish__SolEncoder_Sol__822e2f0488b7f288(v47)
+                return(mload(v48), mload(add(v48, 32)))
+              }
+            }
+            case 404098525 {
+              let v49 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v50 := lt(calldatasize(), add(4, 0))
+              if v50 {
+                revert(0, 0)
+              }
+              if iszero(v50) {
+                let v51 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v49)
+                let v52 := v2
+                let v53 := recv_Erc20_TotalSupply_0_5(v51, v52)
+                let v54 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v54, 32))
+                encode__u256_Sol_SolEncoder__ce94c1790aa7f5c9(v53, v54)
+                let v55 := finish__SolEncoder_Sol__822e2f0488b7f288(v54)
+                return(mload(v55), mload(add(v55, 32)))
+              }
+            }
+            case 117300739 {
+              let v56 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v57 := lt(calldatasize(), add(4, 0))
+              if v57 {
+                revert(0, 0)
+              }
+              if iszero(v57) {
+                let v58 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v56)
+                let v59 := recv_Erc20_Name_0_6(v58)
+                let v60 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v60, 32))
+                encode__String_32__Sol_SolEncoder__fcdbe6cb3c922c20(v59, v60)
+                let v61 := finish__SolEncoder_Sol__822e2f0488b7f288(v60)
+                return(mload(v61), mload(add(v61, 32)))
+              }
+            }
+            case 2514000705 {
+              let v62 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v63 := lt(calldatasize(), add(4, 0))
+              if v63 {
+                revert(0, 0)
+              }
+              if iszero(v63) {
+                let v64 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v62)
+                let v65 := recv_Erc20_Symbol_0_7(v64)
+                let v66 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v66, 32))
+                encode__String_32__Sol_SolEncoder__fcdbe6cb3c922c20(v65, v66)
+                let v67 := finish__SolEncoder_Sol__822e2f0488b7f288(v66)
+                return(mload(v67), mload(add(v67, 32)))
+              }
+            }
+            case 826074471 {
+              let v68 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v69 := lt(calldatasize(), add(4, 0))
+              if v69 {
+                revert(0, 0)
+              }
+              if iszero(v69) {
+                let v70 := decode_____Sol_SolDecoder_CallData___7a33f8e14ea06d71(v68)
+                let v71 := recv_Erc20_Decimals_0_8(v70)
+                let v72 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v72, 32))
+                encode__u8_Sol_SolEncoder__c247f0ed5c0eeb6b(v71, v72)
+                let v73 := finish__SolEncoder_Sol__822e2f0488b7f288(v72)
+                return(mload(v73), mload(add(v73, 32)))
+              }
+            }
+            case 1086394137 {
+              let v74 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v75 := lt(calldatasize(), add(4, 64))
+              if v75 {
+                revert(0, 0)
+              }
+              if iszero(v75) {
+                let v76 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v74)
+                let v77 := v0
+                let v78 := v2
+                let v79 := v1
+                let v80 := v3
+                let v81 := recv_Erc20Extended_Mint_1_0(v76, v0, v78, v1, v80)
+                let v82 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v82, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v81, v82)
+                let v83 := finish__SolEncoder_Sol__822e2f0488b7f288(v82)
+                return(mload(v83), mload(add(v83, 32)))
+              }
+            }
+            case 1117154408 {
+              let v84 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v85 := lt(calldatasize(), add(4, 32))
+              if v85 {
+                revert(0, 0)
+              }
+              if iszero(v85) {
+                let v86 := decode___u256__Sol_SolDecoder_CallData___6bbc79d2596eeb59(v84)
+                let v87 := v0
+                let v88 := v2
+                let v89 := v1
+                let v90 := recv_Erc20Extended_Burn_1_1(v86, v0, v88, v1)
+                let v91 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v91, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v90, v91)
+                let v92 := finish__SolEncoder_Sol__822e2f0488b7f288(v91)
+                return(mload(v92), mload(add(v92, 32)))
+              }
+            }
+            case 2043438992 {
+              let v93 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v94 := lt(calldatasize(), add(4, 64))
+              if v94 {
+                revert(0, 0)
+              }
+              if iszero(v94) {
+                let v95 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v93)
+                let v96 := v0
+                let v97 := v2
+                let v98 := v1
+                let v99 := recv_Erc20Extended_BurnFrom_1_2(v95, v0, v97, v1)
+                let v100 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v100, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v99, v100)
+                let v101 := finish__SolEncoder_Sol__822e2f0488b7f288(v100)
+                return(mload(v101), mload(add(v101, 32)))
+              }
+            }
+            case 961581905 {
+              let v102 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v103 := lt(calldatasize(), add(4, 64))
+              if v103 {
+                revert(0, 0)
+              }
+              if iszero(v103) {
+                let v104 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v102)
+                let v105 := v0
+                let v106 := v2
+                let v107 := v1
+                let v108 := recv_Erc20Extended_IncreaseAllowance_1_3(v104, v0, v106, v1)
+                let v109 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v109, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v108, v109)
+                let v110 := finish__SolEncoder_Sol__822e2f0488b7f288(v109)
+                return(mload(v110), mload(add(v110, 32)))
+              }
+            }
+            case 2757214935 {
+              let v111 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(v5, 4)
+              let v112 := lt(calldatasize(), add(4, 64))
+              if v112 {
+                revert(0, 0)
+              }
+              if iszero(v112) {
+                let v113 := decode___Address__u256__Sol_SolDecoder_CallData___d238c7fab3868e5(v111)
+                let v114 := v0
+                let v115 := v2
+                let v116 := v1
+                let v117 := recv_Erc20Extended_DecreaseAllowance_1_4(v113, v0, v115, v1)
+                let v118 := solencoder_new()
+                pop(reserve_head__SolEncoder_Sol__822e2f0488b7f288(v118, 32))
+                encode__bool_Sol_SolEncoder__adf1e84b81136aa9(v117, v118)
+                let v119 := finish__SolEncoder_Sol__822e2f0488b7f288(v118)
+                return(mload(v119), mload(add(v119, 32)))
+              }
+            }
+            default {
+              revert(0, 0)
+            }
         }
       }
       function selector_from_prefix__Sol__c9e55515628bbda1(prefix) -> ret {

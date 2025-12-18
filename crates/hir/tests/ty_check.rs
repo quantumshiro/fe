@@ -3,6 +3,7 @@ use std::path::Path;
 
 use dir_test::{Fixture, dir_test};
 use fe_hir::analysis::ty::ty_check::{check_contract_recv_arm_body, check_func_body};
+use fe_hir::span::{DesugaredOrigin, HirOrigin};
 use test_db::HirAnalysisTestDb;
 use test_utils::snap_test;
 
@@ -20,6 +21,13 @@ fn ty_check_standalone(fixture: Fixture<&str>) {
     db.assert_no_diags(top_mod);
 
     for &func in top_mod.all_funcs(&db) {
+        // Skip desugared runtime function (but keep init)
+        if matches!(
+            func.origin(&db),
+            HirOrigin::Desugared(DesugaredOrigin::ContractLowering(_))
+        ) {
+            continue;
+        }
         if let Some(body) = func.body(&db) {
             let typed_body = &check_func_body(&db, func).1;
             collect_body_props(&db, body, typed_body, &mut prop_formatter);

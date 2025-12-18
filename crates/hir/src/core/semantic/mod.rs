@@ -2187,6 +2187,10 @@ impl<'db> TraitAssocConstView<'db> {
         self.decl(db).default.is_some()
     }
 
+    pub fn default_body(self, db: &'db dyn HirDb) -> Option<crate::core::hir_def::Body<'db>> {
+        self.decl(db).default.and_then(|body| body.to_opt())
+    }
+
     /// Semantic type of this associated const, lowered in the trait's scope.
     pub fn ty(self, db: &'db dyn HirAnalysisDb) -> Option<TyId<'db>> {
         let hir = self.decl(db).ty.to_opt()?;

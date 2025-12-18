@@ -634,7 +634,7 @@ pub struct Func<'db> {
     pub top_mod: TopLevelMod<'db>,
 
     #[return_ref]
-    pub(crate) origin: HirOrigin<ast::Func>,
+    pub origin: HirOrigin<ast::Func>,
 }
 impl<'db> Func<'db> {
     pub fn span(self) -> LazyFuncSpan<'db> {

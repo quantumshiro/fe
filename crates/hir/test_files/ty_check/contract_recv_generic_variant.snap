@@ -1,34 +1,13 @@
 ---
 source: crates/hir/tests/ty_check.rs
-assertion_line: 41
 expression: res
 input_file: test_files/ty_check/contract_recv_generic_variant.fe
 ---
-note: 
-   ┌─ contract_recv_generic_variant.fe:25:1
-   │  
-25 │ ╭ pub contract GenericRecvContract {
-26 │ │     data: u64,
-27 │ │ 
-28 │ │     recv {
-   · │
-38 │ │     }
-39 │ │ }
-   │ ╰─^ u32
-
 note: 
    ┌─ contract_recv_generic_variant.fe:29:9
    │
 29 │         GenericMsg<u8> { value } -> u8 uses () {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^ GenericMsg<u8>
-
-note: 
-   ┌─ contract_recv_generic_variant.fe:29:9
-   │  
-29 │ ╭         GenericMsg<u8> { value } -> u8 uses () {
-30 │ │             value
-31 │ │         }
-   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_recv_generic_variant.fe:29:26
@@ -58,14 +37,6 @@ note:
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^ GenericMsg<u16>
 
 note: 
-   ┌─ contract_recv_generic_variant.fe:32:9
-   │  
-32 │ ╭         GenericMsg<u16> { value } -> u16 uses () {
-33 │ │             value
-34 │ │         }
-   │ ╰─────────^ (u256, u256)
-
-note: 
    ┌─ contract_recv_generic_variant.fe:32:27
    │
 32 │         GenericMsg<u16> { value } -> u16 uses () {
@@ -91,14 +62,6 @@ note:
    │
 35 │         GenericMsg<u64> { value } -> u64 uses (data) {
    │         ^^^^^^^^^^^^^^^^^^^^^^^^^ GenericMsg<u64>
-
-note: 
-   ┌─ contract_recv_generic_variant.fe:35:9
-   │  
-35 │ ╭         GenericMsg<u64> { value } -> u64 uses (data) {
-36 │ │             data + value
-37 │ │         }
-   │ ╰─────────^ (u256, u256)
 
 note: 
    ┌─ contract_recv_generic_variant.fe:35:27

@@ -1209,19 +1209,37 @@ fn lower_contract_runtime_entrypoint_func<'db>(
         }
     }
 
-    // Build dispatch chain: if selector == X { arm } else if selector == Y { arm } else { revert }
-    let mut dispatch_expr = {
-        let mut b = HirBuilder::new(&mut body_ctxt, desugared.clone());
-        b.revert_call()
-    };
+    // Build dispatch match: match __selector { X::SELECTOR => arm, Y::SELECTOR => arm, _ => revert }
+    let dispatch_expr = {
+        let mut match_arms: Vec<MatchArm> = Vec::new();
 
-    for (arm_desugared, selector_const_path, arm_body) in dispatch_arms.into_iter().rev() {
-        let mut b = HirBuilder::new(&mut body_ctxt, arm_desugared);
+        for (arm_desugared, selector_const_path, arm_body) in dispatch_arms {
+            let b = HirBuilder::new(&mut body_ctxt, arm_desugared);
+            let pat = b.body_ctxt.push_pat(
+                Pat::Path(Partial::Present(selector_const_path), false),
+                b.origin(),
+            );
+            match_arms.push(MatchArm {
+                pat,
+                body: arm_body,
+            });
+        }
+
+        // Add wildcard arm that reverts
+        let mut b = HirBuilder::new(&mut body_ctxt, desugared.clone());
+        let wildcard_pat = b.wildcard_pat();
+        let revert_body = b.revert_call();
+        match_arms.push(MatchArm {
+            pat: wildcard_pat,
+            body: revert_body,
+        });
+
         let selector_var = b.var_expr("__selector");
-        let selector_const = b.path_id_expr(selector_const_path);
-        let cond = b.eq(selector_var, selector_const);
-        dispatch_expr = b.if_else(cond, arm_body, dispatch_expr);
-    }
+        b.body_ctxt.push_expr(
+            Expr::Match(selector_var, Partial::Present(match_arms)),
+            b.origin(),
+        )
+    };
 
     {
         let mut b = HirBuilder::new(&mut body_ctxt, desugared.clone());

@@ -771,20 +771,24 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         match expr.data(self.db, self.body) {
             Partial::Present(Expr::RecordInit(..)) => true,
             // Nested calls might have RecordInit arguments
-            Partial::Present(Expr::Call(_, call_args)) => {
-                call_args.iter().any(|arg| self.needs_block_aware_lowering(arg.expr))
-            }
+            Partial::Present(Expr::Call(_, call_args)) => call_args
+                .iter()
+                .any(|arg| self.needs_block_aware_lowering(arg.expr)),
             Partial::Present(Expr::MethodCall(receiver, _, _, call_args)) => {
                 self.needs_block_aware_lowering(*receiver)
-                    || call_args.iter().any(|arg| self.needs_block_aware_lowering(arg.expr))
+                    || call_args
+                        .iter()
+                        .any(|arg| self.needs_block_aware_lowering(arg.expr))
             }
             // Blocks might contain RecordInit expressions
-            Partial::Present(Expr::Block(stmts)) => stmts.iter().any(|stmt_id| {
-                match stmt_id.data(self.db, self.body) {
-                    Partial::Present(Stmt::Expr(e)) => self.needs_block_aware_lowering(*e),
-                    _ => false,
-                }
-            }),
+            Partial::Present(Expr::Block(stmts)) => {
+                stmts
+                    .iter()
+                    .any(|stmt_id| match stmt_id.data(self.db, self.body) {
+                        Partial::Present(Stmt::Expr(e)) => self.needs_block_aware_lowering(*e),
+                        _ => false,
+                    })
+            }
             // If expressions might contain RecordInit in their branches
             Partial::Present(Expr::If(cond, then_expr, else_expr)) => {
                 self.needs_block_aware_lowering(*cond)

@@ -51,27 +51,31 @@ mod __Counter {
             revert(0, 0)
         }
         let __selector = Sol::selector_from_prefix(calldataload(0))
-        if __selector == CounterMsg::Increment::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<CounterMsg::Increment::Args>() {
-                revert(0, 0)
-            }
-            let __args: CounterMsg::Increment::Args = CounterMsg::Increment::Args::decode(__d)
-            with (count) { recv_CounterMsg_Increment_0_0(__args) }
-            return_data(0, 0)
-        } else if __selector == CounterMsg::Get::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<CounterMsg::Get::Args>() {
-                revert(0, 0)
-            }
-            let __args: CounterMsg::Get::Args = CounterMsg::Get::Args::decode(__d)
-            let __result = with (count) { recv_CounterMsg_Get_0_1(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else { revert(0, 0) }
+        match __selector {
+            CounterMsg::Increment::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<CounterMsg::Increment::Args>() {
+                    revert(0, 0)
+                }
+                let __args: CounterMsg::Increment::Args = CounterMsg::Increment::Args::decode(__d)
+                with (count) { recv_CounterMsg_Increment_0_0(__args) }
+                return_data(0, 0)
+            },
+            CounterMsg::Get::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<CounterMsg::Get::Args>() {
+                    revert(0, 0)
+                }
+                let __args: CounterMsg::Get::Args = CounterMsg::Get::Args::decode(__d)
+                let __result = with (count) { recv_CounterMsg_Get_0_1(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            _ => revert(0, 0),
+        }
     }
 }
 

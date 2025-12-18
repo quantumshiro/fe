@@ -224,7 +224,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         {
             PathRes::Const(const_def, ty) => self.const_literal_from_def(const_def, ty, visited),
             PathRes::TraitConst(ty, trait_inst, const_name) => {
-                self.trait_const_literal_from_inst(ty, trait_inst, const_name, scope, visited)
+                self.trait_const_literal_from_inst(ty, trait_inst, const_name, visited)
             }
             _ => None,
         }
@@ -235,11 +235,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         ty: TyId<'db>,
         trait_inst: hir::analysis::ty::trait_def::TraitInstId<'db>,
         const_name: hir::hir_def::IdentId<'db>,
-        scope: ScopeId<'db>,
         visited: &mut FxHashSet<Const<'db>>,
     ) -> Option<ValueId> {
-        let ingot = scope.ingot(self.db);
-        let body = assoc_const_body_for_trait_inst(self.db, ingot, trait_inst, const_name)?;
+        let body = assoc_const_body_for_trait_inst(self.db, trait_inst, const_name)?;
         let expr_id = body.expr(self.db);
         let expr = match expr_id.data(self.db, body) {
             Partial::Present(expr) => expr,

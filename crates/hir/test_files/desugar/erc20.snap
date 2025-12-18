@@ -165,175 +165,191 @@ mod __CoolCoin {
             revert(0, 0)
         }
         let __selector = Sol::selector_from_prefix(calldataload(0))
-        if __selector == Erc20::Transfer::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Transfer::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::Transfer::Args = Erc20::Transfer::Args::decode(__d)
-            let __result = with (ctx, store, log) { recv_Erc20_Transfer_0_0(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::Approve::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Approve::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::Approve::Args = Erc20::Approve::Args::decode(__d)
-            let __result = with (ctx, store, log) { recv_Erc20_Approve_0_1(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::TransferFrom::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::TransferFrom::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::TransferFrom::Args = Erc20::TransferFrom::Args::decode(__d)
-            let __result = with (ctx, store, log) { recv_Erc20_TransferFrom_0_2(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::BalanceOf::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::BalanceOf::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::BalanceOf::Args = Erc20::BalanceOf::Args::decode(__d)
-            let __result = with (store) { recv_Erc20_BalanceOf_0_3(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::Allowance::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Allowance::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::Allowance::Args = Erc20::Allowance::Args::decode(__d)
-            let __result = with (store) { recv_Erc20_Allowance_0_4(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::TotalSupply::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::TotalSupply::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::TotalSupply::Args = Erc20::TotalSupply::Args::decode(__d)
-            let __result = with (store) { recv_Erc20_TotalSupply_0_5(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::Name::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Name::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::Name::Args = Erc20::Name::Args::decode(__d)
-            let __result = recv_Erc20_Name_0_6(__args)
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::Symbol::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Symbol::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::Symbol::Args = Erc20::Symbol::Args::decode(__d)
-            let __result = recv_Erc20_Symbol_0_7(__args)
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20::Decimals::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Decimals::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20::Decimals::Args = Erc20::Decimals::Args::decode(__d)
-            let __result = recv_Erc20_Decimals_0_8(__args)
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20Extended::Mint::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::Mint::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20Extended::Mint::Args = Erc20Extended::Mint::Args::decode(__d)
-            let __result = with (ctx, store, log, auth) { recv_Erc20Extended_Mint_1_0(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20Extended::Burn::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::Burn::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20Extended::Burn::Args = Erc20Extended::Burn::Args::decode(__d)
-            let __result = with (ctx, store, log) { recv_Erc20Extended_Burn_1_1(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20Extended::BurnFrom::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::BurnFrom::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20Extended::BurnFrom::Args = Erc20Extended::BurnFrom::Args::decode(__d)
-            let __result = with (ctx, store, log) { recv_Erc20Extended_BurnFrom_1_2(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20Extended::IncreaseAllowance::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::IncreaseAllowance::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20Extended::IncreaseAllowance::Args = Erc20Extended::IncreaseAllowance::Args::decode(__d)
-            let __result = with (ctx, store, log) { recv_Erc20Extended_IncreaseAllowance_1_3(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else if __selector == Erc20Extended::DecreaseAllowance::SELECTOR {
-            let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
-            if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::DecreaseAllowance::Args>() {
-                revert(0, 0)
-            }
-            let __args: Erc20Extended::DecreaseAllowance::Args = Erc20Extended::DecreaseAllowance::Args::decode(__d)
-            let __result = with (ctx, store, log) { recv_Erc20Extended_DecreaseAllowance_1_4(__args) }
-            let mut __enc = SolEncoder::new()
-            __enc.reserve_head(32)
-            __result.encode(__enc)
-            let __out = __enc.finish()
-            return_data(__out.0, __out.1)
-        } else { revert(0, 0) }
+        match __selector {
+            Erc20::Transfer::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Transfer::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::Transfer::Args = Erc20::Transfer::Args::decode(__d)
+                let __result = with (ctx, store, log) { recv_Erc20_Transfer_0_0(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::Approve::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Approve::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::Approve::Args = Erc20::Approve::Args::decode(__d)
+                let __result = with (ctx, store, log) { recv_Erc20_Approve_0_1(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::TransferFrom::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::TransferFrom::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::TransferFrom::Args = Erc20::TransferFrom::Args::decode(__d)
+                let __result = with (ctx, store, log) { recv_Erc20_TransferFrom_0_2(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::BalanceOf::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::BalanceOf::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::BalanceOf::Args = Erc20::BalanceOf::Args::decode(__d)
+                let __result = with (store) { recv_Erc20_BalanceOf_0_3(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::Allowance::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Allowance::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::Allowance::Args = Erc20::Allowance::Args::decode(__d)
+                let __result = with (store) { recv_Erc20_Allowance_0_4(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::TotalSupply::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::TotalSupply::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::TotalSupply::Args = Erc20::TotalSupply::Args::decode(__d)
+                let __result = with (store) { recv_Erc20_TotalSupply_0_5(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::Name::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Name::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::Name::Args = Erc20::Name::Args::decode(__d)
+                let __result = recv_Erc20_Name_0_6(__args)
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::Symbol::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Symbol::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::Symbol::Args = Erc20::Symbol::Args::decode(__d)
+                let __result = recv_Erc20_Symbol_0_7(__args)
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20::Decimals::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20::Decimals::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20::Decimals::Args = Erc20::Decimals::Args::decode(__d)
+                let __result = recv_Erc20_Decimals_0_8(__args)
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20Extended::Mint::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::Mint::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20Extended::Mint::Args = Erc20Extended::Mint::Args::decode(__d)
+                let __result = with (ctx, store, log, auth) { recv_Erc20Extended_Mint_1_0(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20Extended::Burn::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::Burn::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20Extended::Burn::Args = Erc20Extended::Burn::Args::decode(__d)
+                let __result = with (ctx, store, log) { recv_Erc20Extended_Burn_1_1(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20Extended::BurnFrom::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::BurnFrom::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20Extended::BurnFrom::Args = Erc20Extended::BurnFrom::Args::decode(__d)
+                let __result = with (ctx, store, log) { recv_Erc20Extended_BurnFrom_1_2(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20Extended::IncreaseAllowance::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::IncreaseAllowance::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20Extended::IncreaseAllowance::Args = Erc20Extended::IncreaseAllowance::Args::decode(__d)
+                let __result = with (ctx, store, log) { recv_Erc20Extended_IncreaseAllowance_1_3(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            Erc20Extended::DecreaseAllowance::SELECTOR => {
+                let mut __d = SolDecoder<CallData>::with_base(__calldata, size_of<Sol::Selector>())
+                if calldatasize() < size_of<Sol::Selector>() + encoded_size<Erc20Extended::DecreaseAllowance::Args>() {
+                    revert(0, 0)
+                }
+                let __args: Erc20Extended::DecreaseAllowance::Args = Erc20Extended::DecreaseAllowance::Args::decode(__d)
+                let __result = with (ctx, store, log) { recv_Erc20Extended_DecreaseAllowance_1_4(__args) }
+                let mut __enc = SolEncoder::new()
+                __enc.reserve_head(32)
+                __result.encode(__enc)
+                let __out = __enc.finish()
+                return_data(__out.0, __out.1)
+            },
+            _ => revert(0, 0),
+        }
     }
 }
 
@@ -687,7 +703,7 @@ struct ApprovalEvent {
 
 fn assert(_ b: bool) {
     if !b {
-        core::intrinsics::revert(0, 0)
+        core::intrinsic::revert(0, 0)
     }
 }
 
@@ -732,7 +748,7 @@ pub struct Ctx {}
 
 impl Ctx {
     pub fn caller(self) -> Address {
-        todo()
+        Address { inner: core::intrinsic::caller() }
     }
 
 }
