@@ -407,7 +407,7 @@ pub struct FieldPtrOrigin {
     /// Base pointer value being offset.
     pub base: ValueId,
     /// Byte offset to add to the base pointer.
-    pub offset_bytes: u64,
+    pub offset_bytes: usize,
     /// Address space of the base pointer (controls offset scaling in codegen).
     pub addr_space: AddressSpaceKind,
 }

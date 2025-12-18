@@ -154,7 +154,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 self.write_u8(0x08);
                 let slot = self.placeholder_value(field_ptr.base);
                 self.write_u32(slot);
-                self.write_u64(field_ptr.offset_bytes);
+                self.write_u64(field_ptr.offset_bytes as u64);
                 self.write_u8(match field_ptr.addr_space {
                     crate::ir::AddressSpaceKind::Memory => 1,
                     crate::ir::AddressSpaceKind::Storage => 2,

@@ -1,8 +1,9 @@
 //! Aggregate lowering and layout helpers for MIR: allocations, field/variant stores, sizing, and
 //! synthetic literals used by records and enums.
 
+use crate::layout;
+
 use super::*;
-use hir::analysis::ty::layout;
 use hir::analysis::ty::ty_def::prim_int_bits;
 
 #[derive(Copy, Clone)]
@@ -10,12 +11,12 @@ struct AggregateCopyCtx {
     expr: ExprId,
     block: BasicBlockId,
     dst_base: ValueId,
-    dst_offset: u64,
+    dst_offset: usize,
     addr_space: AddressSpaceKind,
 }
 
 impl AggregateCopyCtx {
-    fn with_offset(self, offset: u64) -> Self {
+    fn with_offset(self, offset: usize) -> Self {
         Self {
             dst_offset: self.dst_offset + offset,
             ..self
@@ -37,7 +38,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         &mut self,
         expr: ExprId,
         block: BasicBlockId,
-        size_bytes: u64,
+        size_bytes: usize,
     ) -> ValueId {
         let alloc_callable = self.core.make_callable(expr, CoreHelper::Alloc, &[]);
         let alloc_ret_ty = alloc_callable.ret_ty(self.db);
@@ -129,7 +130,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         expr: ExprId,
         block: BasicBlockId,
         base_value: ValueId,
-        stores: &[(u64, TyId<'db>, ValueId)],
+        stores: &[(usize, TyId<'db>, ValueId)],
     ) {
         if stores.is_empty() {
             return;
@@ -364,7 +365,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// # Returns
     /// Bit width when the type is a supported primitive, otherwise `None`.
-    pub(super) fn int_type_bits(&self, ty: TyId<'db>) -> Option<u16> {
+    pub(super) fn int_type_bits(&self, ty: TyId<'db>) -> Option<usize> {
         match ty.data(self.db) {
             TyData::TyBase(TyBase::Prim(prim)) => prim_int_bits(*prim),
             _ => None,
@@ -409,7 +410,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         &self,
         record_like: &RecordLike<'db>,
         idx: usize,
-    ) -> Option<(TyId<'db>, u64)> {
+    ) -> Option<(TyId<'db>, usize)> {
         let ty = match record_like {
             RecordLike::Type(ty) => *ty,
             RecordLike::EnumVariant(variant) => variant.ty,
@@ -430,7 +431,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// # Returns
     /// Total size in bytes if all field sizes are known.
-    pub(super) fn record_size_bytes(&self, record_like: &RecordLike<'db>) -> Option<u64> {
+    pub(super) fn record_size_bytes(&self, record_like: &RecordLike<'db>) -> Option<usize> {
         let ty = match record_like {
             RecordLike::Type(ty) => *ty,
             RecordLike::EnumVariant(variant) => variant.ty,
@@ -445,7 +446,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// # Returns
     /// Total enum size in bytes when layout is known.
-    pub(super) fn enum_size_bytes(&self, enum_ty: TyId<'db>) -> Option<u64> {
+    pub(super) fn enum_size_bytes(&self, enum_ty: TyId<'db>) -> Option<usize> {
         let (base_ty, args) = enum_ty.decompose_ty_app(self.db);
         let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db) else {
             return None;
@@ -454,9 +455,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return None;
         }
 
-        let mut max_payload = 0u64;
+        let mut max_payload = 0;
         for variant in adt_def.fields(self.db) {
-            let mut payload = 0u64;
+            let mut payload = 0;
             for ty in variant.iter_types(self.db) {
                 let field_ty = ty.instantiate(self.db, args);
                 payload += layout::ty_size_bytes(self.db, field_ty).unwrap_or(32);
@@ -471,13 +472,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// This matches the head size used by the ABI encoder/decoder: primitive values occupy one
     /// 32-byte word, while tuples/records are the concatenation of their fields.
-    pub(super) fn abi_static_size_bytes(&self, ty: TyId<'db>) -> Option<u64> {
+    pub(super) fn abi_static_size_bytes(&self, ty: TyId<'db>) -> Option<usize> {
         if ty.is_tuple(self.db)
             || ty
                 .adt_ref(self.db)
                 .is_some_and(|adt| matches!(adt, AdtRef::Struct(_)))
         {
-            let mut size = 0u64;
+            let mut size = 0;
             for field_ty in ty.field_types(self.db) {
                 size += self.abi_static_size_bytes(field_ty)?;
             }

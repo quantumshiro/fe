@@ -1,10 +1,9 @@
-mod test_db;
 use std::path::Path;
 
 use dir_test::{Fixture, dir_test};
 use fe_hir::analysis::ty::ty_check::{check_contract_recv_arm_body, check_func_body};
 use fe_hir::span::{DesugaredOrigin, HirOrigin};
-use test_db::HirAnalysisTestDb;
+use fe_hir::test_db::HirAnalysisTestDb;
 use test_utils::snap_test;
 
 #[dir_test(
@@ -53,7 +52,7 @@ fn collect_body_props<'db>(
     db: &'db HirAnalysisTestDb,
     body: fe_hir::hir_def::Body<'db>,
     typed_body: &fe_hir::analysis::ty::ty_check::TypedBody<'db>,
-    prop_formatter: &mut crate::test_db::HirPropertyFormatter<'db>,
+    prop_formatter: &mut fe_hir::test_db::HirPropertyFormatter<'db>,
 ) {
     for expr in body.exprs(db).keys() {
         let ty = typed_body.expr_ty(db, expr);

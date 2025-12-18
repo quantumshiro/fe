@@ -1253,7 +1253,7 @@ impl PrimTy {
 }
 
 /// Returns the width (in bits) for the given primitive integer type, or `None` when unknown.
-pub fn prim_int_bits(prim: PrimTy) -> Option<u16> {
+pub fn prim_int_bits(prim: PrimTy) -> Option<usize> {
     use PrimTy::*;
     match prim {
         U8 | I8 => Some(8),

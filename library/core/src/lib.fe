@@ -2,7 +2,6 @@ pub use option::Option
 pub use result::Result
 pub use default::Default
 pub use abi::{self, *}
-pub use dispatcher::Dispatcher
 pub use message::MsgVariant
 pub use ops::{self, *}
 pub use ptr::*

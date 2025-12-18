@@ -89,7 +89,7 @@ pub type MirLowerResult<T> = Result<T, MirLowerError>;
 /// Field type and byte offset information used when lowering record/variant accesses.
 pub(super) struct FieldAccessInfo<'db> {
     pub(super) field_ty: TyId<'db>,
-    pub(super) offset_bytes: u64,
+    pub(super) offset_bytes: usize,
     pub(super) field_idx: usize,
 }
 
@@ -283,7 +283,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         self.mir_body.push_block(BasicBlock::new())
     }
 
-    fn offset_units_for_space(&self, space: AddressSpaceKind, offset_bytes: u64) -> u64 {
+    fn offset_units_for_space(&self, space: AddressSpaceKind, offset_bytes: usize) -> usize {
         match space {
             AddressSpaceKind::Memory => offset_bytes,
             AddressSpaceKind::Storage => offset_bytes / 32,

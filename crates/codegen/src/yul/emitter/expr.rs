@@ -1,7 +1,6 @@
 //! Expression and value lowering helpers shared across the Yul emitter.
 
 use hir::analysis::ty::decision_tree::Projection;
-use hir::analysis::ty::layout;
 use hir::analysis::ty::simplified_pattern::ConstructorKind;
 use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId};
 use hir::hir_def::{
@@ -11,6 +10,7 @@ use hir::hir_def::{
 use mir::{
     CallOrigin, ValueId, ValueOrigin,
     ir::{FieldPtrOrigin, Place, SyntheticValue},
+    layout,
 };
 
 use crate::yul::{doc::YulDoc, state::BlockState};
@@ -490,7 +490,7 @@ impl<'db> FunctionEmitter<'db> {
         // Get the base value's type to navigate projections
         let base_value = self.mir_func.body.value(place.base);
         let mut current_ty = base_value.ty;
-        let mut total_offset = 0u64;
+        let mut total_offset = 0;
         let is_storage = matches!(place.address_space, mir::ir::AddressSpaceKind::Storage);
 
         for proj in place.projection.iter() {
@@ -526,7 +526,7 @@ impl<'db> FunctionEmitter<'db> {
                     // Skip discriminant then compute field offset
                     // Use slot-based offsets for storage, byte-based for memory
                     if is_storage {
-                        total_offset += layout::DISCRIMINANT_SIZE_SLOTS;
+                        total_offset += 1;
                         total_offset += layout::variant_field_offset_slots(
                             self.db, *enum_ty, *variant, *field_idx,
                         );

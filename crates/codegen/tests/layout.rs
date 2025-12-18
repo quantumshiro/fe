@@ -3,20 +3,18 @@
 //! These tests ensure layout computation is consistent and correct.
 //! The snapshots serve as golden values that catch layout drift.
 
-mod test_db;
-
 use std::path::Path;
 
 use dir_test::{Fixture, dir_test};
-use fe_hir::analysis::ty::layout::{self, DISCRIMINANT_SIZE_BYTES};
-use fe_hir::hir_def::{Enum, Struct};
-use test_db::HirAnalysisTestDb;
+use hir::hir_def::{Enum, Struct};
+use hir::test_db::HirAnalysisTestDb;
+use mir::layout;
 use test_utils::snap_test;
 
 /// Generates a layout report for all ADTs in a module.
 fn generate_layout_report<'db>(
     db: &'db HirAnalysisTestDb,
-    top_mod: fe_hir::hir_def::TopLevelMod<'db>,
+    top_mod: hir::hir_def::TopLevelMod<'db>,
 ) -> String {
     let mut report = String::new();
 
@@ -48,7 +46,7 @@ fn format_struct_layout<'db>(db: &'db HirAnalysisTestDb, strct: Struct<'db>) -> 
     let field_tys = strct.field_tys(db);
 
     // Compute total size
-    let mut total_size: u64 = 0;
+    let mut total_size = 0;
     for field_ty_binder in &field_tys {
         let field_ty = *field_ty_binder.skip_binder();
         total_size += layout::ty_size_bytes(db, field_ty).expect("field size known");
@@ -57,7 +55,7 @@ fn format_struct_layout<'db>(db: &'db HirAnalysisTestDb, strct: Struct<'db>) -> 
 
     lines.push("  fields:".to_string());
 
-    let mut offset: u64 = 0;
+    let mut offset = 0;
     for (idx, field_ty_binder) in field_tys.iter().enumerate() {
         let field_ty = *field_ty_binder.skip_binder();
         let field_size = layout::ty_size_bytes(db, field_ty).expect("field size known");
@@ -81,9 +79,9 @@ fn format_enum_layout<'db>(db: &'db HirAnalysisTestDb, enm: Enum<'db>) -> String
     let mut lines = vec![format!("enum {name}:")];
 
     // Compute enum size (discriminant + max payload)
-    let mut max_payload_size: u64 = 0;
+    let mut max_payload_size = 0;
     for adt_field in adt_def.fields(db).iter() {
-        let mut payload_size: u64 = 0;
+        let mut payload_size = 0;
         for field_ty_binder in adt_field.iter_types(db) {
             let field_ty = *field_ty_binder.skip_binder();
             payload_size += layout::ty_size_bytes(db, field_ty).expect("variant field size known");
@@ -91,9 +89,12 @@ fn format_enum_layout<'db>(db: &'db HirAnalysisTestDb, enm: Enum<'db>) -> String
         max_payload_size = max_payload_size.max(payload_size);
     }
 
-    let total_size = DISCRIMINANT_SIZE_BYTES + max_payload_size;
+    let total_size = layout::DISCRIMINANT_SIZE_BYTES + max_payload_size;
     lines.push(format!("  size: {total_size} bytes"));
-    lines.push(format!("  discriminant: {DISCRIMINANT_SIZE_BYTES} bytes"));
+    lines.push(format!(
+        "  discriminant: {} bytes",
+        layout::DISCRIMINANT_SIZE_BYTES
+    ));
 
     lines.push("  variants:".to_string());
 
@@ -110,14 +111,14 @@ fn format_enum_layout<'db>(db: &'db HirAnalysisTestDb, enm: Enum<'db>) -> String
             lines.push(format!("    {variant_name}: (unit)"));
         } else {
             lines.push(format!("    {variant_name}:"));
-            let mut field_offset: u64 = 0;
+            let mut field_offset = 0;
             for (field_idx, field_ty_binder) in adt_field.iter_types(db).enumerate() {
                 let field_ty = *field_ty_binder.skip_binder();
                 let field_size =
                     layout::ty_size_bytes(db, field_ty).expect("variant field size known");
 
                 // Absolute offset = discriminant + payload offset
-                let abs_offset = DISCRIMINANT_SIZE_BYTES + field_offset;
+                let abs_offset = layout::DISCRIMINANT_SIZE_BYTES + field_offset;
                 lines.push(format!(
                     "      [{field_idx}]: offset={abs_offset}, size={field_size}"
                 ));
@@ -130,7 +131,7 @@ fn format_enum_layout<'db>(db: &'db HirAnalysisTestDb, enm: Enum<'db>) -> String
 }
 
 #[dir_test(
-    dir: "$CARGO_MANIFEST_DIR/test_files/layout",
+    dir: "$CARGO_MANIFEST_DIR/tests/fixtures/layout",
     glob: "*.fe"
 )]
 fn layout_snapshot(fixture: Fixture<&str>) {

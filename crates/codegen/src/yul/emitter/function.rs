@@ -2,15 +2,11 @@ use driver::DriverDataBase;
 use hir::{
     analysis::{
         name_resolution::{PathRes, resolve_path},
-        ty::{
-            adt_def::AdtRef,
-            trait_resolution::PredicateListId,
-            ty_def::{PrimTy, TyBase, TyData, TyId},
-        },
+        ty::trait_resolution::PredicateListId,
     },
     hir_def::{Body, Expr, ExprId, Partial, Pat, PatId, PathId, Stmt, StmtId},
 };
-use mir::MirFunction;
+use mir::{MirFunction, layout};
 use rustc_hash::FxHashMap;
 
 use crate::yul::{doc::YulDoc, errors::YulError, state::BlockState};
@@ -269,7 +265,7 @@ impl<'db> FunctionEmitter<'db> {
         &self,
         effect: hir::core::semantic::EffectParamView<'db>,
         binding_name: &str,
-    ) -> Result<u64, YulError> {
+    ) -> Result<usize, YulError> {
         let key_path = effect.key_path(self.db).ok_or_else(|| {
             YulError::Unsupported(format!(
                 "cannot determine storage size for effect `{binding_name}`: missing type path"
@@ -296,59 +292,10 @@ impl<'db> FunctionEmitter<'db> {
                 )));
             }
         };
-        self.ty_storage_slots(ty).ok_or_else(|| {
+        layout::ty_storage_slots(self.db, ty).ok_or_else(|| {
             YulError::Unsupported(format!(
                 "cannot determine storage size for effect `{binding_name}`: unsupported type"
             ))
         })
-    }
-
-    /// Best-effort slot size computation for types in storage.
-    fn ty_storage_slots(&self, ty: TyId<'db>) -> Option<u64> {
-        // Handle tuples first (check base type for TyApp cases)
-        if ty.is_tuple(self.db) {
-            let mut size = 0u64;
-            for field_ty in ty.field_types(self.db) {
-                size += self.ty_storage_slots(field_ty)?;
-            }
-            return Some(size);
-        }
-
-        // Handle primitives
-        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db)
-            && matches!(
-                prim,
-                PrimTy::Bool
-                    | PrimTy::U8
-                    | PrimTy::U16
-                    | PrimTy::U32
-                    | PrimTy::U64
-                    | PrimTy::U128
-                    | PrimTy::U256
-                    | PrimTy::I8
-                    | PrimTy::I16
-                    | PrimTy::I32
-                    | PrimTy::I64
-                    | PrimTy::I128
-                    | PrimTy::I256
-                    | PrimTy::Usize
-                    | PrimTy::Isize
-            )
-        {
-            return Some(1);
-        }
-
-        // Handle ADT types (structs) - use adt_def() which handles TyApp
-        if let Some(adt_def) = ty.adt_def(self.db)
-            && matches!(adt_def.adt_ref(self.db), AdtRef::Struct(_))
-        {
-            let mut size = 0u64;
-            for field_ty in ty.field_types(self.db) {
-                size += self.ty_storage_slots(field_ty)?;
-            }
-            return Some(size);
-        }
-
-        None
     }
 }

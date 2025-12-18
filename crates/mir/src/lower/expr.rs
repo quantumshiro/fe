@@ -3,13 +3,12 @@
 
 use hir::analysis::ty::decision_tree::{Projection, ProjectionPath};
 
+use crate::layout::{self, ty_storage_slots};
+
 use super::*;
 use hir::analysis::{
     place::PlaceBase,
-    ty::{
-        layout,
-        ty_check::{EffectArg, EffectPassMode},
-    },
+    ty::ty_check::{EffectArg, EffectPassMode},
 };
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
@@ -50,52 +49,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
     }
 
-    fn ty_storage_slots(&self, ty: TyId<'db>) -> Option<u64> {
-        if ty.is_tuple(self.db) {
-            let mut size = 0u64;
-            for field_ty in ty.field_types(self.db) {
-                size += self.ty_storage_slots(field_ty)?;
-            }
-            return Some(size);
-        }
-
-        if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db)
-            && matches!(
-                prim,
-                PrimTy::Bool
-                    | PrimTy::U8
-                    | PrimTy::U16
-                    | PrimTy::U32
-                    | PrimTy::U64
-                    | PrimTy::U128
-                    | PrimTy::U256
-                    | PrimTy::I8
-                    | PrimTy::I16
-                    | PrimTy::I32
-                    | PrimTy::I64
-                    | PrimTy::I128
-                    | PrimTy::I256
-                    | PrimTy::Usize
-                    | PrimTy::Isize
-            )
-        {
-            return Some(1);
-        }
-
-        if let Some(adt_def) = ty.adt_def(self.db)
-            && matches!(adt_def.adt_ref(self.db), AdtRef::Struct(_))
-        {
-            let mut size = 0u64;
-            for field_ty in ty.field_types(self.db) {
-                size += self.ty_storage_slots(field_ty)?;
-            }
-            return Some(size);
-        }
-
-        None
-    }
-
-    fn contract_field_slot_offset(&self, contract_name: &str, field_idx: usize) -> Option<u64> {
+    fn contract_field_slot_offset(&self, contract_name: &str, field_idx: usize) -> Option<usize> {
         let top_mod = self.body.top_mod(self.db);
         let contract = top_mod
             .all_contracts(self.db)
@@ -116,10 +70,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let scope = contract.scope();
         let assumptions = PredicateListId::empty_list(self.db);
 
-        let mut offset = 0u64;
+        let mut offset = 0;
         for field in fields.iter().take(field_idx) {
             let field_ty = lower_opt_hir_ty(self.db, field.type_ref(), scope, assumptions);
-            offset += self.ty_storage_slots(field_ty)?;
+            offset += ty_storage_slots(self.db, field_ty)?;
         }
         Some(offset)
     }
