@@ -58,19 +58,20 @@ object "NestedStruct" {
       }
       function runtime() {
         let v0 := 0
-        let v1 := shr(224, calldataload(0))
-        switch v1
+        let v1 := v0
+        let v2 := shr(224, calldataload(0))
+        switch v2
           case 3091856072 {
-            let v2 := calldataload(4)
-            write_inner(v2, v0)
-            abi_encode(v2)
+            let v3 := calldataload(4)
+            write_inner(v3, v0)
+            abi_encode(v3)
           }
           case 3513050253 {
             abi_encode(read_inner(v0))
           }
           case 2154770637 {
-            let v3 := calldataload(4)
-            abi_encode(mem_read(v3))
+            let v4 := calldataload(4)
+            abi_encode(mem_read(v4))
           }
           default {
             return(0, 0)

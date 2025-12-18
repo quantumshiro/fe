@@ -1,8 +1,9 @@
 //! Aggregate lowering and layout helpers for MIR: allocations, field/variant stores, sizing, and
 //! synthetic literals used by records and enums.
 
+use crate::layout;
+
 use super::*;
-use hir::analysis::ty::layout;
 use hir::analysis::ty::ty_def::prim_int_bits;
 
 #[derive(Copy, Clone)]
@@ -10,12 +11,12 @@ struct AggregateCopyCtx {
     expr: ExprId,
     block: BasicBlockId,
     dst_base: ValueId,
-    dst_offset: u64,
+    dst_offset: usize,
     addr_space: AddressSpaceKind,
 }
 
 impl AggregateCopyCtx {
-    fn with_offset(self, offset: u64) -> Self {
+    fn with_offset(self, offset: usize) -> Self {
         Self {
             dst_offset: self.dst_offset + offset,
             ..self
@@ -37,7 +38,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         &mut self,
         expr: ExprId,
         block: BasicBlockId,
-        size_bytes: u64,
+        size_bytes: usize,
     ) -> ValueId {
         let alloc_callable = self.core.make_callable(expr, CoreHelper::Alloc, &[]);
         let alloc_ret_ty = alloc_callable.ret_ty(self.db);
@@ -48,6 +49,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: alloc_callable,
                 args: vec![size_value],
+                effect_args: Vec::new(),
+                effect_kinds: Vec::new(),
                 receiver_space: None,
                 resolved_name: None,
             }),
@@ -95,6 +98,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable: store_discr_callable,
                 args: vec![base_value, discr_value],
+                effect_args: Vec::new(),
+                effect_kinds: Vec::new(),
                 receiver_space: None,
                 resolved_name: None,
             }),
@@ -125,7 +130,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         expr: ExprId,
         block: BasicBlockId,
         base_value: ValueId,
-        stores: &[(u64, TyId<'db>, ValueId)],
+        stores: &[(usize, TyId<'db>, ValueId)],
     ) {
         if stores.is_empty() {
             return;
@@ -153,7 +158,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 let callable =
                     self.core
                         .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, *field_ty]);
-                let offset_value = self.synthetic_u256(BigUint::from(*offset_bytes));
+                let offset_units = self.offset_units_for_space(addr_space, *offset_bytes);
+                let offset_value = self.synthetic_u256(BigUint::from(offset_units));
                 let store_ret_ty = callable.ret_ty(self.db);
                 let store_call = self.mir_body.alloc_value(ValueData {
                     ty: store_ret_ty,
@@ -161,6 +167,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         expr,
                         callable,
                         args: vec![base_value, offset_value, *field_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),
@@ -215,6 +223,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
                             base: src_ptr,
                             offset_bytes: field_offset,
+                            addr_space: src_space,
                         }),
                     });
                     self.value_address_space.insert(ptr, src_space);
@@ -223,7 +232,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 self.emit_aggregate_copy(*field_ty, src_field_ptr, ctx.with_offset(field_offset));
             } else {
                 // Load from source and store to destination
-                let src_offset_value = self.synthetic_u256(BigUint::from(field_offset));
+                let src_offset_units = self.offset_units_for_space(src_space, field_offset);
+                let src_offset_value = self.synthetic_u256(BigUint::from(src_offset_units));
                 let get_callable = self.core.make_callable(
                     ctx.expr,
                     CoreHelper::GetField,
@@ -235,14 +245,17 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         expr: ctx.expr,
                         callable: get_callable,
                         args: vec![src_ptr, src_offset_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),
                 });
 
                 // Store to destination
-                let dst_offset_value =
-                    self.synthetic_u256(BigUint::from(ctx.dst_offset + field_offset));
+                let dst_offset_units =
+                    self.offset_units_for_space(ctx.addr_space, ctx.dst_offset + field_offset);
+                let dst_offset_value = self.synthetic_u256(BigUint::from(dst_offset_units));
                 let store_callable =
                     self.core
                         .make_callable(ctx.expr, CoreHelper::StoreField, &[ptr_ty, *field_ty]);
@@ -253,6 +266,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                         expr: ctx.expr,
                         callable: store_callable,
                         args: vec![ctx.dst_base, dst_offset_value, loaded_value],
+                        effect_args: Vec::new(),
+                        effect_kinds: Vec::new(),
                         receiver_space: None,
                         resolved_name: None,
                     }),
@@ -305,6 +320,23 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         };
 
         let record_ty = self.typed_body.expr_ty(self.db, expr);
+        let record_base = record_ty.base_ty(self.db);
+        let effect_ptr_bases = [
+            self.core
+                .helper_ty(CoreHelperTy::EffectMemPtr)
+                .base_ty(self.db),
+            self.core
+                .helper_ty(CoreHelperTy::EffectStorPtr)
+                .base_ty(self.db),
+            self.core
+                .helper_ty(CoreHelperTy::EffectCalldataPtr)
+                .base_ty(self.db),
+        ];
+        if effect_ptr_bases.contains(&record_base) && lowered_fields.len() == 1 {
+            let value = lowered_fields[0].1;
+            self.mir_body.expr_values.insert(expr, value);
+            return (Some(curr_block), value);
+        }
         let record_like = RecordLike::from_ty(record_ty);
         let Some(size_bytes) = self.record_size_bytes(&record_like) else {
             let value_id = self.ensure_value(expr);
@@ -333,7 +365,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// # Returns
     /// Bit width when the type is a supported primitive, otherwise `None`.
-    pub(super) fn int_type_bits(&self, ty: TyId<'db>) -> Option<u16> {
+    pub(super) fn int_type_bits(&self, ty: TyId<'db>) -> Option<usize> {
         match ty.data(self.db) {
             TyData::TyBase(TyBase::Prim(prim)) => prim_int_bits(*prim),
             _ => None,
@@ -378,7 +410,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         &self,
         record_like: &RecordLike<'db>,
         idx: usize,
-    ) -> Option<(TyId<'db>, u64)> {
+    ) -> Option<(TyId<'db>, usize)> {
         let ty = match record_like {
             RecordLike::Type(ty) => *ty,
             RecordLike::EnumVariant(variant) => variant.ty,
@@ -399,7 +431,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// # Returns
     /// Total size in bytes if all field sizes are known.
-    pub(super) fn record_size_bytes(&self, record_like: &RecordLike<'db>) -> Option<u64> {
+    pub(super) fn record_size_bytes(&self, record_like: &RecordLike<'db>) -> Option<usize> {
         let ty = match record_like {
             RecordLike::Type(ty) => *ty,
             RecordLike::EnumVariant(variant) => variant.ty,
@@ -414,7 +446,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     ///
     /// # Returns
     /// Total enum size in bytes when layout is known.
-    pub(super) fn enum_size_bytes(&self, enum_ty: TyId<'db>) -> Option<u64> {
+    pub(super) fn enum_size_bytes(&self, enum_ty: TyId<'db>) -> Option<usize> {
         let (base_ty, args) = enum_ty.decompose_ty_app(self.db);
         let TyData::TyBase(TyBase::Adt(adt_def)) = base_ty.data(self.db) else {
             return None;
@@ -423,9 +455,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return None;
         }
 
-        let mut max_payload = 0u64;
+        let mut max_payload = 0;
         for variant in adt_def.fields(self.db) {
-            let mut payload = 0u64;
+            let mut payload = 0;
             for ty in variant.iter_types(self.db) {
                 let field_ty = ty.instantiate(self.db, args);
                 payload += layout::ty_size_bytes(self.db, field_ty).unwrap_or(32);
@@ -434,6 +466,30 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         }
 
         Some(layout::DISCRIMINANT_SIZE_BYTES + max_payload)
+    }
+
+    /// Returns the ABI-encoded byte width for statically-sized values.
+    ///
+    /// This matches the head size used by the ABI encoder/decoder: primitive values occupy one
+    /// 32-byte word, while tuples/records are the concatenation of their fields.
+    pub(super) fn abi_static_size_bytes(&self, ty: TyId<'db>) -> Option<usize> {
+        if ty.is_tuple(self.db)
+            || ty
+                .adt_ref(self.db)
+                .is_some_and(|adt| matches!(adt, AdtRef::Struct(_)))
+        {
+            let mut size = 0;
+            for field_ty in ty.field_types(self.db) {
+                size += self.abi_static_size_bytes(field_ty)?;
+            }
+            return Some(size);
+        }
+
+        if let TyData::TyBase(TyBase::Prim(_)) = ty.base_ty(self.db).data(self.db) {
+            return Some(32);
+        }
+
+        None
     }
 
     /// Lowers an assignment to a field target into a `store_field` helper call
@@ -484,7 +540,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
             AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
         };
-        let offset_value = self.synthetic_u256(BigUint::from(info.offset_bytes));
+        let offset_units = self.offset_units_for_space(addr_space, info.offset_bytes);
+        let offset_value = self.synthetic_u256(BigUint::from(offset_units));
         let callable =
             self.core
                 .make_callable(expr, CoreHelper::StoreField, &[ptr_ty, info.field_ty]);
@@ -496,6 +553,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 expr,
                 callable,
                 args: vec![addr_value, offset_value, value],
+                effect_args: Vec::new(),
+                effect_kinds: Vec::new(),
                 receiver_space: None,
                 resolved_name: None,
             }),

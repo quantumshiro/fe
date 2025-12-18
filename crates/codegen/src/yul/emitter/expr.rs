@@ -1,16 +1,16 @@
 //! Expression and value lowering helpers shared across the Yul emitter.
 
 use hir::analysis::ty::decision_tree::Projection;
-use hir::analysis::ty::layout;
 use hir::analysis::ty::simplified_pattern::ConstructorKind;
 use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId};
 use hir::hir_def::{
-    Attr, CallableDef, Expr, ExprId, Func, ItemKind, LitKind, Stmt, StmtId,
+    CallableDef, Expr, ExprId, LitKind, Stmt, StmtId,
     expr::{ArithBinOp, BinOp, CompBinOp, LogicalBinOp, UnOp},
 };
 use mir::{
     CallOrigin, ValueId, ValueOrigin,
-    ir::{ContractFunctionKind, FieldPtrOrigin, Place, SyntheticValue},
+    ir::{FieldPtrOrigin, Place, SyntheticValue},
+    layout,
 };
 
 use crate::yul::{doc::YulDoc, state::BlockState};
@@ -47,6 +47,7 @@ impl<'db> FunctionEmitter<'db> {
                     self.lower_expr(*expr_id, state)
                 }
             }
+            ValueOrigin::BindingName(name) => Ok(state.resolve_name(name)),
             ValueOrigin::Call(call) => self.lower_call_value(call, state),
             ValueOrigin::Intrinsic(intr) => self.lower_intrinsic_value(intr, state),
             ValueOrigin::Synthetic(synth) => self.lower_synthetic_value(synth),
@@ -194,9 +195,13 @@ impl<'db> FunctionEmitter<'db> {
                 }
             }
             Expr::Path(path) => {
-                let original = self
-                    .path_ident(*path)
-                    .ok_or_else(|| YulError::Unsupported("unsupported path expression".into()))?;
+                let original = self.path_ident(*path).ok_or_else(|| {
+                    let pretty = path
+                        .to_opt()
+                        .map(|path| path.pretty_print(self.db))
+                        .unwrap_or_else(|| "_".to_string());
+                    YulError::Unsupported(format!("unsupported path expression `{pretty}`"))
+                })?;
                 Ok(state.resolve_name(&original))
             }
             Expr::Field(..) => {
@@ -269,9 +274,8 @@ impl<'db> FunctionEmitter<'db> {
         for &arg in &call.args {
             lowered_args.push(self.lower_value(arg, state)?);
         }
-        if let CallableDef::Func(func_def) = call.callable.callable_def {
-            let effect_args = self.lower_effect_arguments(func_def, state)?;
-            lowered_args.extend(effect_args);
+        for &arg in &call.effect_args {
+            lowered_args.push(self.lower_value(arg, state)?);
         }
         if let Some(arg) = try_collapse_cast_shim(&callee, &lowered_args)? {
             return Ok(arg);
@@ -348,62 +352,6 @@ impl<'db> FunctionEmitter<'db> {
         ty.is_tuple(self.db) && ty.field_count(self.db) == 0
     }
 
-    /// Computes extra arguments for a callee's effect parameters and appends them to the call.
-    ///
-    /// * `func` - The function being called.
-    /// * `state` - Current block bindings used to resolve effect names to Yul locals.
-    ///
-    /// Returns any effect arguments that should be passed (empty for contract init/runtime).
-    fn lower_effect_arguments(
-        &self,
-        func: Func<'db>,
-        state: &BlockState,
-    ) -> Result<Vec<String>, YulError> {
-        if !func.has_effects(self.db) {
-            return Ok(Vec::new());
-        }
-        if self.function_contract_kind(func).is_some() {
-            return Ok(Vec::new());
-        }
-
-        let mut args = Vec::new();
-        for binding in func
-            .effect_params(self.db)
-            .map(|effect| self.effect_binding_name(effect))
-        {
-            if let Some(name) = state.binding(&binding) {
-                args.push(name);
-            } else {
-                return Err(YulError::Unsupported(format!(
-                    "missing effect binding `{binding}` when calling {}",
-                    function_name(self.db, func)
-                )));
-            }
-        }
-        Ok(args)
-    }
-
-    /// Detects whether `func` is a contract init/runtime entrypoint by inspecting attributes.
-    fn function_contract_kind(&self, func: Func<'db>) -> Option<ContractFunctionKind> {
-        let attrs = ItemKind::Func(func).attrs(self.db)?;
-        for attr in attrs.data(self.db) {
-            if let Attr::Normal(normal) = attr {
-                let Some(path) = normal.path.to_opt() else {
-                    continue;
-                };
-                let Some(name) = path.as_ident(self.db) else {
-                    continue;
-                };
-                match name.data(self.db).as_str() {
-                    "contract_init" => return Some(ContractFunctionKind::Init),
-                    "contract_runtime" => return Some(ContractFunctionKind::Runtime),
-                    _ => {}
-                }
-            }
-        }
-        None
-    }
-
     /// Lowers a FieldPtr (pointer arithmetic for nested struct access) into a Yul add expression.
     ///
     /// * `field_ptr` - The FieldPtrOrigin containing base pointer and offset.
@@ -419,7 +367,11 @@ impl<'db> FunctionEmitter<'db> {
         if field_ptr.offset_bytes == 0 {
             Ok(base)
         } else {
-            Ok(format!("add({}, {})", base, field_ptr.offset_bytes))
+            let offset = match field_ptr.addr_space {
+                mir::ir::AddressSpaceKind::Memory => field_ptr.offset_bytes,
+                mir::ir::AddressSpaceKind::Storage => field_ptr.offset_bytes / 32,
+            };
+            Ok(format!("add({}, {})", base, offset))
         }
     }
 
@@ -428,7 +380,7 @@ impl<'db> FunctionEmitter<'db> {
     /// Walks the projection path to compute the byte offset from the base,
     /// then emits a load instruction based on the address space, applying
     /// the appropriate type conversion (masking, sign extension, etc.).
-    fn lower_place_load(
+    pub(super) fn lower_place_load(
         &self,
         place: &Place<'db>,
         loaded_ty: TyId<'db>,
@@ -512,13 +464,18 @@ impl<'db> FunctionEmitter<'db> {
     ///
     /// Walks the projection path to compute the byte offset from the base,
     /// returning the pointer without loading.
-    fn lower_place_ref(&self, place: &Place<'db>, state: &BlockState) -> Result<String, YulError> {
+    pub(super) fn lower_place_ref(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
         self.lower_place_address(place, state)
     }
 
     /// Computes the address for a place by walking the projection path.
     ///
-    /// Returns a Yul expression representing the memory address.
+    /// Returns a Yul expression representing the memory/storage address.
+    /// For memory, computes byte offsets. For storage, computes slot offsets.
     fn lower_place_address(
         &self,
         place: &Place<'db>,
@@ -533,12 +490,12 @@ impl<'db> FunctionEmitter<'db> {
         // Get the base value's type to navigate projections
         let base_value = self.mir_func.body.value(place.base);
         let mut current_ty = base_value.ty;
-        let mut total_offset = 0u64;
+        let mut total_offset = 0;
+        let is_storage = matches!(place.address_space, mir::ir::AddressSpaceKind::Storage);
 
         for proj in place.projection.iter() {
             match proj {
                 Projection::Field(field_idx) => {
-                    // Use centralized layout API for field offset
                     let field_types = current_ty.field_types(self.db);
                     if field_types.is_empty() {
                         return Err(YulError::Unsupported(format!(
@@ -546,8 +503,12 @@ impl<'db> FunctionEmitter<'db> {
                             field_idx
                         )));
                     }
-                    total_offset +=
-                        layout::field_offset_bytes_or_word_aligned(self.db, current_ty, *field_idx);
+                    // Use slot-based offsets for storage, byte-based for memory
+                    total_offset += if is_storage {
+                        layout::field_offset_slots(self.db, current_ty, *field_idx)
+                    } else {
+                        layout::field_offset_bytes_or_word_aligned(self.db, current_ty, *field_idx)
+                    };
                     // Update current type to the field's type
                     current_ty = *field_types.get(*field_idx).ok_or_else(|| {
                         YulError::Unsupported(format!(
@@ -562,11 +523,19 @@ impl<'db> FunctionEmitter<'db> {
                     enum_ty,
                     field_idx,
                 } => {
-                    // Skip discriminant then use centralized layout API for field offset
-                    total_offset += layout::DISCRIMINANT_SIZE_BYTES;
-                    total_offset += layout::variant_field_offset_bytes_or_word_aligned(
-                        self.db, *enum_ty, *variant, *field_idx,
-                    );
+                    // Skip discriminant then compute field offset
+                    // Use slot-based offsets for storage, byte-based for memory
+                    if is_storage {
+                        total_offset += 1;
+                        total_offset += layout::variant_field_offset_slots(
+                            self.db, *enum_ty, *variant, *field_idx,
+                        );
+                    } else {
+                        total_offset += layout::DISCRIMINANT_SIZE_BYTES;
+                        total_offset += layout::variant_field_offset_bytes_or_word_aligned(
+                            self.db, *enum_ty, *variant, *field_idx,
+                        );
+                    }
                     // Update current type to the field's type
                     let ctor = ConstructorKind::Variant(*variant, *enum_ty);
                     let field_types = ctor.field_types(self.db);

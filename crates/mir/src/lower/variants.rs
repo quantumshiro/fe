@@ -1,7 +1,8 @@
 //! Variant lowering helpers for MIR: handles enum constructor calls and unit variant paths.
 
+use crate::layout;
+
 use super::*;
-use hir::analysis::ty::layout;
 use num_bigint::BigUint;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
@@ -74,6 +75,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     expr,
                     callable,
                     args: vec![value_id, offset_value, field_value],
+                    effect_args: Vec::new(),
+                    effect_kinds: Vec::new(),
                     receiver_space: None,
                     resolved_name: None,
                 }),

@@ -1,4 +1,3 @@
-mod test_db;
 use std::path::Path;
 
 use ascii_tree::{Tree, write_tree};
@@ -11,11 +10,11 @@ use fe_hir::analysis::ty::{
     ty_def::{TyData, TyId},
 };
 use fe_hir::hir_def::LitKind;
+use fe_hir::test_db::{HirAnalysisTestDb, HirPropertyFormatter};
 use fe_hir::{
     hir_def::{Expr, ExprId},
     visitor::prelude::*,
 };
-use test_db::{HirAnalysisTestDb, HirPropertyFormatter};
 use test_utils::snap_test;
 
 fn render_decision_tree<'db>(
