@@ -4,6 +4,8 @@ expression: output
 input_file: test_files/desugar/erc20.fe
 ---
 use core::prelude::*
+use core::storage_map::StorageMap
+use core::storage_map::StorageKey
 
 const MINTER: u256 = 1
 
@@ -59,7 +61,7 @@ mod __CoolCoin {
     fn recv_Erc20_BalanceOf_0_3(args: Erc20::BalanceOf::Args) -> u256 uses (store: TokenStore) {
         let account = args.0
         return {
-            store.balances[account]
+            store.balances.get(account)
         }
     }
 
@@ -67,7 +69,7 @@ mod __CoolCoin {
         let owner = args.0
         let spender = args.1
         return {
-            store.allowances[(owner, spender)]
+            store.allowances.get((owner, spender))
         }
     }
 
@@ -128,7 +130,7 @@ mod __CoolCoin {
         let added_value = args.1
         return {
             let owner = ctx.caller()
-            let current = store.allowances[(owner, spender)]
+            let current = store.allowances.get((owner, spender))
             approve(owner, spender, amount: current + added_value)
             true
         }
@@ -139,8 +141,8 @@ mod __CoolCoin {
         let subtracted_value = args.1
         return {
             let owner = ctx.caller()
-            let current = store.allowances[(owner, spender)]
-            assert(current >= subtracted_value, "decreased allowance below zero")
+            let current = store.allowances.get((owner, spender))
+            assert(current >= subtracted_value)
             approve(owner, spender, amount: current - subtracted_value)
             true
         }
@@ -336,73 +338,69 @@ mod __CoolCoin {
 }
 
 fn transfer(from: Address, to: Address, amount: u256) uses (mut store: TokenStore, mut log: Log) {
-    assert(from != Address::zero(), "transfer from zero address")
-    assert(to != Address::zero(), "transfer to zero address")
-    let from_balance = store.balances[from]
-    assert(from_balance >= amount, "transfer amount exceeds balance")
-    store.balances[from] = from_balance - amount
-    store.balances[to] += amount
+    assert(from != Address::zero())
+    assert(to != Address::zero())
+    let from_balance = store.balances.get(from)
+    assert(from_balance >= amount)
+    store.balances.set(from, from_balance - amount)
+    store.balances.set(to, store.balances.get(to) + amount)
     log.emit(TransferEvent { from, to, value: amount })
 }
 
 fn mint(to: Address, amount: u256) uses (mut store: TokenStore, mut log: Log) {
-    assert(to != Address::zero(), "mint to zero address")
+    assert(to != Address::zero())
     store.total_supply += amount
-    store.balances[to] += amount
+    store.balances.set(to, store.balances.get(to) + amount)
     log.emit(TransferEvent { from: Address::zero(), to, value: amount })
 }
 
 fn burn(from: Address, amount: u256) uses (mut store: TokenStore, mut log: Log) {
-    assert(from != Address::zero(), "burn from zero address")
-    let from_balance = store.balances[from]
-    assert(from_balance >= amount, "burn amount exceeds balance")
-    store.balances[from] = from_balance - amount
+    assert(from != Address::zero())
+    let from_balance = store.balances.get(from)
+    assert(from_balance >= amount)
+    store.balances.set(from, from_balance - amount)
     store.total_supply -= amount
     log.emit(TransferEvent { from, to: Address::zero(), value: amount })
 }
 
 fn approve(owner: Address, spender: Address, amount: u256) uses (mut store: TokenStore, mut log: Log) {
-    assert(owner != Address::zero(), "approve from zero address")
-    assert(spender != Address::zero(), "approve to zero address")
-    store.allowances[(owner, spender)] = amount
+    assert(owner != Address::zero())
+    assert(spender != Address::zero())
+    store.allowances.set((owner, spender), amount)
     log.emit(ApprovalEvent { owner, spender, value: amount })
 }
 
 fn spend_allowance(owner: Address, spender: Address, amount: u256) uses (mut store: TokenStore) {
-    let current = store.allowances[(owner, spender)]
-    assert(current >= amount, "insufficient allowance")
-    store.allowances[(owner, spender)] = current - amount
+    let current = store.allowances.get((owner, spender))
+    assert(current >= amount)
+    store.allowances.set((owner, spender), current - amount)
 }
 
 struct TokenStore {
     total_supply: u256,
-    balances: Map<Address, u256>,
-    allowances: Map<(Address, Address), u256>,
+    balances: StorageMap<Address, u256>,
+    allowances: StorageMap<(Address, Address), u256>,
 }
 
 pub struct AccessControl {
-    roles: Map<(u256, Address), bool>,
+    roles: StorageMap<(u256, Address), bool>,
 }
 
 impl AccessControl {
-    pub fn new() -> Self {
-        AccessControl { roles: Map::new() }
-    }
-
     pub fn has_role(self, role: u256, account: Address) -> bool {
-        self.roles[(role, account)]
+        self.roles.get((role, account))
     }
 
     pub fn require(self, role: u256) uses (ctx: Ctx) {
-        assert(self.roles[(role, ctx.caller())], "access denied: missing role")
+        assert(self.roles.get((role, ctx.caller())) == true)
     }
 
     pub fn grant(mut self, role: u256, to: Address) {
-        self.roles[(role, to)] = true
+        self.roles.set((role, to), true)
     }
 
     pub fn revoke(mut self, role: u256, from: Address) {
-        self.roles[(role, from)] = false
+        self.roles.set((role, from), false)
     }
 
 }
@@ -687,8 +685,10 @@ struct ApprovalEvent {
     value: u256,
 }
 
-extern {
-    fn assert(_: bool, _: String<64>)
+fn assert(_ b: bool) {
+    if !b {
+        core::intrinsics::revert(0, 0)
+    }
 }
 
 use core::abi::Abi
@@ -720,20 +720,11 @@ impl core::ops::Eq for Address {
     }
 }
 
-pub struct Map<K, V> {}
+impl StorageKey for Address {
 
-impl<K, V> Map<K, V> {
-    pub fn new() -> Self {
-        Map {  }
-    }
-
-}
-
-impl<K, V> core::ops::Index<K> for Map<K, V> {
-    type Output = V
-
-    fn index(self, _ key: K) -> V {
-        todo()
+    fn write_key(ptr: u256, self) -> u256 {
+        core::intrinsic::mstore(ptr, self.inner)
+        32
     }
 }
 
