@@ -256,6 +256,60 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 let val = self.ensure_value(expr);
                 (Some(block), val, true)
             }
+            Partial::Present(Expr::Call(_, call_args)) => {
+                // Lower argument expressions that need block-aware lowering (like RecordInit)
+                // before creating the call value.
+                let mut current = Some(block);
+                for arg in call_args {
+                    let Some(curr_block) = current else { break };
+                    if self.needs_block_aware_lowering(arg.expr) {
+                        let (next_block, value, push_eval) =
+                            self.lower_expr_core(curr_block, arg.expr);
+                        current = next_block;
+                        if push_eval && let Some(curr_block) = current {
+                            let bind_value =
+                                !self.is_unit_ty(self.typed_body.expr_ty(self.db, arg.expr));
+                            self.push_inst(
+                                curr_block,
+                                MirInst::EvalExpr {
+                                    expr: arg.expr,
+                                    value,
+                                    bind_value,
+                                },
+                            );
+                        }
+                    }
+                }
+                let val = self.ensure_value(expr);
+                (current, val, true)
+            }
+            Partial::Present(Expr::MethodCall(_, _, _, call_args)) => {
+                // Lower argument expressions that need block-aware lowering (like RecordInit)
+                // before creating the call value.
+                let mut current = Some(block);
+                for arg in call_args {
+                    let Some(curr_block) = current else { break };
+                    if self.needs_block_aware_lowering(arg.expr) {
+                        let (next_block, value, push_eval) =
+                            self.lower_expr_core(curr_block, arg.expr);
+                        current = next_block;
+                        if push_eval && let Some(curr_block) = current {
+                            let bind_value =
+                                !self.is_unit_ty(self.typed_body.expr_ty(self.db, arg.expr));
+                            self.push_inst(
+                                curr_block,
+                                MirInst::EvalExpr {
+                                    expr: arg.expr,
+                                    value,
+                                    bind_value,
+                                },
+                            );
+                        }
+                    }
+                }
+                let val = self.ensure_value(expr);
+                (current, val, true)
+            }
             _ => {
                 let val = self.ensure_value(expr);
                 (Some(block), val, true)
@@ -706,6 +760,41 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// `true` if the type is unit.
     pub(super) fn is_unit_ty(&self, ty: TyId<'db>) -> bool {
         ty.is_tuple(self.db) && ty.field_count(self.db) == 0
+    }
+
+    /// Returns whether an expression needs block-aware lowering.
+    ///
+    /// Some expressions (like RecordInit) need to be lowered with access to a basic block
+    /// so they can emit instructions. This method checks if an expression is one of these
+    /// types, including recursively checking nested expressions.
+    fn needs_block_aware_lowering(&self, expr: ExprId) -> bool {
+        match expr.data(self.db, self.body) {
+            Partial::Present(Expr::RecordInit(..)) => true,
+            // Nested calls might have RecordInit arguments
+            Partial::Present(Expr::Call(_, call_args)) => {
+                call_args.iter().any(|arg| self.needs_block_aware_lowering(arg.expr))
+            }
+            Partial::Present(Expr::MethodCall(receiver, _, _, call_args)) => {
+                self.needs_block_aware_lowering(*receiver)
+                    || call_args.iter().any(|arg| self.needs_block_aware_lowering(arg.expr))
+            }
+            // Blocks might contain RecordInit expressions
+            Partial::Present(Expr::Block(stmts)) => stmts.iter().any(|stmt_id| {
+                match stmt_id.data(self.db, self.body) {
+                    Partial::Present(Stmt::Expr(e)) => self.needs_block_aware_lowering(*e),
+                    _ => false,
+                }
+            }),
+            // If expressions might contain RecordInit in their branches
+            Partial::Present(Expr::If(cond, then_expr, else_expr)) => {
+                self.needs_block_aware_lowering(*cond)
+                    || self.needs_block_aware_lowering(*then_expr)
+                    || else_expr
+                        .map(|e| self.needs_block_aware_lowering(e))
+                        .unwrap_or(false)
+            }
+            _ => false,
+        }
     }
 
     /// Lowers an expression statement, emitting side-effecting instructions as needed.
