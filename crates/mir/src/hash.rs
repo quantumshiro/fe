@@ -4,13 +4,14 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 
 use hir::analysis::HirAnalysisDb;
+use hir::analysis::ty::decision_tree::Projection;
 use hir::hir_def::{ExprId, PatId};
 use num_bigint::BigUint;
 use rustc_hash::FxHashMap;
 
 use crate::{
     CallOrigin, MirFunction, MirInst, SwitchValue, Terminator, ValueId, ValueOrigin,
-    ir::SyntheticValue,
+    ir::{Place, SyntheticValue},
 };
 
 /// Hashes a MIR function (including its callees) so structurally equivalent bodies
@@ -158,6 +159,65 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     crate::ir::AddressSpaceKind::Memory => 1,
                     crate::ir::AddressSpaceKind::Storage => 2,
                 });
+            }
+            ValueOrigin::PlaceLoad(place) => {
+                self.write_u8(0x09);
+                self.hash_place(place);
+            }
+            ValueOrigin::PlaceRef(place) => {
+                self.write_u8(0x0A);
+                self.hash_place(place);
+            }
+        }
+    }
+
+    fn hash_place(&mut self, place: &Place<'db>) {
+        let slot = self.placeholder_value(place.base);
+        self.write_u32(slot);
+        // Hash address space (0 for memory, 1 for storage)
+        self.write_u8(match place.address_space {
+            crate::ir::AddressSpaceKind::Memory => 0,
+            crate::ir::AddressSpaceKind::Storage => 1,
+        });
+        self.write_usize(place.projection.len());
+        for proj in place.projection.iter() {
+            match proj {
+                Projection::Field(idx) => {
+                    self.write_u8(0x00);
+                    self.write_usize(*idx);
+                }
+                Projection::VariantField {
+                    variant,
+                    enum_ty,
+                    field_idx,
+                } => {
+                    // Include variant index and enum type identity to distinguish
+                    // operations on different enum types/variants. While structurally
+                    // equivalent code might produce the same Yul, we hash the enum
+                    // type to preserve type system semantics in deduplication.
+                    self.write_u8(0x01);
+                    self.write_str(enum_ty.pretty_print(self.db));
+                    self.write_usize(variant.idx as usize);
+                    self.write_usize(*field_idx);
+                }
+                Projection::Index(idx_source) => {
+                    self.write_u8(0x02);
+                    match idx_source {
+                        hir::projection::IndexSource::Constant(idx) => {
+                            self.write_u8(0x00);
+                            self.write_usize(*idx);
+                        }
+                        hir::projection::IndexSource::Dynamic(infallible) => {
+                            // HIR projections use Infallible for Idx, making Dynamic
+                            // impossible to construct. This match arm is exhaustive
+                            // but can never be reached.
+                            match *infallible {}
+                        }
+                    }
+                }
+                Projection::Deref => {
+                    self.write_u8(0x03);
+                }
             }
         }
     }

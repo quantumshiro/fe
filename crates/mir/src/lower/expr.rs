@@ -1,10 +1,12 @@
 //! Expression and statement lowering for MIR: handles blocks, control flow, calls, and dispatches
 //! to specialized lowering helpers.
 
+use hir::analysis::ty::decision_tree::{Projection, ProjectionPath};
+
 use super::*;
 use hir::analysis::{
     place::PlaceBase,
-    ty::ty_check::{EffectArg, EffectPassMode},
+    ty::{layout, ty_check::{EffectArg, EffectPassMode}},
 };
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
@@ -26,7 +28,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let ty = *callable.generic_args().first()?;
 
         let size_bytes = if is_size_of {
-            self.ty_size_bytes(ty)?
+            layout::ty_size_bytes(self.db, ty)?
         } else {
             self.abi_static_size_bytes(ty)?
         };
@@ -242,11 +244,10 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 (next, val, true)
             }
             Partial::Present(Expr::Match(scrutinee, arms)) => {
-                if let Partial::Present(arms) = arms
-                    && let Some(mut patterns) = self.match_arm_patterns(arms)
-                {
+                if let Partial::Present(arms) = arms {
+                    // Try decision tree lowering first
                     let (next, val) =
-                        self.lower_match_expr(block, expr, *scrutinee, arms, &mut patterns);
+                        self.lower_match_with_decision_tree(block, expr, *scrutinee, arms);
                     return (next, val, false);
                 }
                 let val = self.ensure_value(expr);
@@ -428,51 +429,28 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let addr_space = self.value_address_space(addr_value);
         let is_aggregate = info.field_ty.field_count(self.db) > 0;
 
-        // For aggregate (struct) fields, emit pointer arithmetic instead of a load
-        if is_aggregate {
-            // Optimization: if offset is 0, reuse the base pointer directly
-            if info.offset_bytes == 0 {
-                // Ensure address space is propagated even when reusing the base pointer
-                self.value_address_space.insert(addr_value, addr_space);
-                return Some(addr_value);
-            }
-            // Emit FieldPtr for non-zero offsets
-            let result = self.mir_body.alloc_value(ValueData {
-                ty: info.field_ty,
-                origin: ValueOrigin::FieldPtr(FieldPtrOrigin {
-                    base: addr_value,
-                    offset_bytes: info.offset_bytes,
-                    addr_space,
-                }),
-            });
-            // Propagate address space to the result
-            self.value_address_space.insert(result, addr_space);
-            return Some(result);
-        }
+        // Create Place with single-element projection path
+        let place = Place::new(
+            addr_value,
+            ProjectionPath::from_projection(Projection::Field(info.field_idx)),
+            addr_space,
+        );
 
-        // For primitive fields, emit a get_field call to load the value
-        let ptr_ty = match addr_space {
-            AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),
-            AddressSpaceKind::Storage => self.core.helper_ty(CoreHelperTy::StorPtr),
+        // Use PlaceRef for aggregates (pointer only), PlaceLoad for scalars (load value)
+        let origin = if is_aggregate {
+            ValueOrigin::PlaceRef(place)
+        } else {
+            ValueOrigin::PlaceLoad(place)
         };
-        let offset_units = self.offset_units_for_space(addr_space, info.offset_bytes);
-        let offset_value = self.synthetic_u256(BigUint::from(offset_units));
-        let callable =
-            self.core
-                .make_callable(expr, CoreHelper::GetField, &[ptr_ty, info.field_ty]);
 
-        Some(self.mir_body.alloc_value(ValueData {
+        let result = self.mir_body.alloc_value(ValueData {
             ty: info.field_ty,
-            origin: ValueOrigin::Call(CallOrigin {
-                expr,
-                callable,
-                args: vec![addr_value, offset_value],
-                effect_args: Vec::new(),
-                effect_kinds: Vec::new(),
-                receiver_space: None,
-                resolved_name: None,
-            }),
-        }))
+            origin,
+        });
+
+        // Propagate address space to the result
+        self.value_address_space.insert(result, addr_space);
+        Some(result)
     }
 
     /// Lowers a statement and returns its continuation and produced value (if any).

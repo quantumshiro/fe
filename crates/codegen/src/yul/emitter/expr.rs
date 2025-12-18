@@ -1,12 +1,16 @@
 //! Expression and value lowering helpers shared across the Yul emitter.
 
+use hir::analysis::ty::decision_tree::Projection;
+use hir::analysis::ty::layout;
+use hir::analysis::ty::simplified_pattern::ConstructorKind;
+use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId};
 use hir::hir_def::{
     CallableDef, Expr, ExprId, LitKind, Stmt, StmtId,
     expr::{ArithBinOp, BinOp, CompBinOp, LogicalBinOp, UnOp},
 };
 use mir::{
     CallOrigin, ValueId, ValueOrigin,
-    ir::{FieldPtrOrigin, SyntheticValue},
+    ir::{FieldPtrOrigin, Place, SyntheticValue},
 };
 
 use crate::yul::{doc::YulDoc, state::BlockState};
@@ -34,6 +38,7 @@ impl<'db> FunctionEmitter<'db> {
             return Ok(temp.clone());
         }
         let value = self.mir_func.body.value(value_id);
+        let value_ty = value.ty;
         match &value.origin {
             ValueOrigin::Expr(expr_id) => {
                 if let Some(temp) = self.match_values.get(expr_id) {
@@ -47,6 +52,8 @@ impl<'db> FunctionEmitter<'db> {
             ValueOrigin::Intrinsic(intr) => self.lower_intrinsic_value(intr, state),
             ValueOrigin::Synthetic(synth) => self.lower_synthetic_value(synth),
             ValueOrigin::FieldPtr(field_ptr) => self.lower_field_ptr(field_ptr, state),
+            ValueOrigin::PlaceLoad(place) => self.lower_place_load(place, value_ty, state),
+            ValueOrigin::PlaceRef(place) => self.lower_place_ref(place, state),
             _ => Err(YulError::Unsupported(
                 "only expression-derived values are supported".into(),
             )),
@@ -72,6 +79,7 @@ impl<'db> FunctionEmitter<'db> {
         }
         if let Some(value_id) = self.mir_func.body.expr_values.get(&expr_id) {
             let value = self.mir_func.body.value(*value_id);
+            let value_ty = value.ty;
             match &value.origin {
                 ValueOrigin::Call(call) => return self.lower_call_value(call, state),
                 ValueOrigin::Synthetic(synth) => {
@@ -82,6 +90,12 @@ impl<'db> FunctionEmitter<'db> {
                 }
                 ValueOrigin::Intrinsic(intr) => {
                     return self.lower_intrinsic_value(intr, state);
+                }
+                ValueOrigin::PlaceLoad(place) => {
+                    return self.lower_place_load(place, value_ty, state);
+                }
+                ValueOrigin::PlaceRef(place) => {
+                    return self.lower_place_ref(place, state);
                 }
                 // For Expr origins, we just continue to process the expression below
                 // to avoid infinite recursion when expr_values[expr_id] points to Expr(expr_id)
@@ -358,6 +372,195 @@ impl<'db> FunctionEmitter<'db> {
                 mir::ir::AddressSpaceKind::Storage => field_ptr.offset_bytes / 32,
             };
             Ok(format!("add({}, {})", base, offset))
+        }
+    }
+
+    /// Lowers a PlaceLoad (load value from a place with projection path).
+    ///
+    /// Walks the projection path to compute the byte offset from the base,
+    /// then emits a load instruction based on the address space, applying
+    /// the appropriate type conversion (masking, sign extension, etc.).
+    fn lower_place_load(
+        &self,
+        place: &Place<'db>,
+        loaded_ty: TyId<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
+        let addr = self.lower_place_address(place, state)?;
+        let raw_load = match place.address_space {
+            mir::ir::AddressSpaceKind::Memory => format!("mload({addr})"),
+            mir::ir::AddressSpaceKind::Storage => format!("sload({addr})"),
+        };
+
+        // Apply type-specific conversion (LoadableScalar::from_word equivalent)
+        Ok(self.apply_from_word_conversion(&raw_load, loaded_ty))
+    }
+
+    /// Applies the LoadableScalar::from_word conversion for a given type.
+    ///
+    /// This mirrors the Fe core library's from_word implementations defined in:
+    /// - `library/core/src/ptr.fe` (LoadableScalar trait)
+    /// - `library/core/src/enum_repr.fe` (enum discriminant handling)
+    ///
+    /// Conversion rules:
+    /// - bool: word != 0
+    /// - u8/u16/u32/u64/u128: mask to appropriate width
+    /// - u256: identity
+    /// - i8/i16/i32/i64/i128/i256: sign extension
+    ///
+    /// NOTE: This is a single source of truth for codegen. If the core library
+    /// semantics change, this function must be updated to match.
+    fn apply_from_word_conversion(&self, raw_load: &str, ty: TyId<'db>) -> String {
+        let base_ty = ty.base_ty(self.db);
+        if let TyData::TyBase(TyBase::Prim(prim)) = base_ty.data(self.db) {
+            match prim {
+                PrimTy::Bool => {
+                    // bool: iszero(eq(word, 0)) which is equivalent to word != 0
+                    format!("iszero(eq({raw_load}, 0))")
+                }
+                PrimTy::U8 => format!("and({raw_load}, 0xff)"),
+                PrimTy::U16 => format!("and({raw_load}, 0xffff)"),
+                PrimTy::U32 => format!("and({raw_load}, 0xffffffff)"),
+                PrimTy::U64 => format!("and({raw_load}, 0xffffffffffffffff)"),
+                PrimTy::U128 => {
+                    format!("and({raw_load}, 0xffffffffffffffffffffffffffffffff)")
+                }
+                PrimTy::U256 | PrimTy::Usize => {
+                    // No conversion needed for full-width unsigned
+                    raw_load.to_string()
+                }
+                PrimTy::I8 => {
+                    // Sign extension for i8
+                    format!("signextend(0, and({raw_load}, 0xff))")
+                }
+                PrimTy::I16 => {
+                    format!("signextend(1, and({raw_load}, 0xffff))")
+                }
+                PrimTy::I32 => {
+                    format!("signextend(3, and({raw_load}, 0xffffffff))")
+                }
+                PrimTy::I64 => {
+                    format!("signextend(7, and({raw_load}, 0xffffffffffffffff))")
+                }
+                PrimTy::I128 => {
+                    format!("signextend(15, and({raw_load}, 0xffffffffffffffffffffffffffffffff))")
+                }
+                PrimTy::I256 | PrimTy::Isize => {
+                    // Full-width signed doesn't need masking, sign is already there
+                    raw_load.to_string()
+                }
+                // String, Array, Tuple, Ptr are aggregate/pointer types - no conversion
+                PrimTy::String | PrimTy::Array | PrimTy::Tuple(_) | PrimTy::Ptr => {
+                    raw_load.to_string()
+                }
+            }
+        } else {
+            // Non-primitive types (aggregates, etc.) - no conversion
+            raw_load.to_string()
+        }
+    }
+
+    /// Lowers a PlaceRef (reference to a place with projection path).
+    ///
+    /// Walks the projection path to compute the byte offset from the base,
+    /// returning the pointer without loading.
+    fn lower_place_ref(&self, place: &Place<'db>, state: &BlockState) -> Result<String, YulError> {
+        self.lower_place_address(place, state)
+    }
+
+    /// Computes the address for a place by walking the projection path.
+    ///
+    /// Returns a Yul expression representing the memory/storage address.
+    /// For memory, computes byte offsets. For storage, computes slot offsets.
+    fn lower_place_address(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
+        let base = self.lower_value(place.base, state)?;
+
+        if place.projection.is_empty() {
+            return Ok(base);
+        }
+
+        // Get the base value's type to navigate projections
+        let base_value = self.mir_func.body.value(place.base);
+        let mut current_ty = base_value.ty;
+        let mut total_offset = 0u64;
+        let is_storage = matches!(place.address_space, mir::ir::AddressSpaceKind::Storage);
+
+        for proj in place.projection.iter() {
+            match proj {
+                Projection::Field(field_idx) => {
+                    let field_types = current_ty.field_types(self.db);
+                    if field_types.is_empty() {
+                        return Err(YulError::Unsupported(format!(
+                            "place projection: no field types for type but accessing field {}",
+                            field_idx
+                        )));
+                    }
+                    // Use slot-based offsets for storage, byte-based for memory
+                    total_offset += if is_storage {
+                        layout::field_offset_slots(self.db, current_ty, *field_idx)
+                    } else {
+                        layout::field_offset_bytes_or_word_aligned(self.db, current_ty, *field_idx)
+                    };
+                    // Update current type to the field's type
+                    current_ty = *field_types.get(*field_idx).ok_or_else(|| {
+                        YulError::Unsupported(format!(
+                            "place projection: target field {} out of bounds (have {} fields)",
+                            field_idx,
+                            field_types.len()
+                        ))
+                    })?;
+                }
+                Projection::VariantField {
+                    variant,
+                    enum_ty,
+                    field_idx,
+                } => {
+                    // Skip discriminant then compute field offset
+                    // Use slot-based offsets for storage, byte-based for memory
+                    if is_storage {
+                        total_offset += layout::DISCRIMINANT_SIZE_SLOTS;
+                        total_offset += layout::variant_field_offset_slots(
+                            self.db, *enum_ty, *variant, *field_idx,
+                        );
+                    } else {
+                        total_offset += layout::DISCRIMINANT_SIZE_BYTES;
+                        total_offset += layout::variant_field_offset_bytes_or_word_aligned(
+                            self.db, *enum_ty, *variant, *field_idx,
+                        );
+                    }
+                    // Update current type to the field's type
+                    let ctor = ConstructorKind::Variant(*variant, *enum_ty);
+                    let field_types = ctor.field_types(self.db);
+                    current_ty = *field_types.get(*field_idx).ok_or_else(|| {
+                        YulError::Unsupported(format!(
+                            "place projection: target variant field {} out of bounds (have {} fields)",
+                            field_idx,
+                            field_types.len()
+                        ))
+                    })?;
+                }
+                // Index and Deref projections are not yet implemented
+                Projection::Index(_) => {
+                    return Err(YulError::Unsupported(
+                        "place projection: array index access not yet implemented".to_string(),
+                    ));
+                }
+                Projection::Deref => {
+                    return Err(YulError::Unsupported(
+                        "place projection: pointer dereference not yet implemented".to_string(),
+                    ));
+                }
+            }
+        }
+
+        if total_offset == 0 {
+            Ok(base)
+        } else {
+            Ok(format!("add({base}, {total_offset})"))
         }
     }
 }

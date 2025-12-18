@@ -1,6 +1,7 @@
 //! Variant lowering helpers for MIR: handles enum constructor calls and unit variant paths.
 
 use super::*;
+use hir::analysis::ty::layout;
 use num_bigint::BigUint;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
@@ -49,12 +50,13 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         let value_id = self.emit_alloc(expr, curr_block, total_size);
         self.emit_store_discriminant(expr, curr_block, value_id, variant_index);
 
-        let mut offset: u64 = 0;
         let mut stores = Vec::with_capacity(lowered_args.len());
-        for (i, arg_value) in lowered_args.iter().enumerate() {
-            let arg_ty = self.typed_body.expr_ty(self.db, call_args[i].expr);
+        for (field_idx, arg_value) in lowered_args.iter().enumerate() {
+            let arg_ty = self.typed_body.expr_ty(self.db, call_args[field_idx].expr);
+            let offset = layout::variant_field_offset_bytes_or_word_aligned(
+                self.db, enum_ty, variant, field_idx,
+            );
             stores.push((offset, arg_ty, *arg_value));
-            offset += self.ty_size_bytes(arg_ty).unwrap_or(32);
         }
         let ptr_ty = match self.value_address_space(value_id) {
             AddressSpaceKind::Memory => self.core.helper_ty(CoreHelperTy::MemPtr),

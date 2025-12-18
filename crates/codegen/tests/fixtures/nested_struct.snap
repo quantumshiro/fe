@@ -1,6 +1,5 @@
 ---
 source: crates/codegen/tests/yul.rs
-assertion_line: 31
 expression: output
 input_file: tests/fixtures/nested_struct.fe
 ---
@@ -35,19 +34,15 @@ object "NestedStruct" {
           ret := v0
         }
       }
+      function from_word__u256__3271ca15373d4483(word) -> ret {
+        ret := word
+      }
       function get_field__MemPtr_u256__97fe9178c4597e85(ptr, offset) -> ret {
         let v0 := add(ptr, offset)
-        ret := to_word__deduped(load__MemPtr__d0292394fccae3e4(v0))
-      }
-      function get_field__StorPtr_u256__2bec36171fad53de(ptr, offset) -> ret {
-        let v0 := add(ptr, offset)
-        ret := to_word__deduped(load__StorPtr__7f7854645e12e266(v0))
+        ret := from_word__u256__3271ca15373d4483(load__MemPtr__d0292394fccae3e4(v0))
       }
       function load__MemPtr__d0292394fccae3e4(addr) -> ret {
         ret := mload(addr)
-      }
-      function load__StorPtr__7f7854645e12e266(addr) -> ret {
-        ret := sload(addr)
       }
       function mem_read(value) -> ret {
         let v0 := alloc(32)
@@ -56,10 +51,10 @@ object "NestedStruct" {
         store_field__MemPtr_u256__97fe9178c4597e85(v1, 0, get_field__MemPtr_u256__97fe9178c4597e85(v0, 0))
         let v2 := v1
         store_field__MemPtr_u256__97fe9178c4597e85(v2, 0, value)
-        ret := get_field__MemPtr_u256__97fe9178c4597e85(v2, 0)
+        ret := mload(v2)
       }
       function read_inner(outer) -> ret {
-        ret := get_field__StorPtr_u256__2bec36171fad53de(outer, 0)
+        ret := sload(outer)
       }
       function runtime() {
         let v0 := 0
@@ -90,14 +85,11 @@ object "NestedStruct" {
       }
       function store_field__MemPtr_u256__97fe9178c4597e85(ptr, offset, value) {
         let v0 := add(ptr, offset)
-        store__MemPtr__d0292394fccae3e4(v0, to_word__deduped(value))
+        store__MemPtr__d0292394fccae3e4(v0, from_word__u256__3271ca15373d4483(value))
       }
       function store_field__StorPtr_u256__2bec36171fad53de(ptr, offset, value) {
         let v0 := add(ptr, offset)
-        store__StorPtr__7f7854645e12e266(v0, to_word__deduped(value))
-      }
-      function to_word__deduped(self) -> ret {
-        ret := self
+        store__StorPtr__7f7854645e12e266(v0, from_word__u256__3271ca15373d4483(value))
       }
       function write_inner(value, outer) {
         store_field__StorPtr_u256__2bec36171fad53de(outer, 0, value)
