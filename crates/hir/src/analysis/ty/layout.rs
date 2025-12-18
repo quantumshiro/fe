@@ -260,10 +260,10 @@ pub fn ty_size_slots(db: &dyn HirAnalysisDb, ty: TyId<'_>) -> u64 {
     }
 
     // Handle primitives - each primitive takes 1 slot
-    if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(db).data(db) {
-        if *prim == PrimTy::Bool || prim_int_bits(*prim).is_some() {
-            return 1;
-        }
+    if let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(db).data(db)
+        && (*prim == PrimTy::Bool || prim_int_bits(*prim).is_some())
+    {
+        return 1;
     }
 
     // Handle ADT types (structs)

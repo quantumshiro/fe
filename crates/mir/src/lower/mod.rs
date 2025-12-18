@@ -31,9 +31,9 @@ use crate::{
     core_lib::{CoreHelper, CoreHelperTy, CoreLib, CoreLibError},
     ir::{
         AddressSpaceKind, BasicBlock, BasicBlockId, CallOrigin, CodeRegionRoot, ContractFunction,
-        ContractFunctionKind, EffectProviderKind, DecisionTreeBinding, FieldPtrOrigin, IntrinsicOp, IntrinsicValue,
-        LoopInfo, MatchArmLowering, MatchArmPattern, MatchLoweringInfo, MirBody, MirFunction,
-        MirInst, MirModule, Place, SwitchOrigin, SwitchTarget, SwitchValue,
+        ContractFunctionKind, DecisionTreeBinding, EffectProviderKind, FieldPtrOrigin, IntrinsicOp,
+        IntrinsicValue, LoopInfo, MatchArmLowering, MatchArmPattern, MatchLoweringInfo, MirBody,
+        MirFunction, MirInst, MirModule, Place, SwitchOrigin, SwitchTarget, SwitchValue,
         SyntheticValue, Terminator, ValueData, ValueId, ValueOrigin,
     },
     monomorphize::monomorphize_functions,

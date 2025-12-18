@@ -6,7 +6,10 @@ use hir::analysis::ty::decision_tree::{Projection, ProjectionPath};
 use super::*;
 use hir::analysis::{
     place::PlaceBase,
-    ty::{layout, ty_check::{EffectArg, EffectPassMode}},
+    ty::{
+        layout,
+        ty_check::{EffectArg, EffectPassMode},
+    },
 };
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
