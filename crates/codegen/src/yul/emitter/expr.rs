@@ -380,7 +380,7 @@ impl<'db> FunctionEmitter<'db> {
     /// Walks the projection path to compute the byte offset from the base,
     /// then emits a load instruction based on the address space, applying
     /// the appropriate type conversion (masking, sign extension, etc.).
-    fn lower_place_load(
+    pub(super) fn lower_place_load(
         &self,
         place: &Place<'db>,
         loaded_ty: TyId<'db>,
@@ -464,7 +464,11 @@ impl<'db> FunctionEmitter<'db> {
     ///
     /// Walks the projection path to compute the byte offset from the base,
     /// returning the pointer without loading.
-    fn lower_place_ref(&self, place: &Place<'db>, state: &BlockState) -> Result<String, YulError> {
+    pub(super) fn lower_place_ref(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
         self.lower_place_address(place, state)
     }
 
