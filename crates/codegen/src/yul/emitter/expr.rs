@@ -42,10 +42,20 @@ impl<'db> FunctionEmitter<'db> {
         match &value.origin {
             ValueOrigin::Expr(expr_id) => {
                 if let Some(temp) = self.match_values.get(expr_id) {
-                    Ok(temp.clone())
-                } else {
-                    self.lower_expr(*expr_id, state)
+                    return Ok(temp.clone());
                 }
+                // Check if there's a better (non-Expr) value for this expression in expr_values.
+                // This can happen when a tuple was pre-lowered via emit_alloc but the call's
+                // args still reference an old ValueId with ValueOrigin::Expr.
+                if let Some(better_value_id) = self.mir_func.body.expr_values.get(expr_id)
+                    && *better_value_id != value_id
+                {
+                    let better_value = self.mir_func.body.value(*better_value_id);
+                    if !matches!(&better_value.origin, ValueOrigin::Expr(_)) {
+                        return self.lower_value(*better_value_id, state);
+                    }
+                }
+                self.lower_expr(*expr_id, state)
             }
             ValueOrigin::BindingName(name) => Ok(state.resolve_name(name)),
             ValueOrigin::Call(call) => self.lower_call_value(call, state),
@@ -121,12 +131,29 @@ impl<'db> FunctionEmitter<'db> {
                     UnOp::BitNot => Ok(format!("not({value})")),
                 }
             }
-            Expr::Tuple(values) => {
-                let parts = values
-                    .iter()
-                    .map(|expr| self.lower_expr(*expr, state))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(format!("tuple({})", parts.join(", ")))
+            Expr::Tuple(elems) => {
+                // Tuples should be lowered to struct-like alloc+store_field operations in MIR.
+                // If we reach here, something went wrong in MIR lowering.
+                // Check if this is a unit tuple, which doesn't need allocation
+                if elems.is_empty() {
+                    return Ok("0".to_string()); // Unit tuple represented as 0
+                }
+                // Non-empty tuples must have been lowered - panic with diagnostic info
+                let func_name = self
+                    .mir_func
+                    .func
+                    .name(self.db)
+                    .to_opt()
+                    .map(|n| n.data(self.db).to_string())
+                    .unwrap_or_default();
+                panic!(
+                    "tuple expression with {} elements was not lowered before codegen in function '{}'. \
+                     expr_id: {:?}, expr_values contains: {}",
+                    elems.len(),
+                    func_name,
+                    expr_id,
+                    self.mir_func.body.expr_values.contains_key(&expr_id)
+                );
             }
             Expr::Call(callee, call_args) => {
                 let callee_expr = self.lower_expr(*callee, state)?;
@@ -386,6 +413,9 @@ impl<'db> FunctionEmitter<'db> {
         loaded_ty: TyId<'db>,
         state: &BlockState,
     ) -> Result<String, YulError> {
+        if layout::ty_size_bytes(self.db, loaded_ty) == Some(0) {
+            return Ok("0".into());
+        }
         let addr = self.lower_place_address(place, state)?;
         let raw_load = match place.address_space {
             mir::ir::AddressSpaceKind::Memory => format!("mload({addr})"),

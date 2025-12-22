@@ -36,7 +36,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         self.ensure_expr_values(
             |expr| matches!(expr, Expr::Field(..)),
             |this, expr_id| {
-                this.ensure_value(expr_id);
+                if let Some(value_id) = this.try_lower_field(expr_id) {
+                    this.mir_body.expr_values.entry(expr_id).or_insert(value_id);
+                }
             },
         );
     }
