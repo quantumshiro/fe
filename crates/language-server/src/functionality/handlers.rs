@@ -4,7 +4,8 @@ use async_lsp::lsp_types::FileChangeType;
 use async_lsp::{
     ErrorCode, LanguageClient, ResponseError,
     lsp_types::{
-        Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, LogMessageParams,
+        DocumentFormattingParams, Hover, HoverParams, InitializeParams, InitializeResult,
+        InitializedParams, LogMessageParams, Position, Range, TextEdit,
     },
 };
 
@@ -72,13 +73,11 @@ async fn discover_and_load_ingots(
             )
         })?;
 
-        let diagnostics = init_ingot(&mut backend.db, &ingot_url);
-
-        // Log any diagnostics
-        for diagnostic in diagnostics {
+        let had_diagnostics = init_ingot(&mut backend.db, &ingot_url);
+        if had_diagnostics {
             warn!(
-                "Ingot initialization diagnostic for {:?}: {}",
-                ingot_dir, diagnostic
+                "Ingot initialization produced diagnostics for {:?}",
+                ingot_dir
             );
         }
     }
@@ -92,14 +91,9 @@ async fn discover_and_load_ingots(
             )
         })?;
 
-        let diagnostics = init_ingot(&mut backend.db, &root_url);
-
-        // Log any diagnostics
-        for diagnostic in diagnostics {
-            warn!(
-                "Ingot initialization diagnostic for workspace root: {}",
-                diagnostic
-            );
+        let had_diagnostics = init_ingot(&mut backend.db, &root_url);
+        if had_diagnostics {
+            warn!("Ingot initialization produced diagnostics for workspace root");
         }
     }
 
@@ -328,13 +322,11 @@ async fn load_ingot_files(
         )
     })?;
 
-    let diagnostics = init_ingot(&mut backend.db, &ingot_url);
-
-    // Log any diagnostics
-    for diagnostic in diagnostics {
+    let had_diagnostics = init_ingot(&mut backend.db, &ingot_url);
+    if had_diagnostics {
         warn!(
-            "Ingot initialization diagnostic for {:?}: {}",
-            ingot_dir, diagnostic
+            "Ingot initialization produced diagnostics for {:?}",
+            ingot_dir
         );
     }
 
@@ -364,7 +356,6 @@ pub async fn handle_files_need_diagnostics(
     let ingots_need_diagnostics: FxHashSet<_> = need_diagnostics
         .iter()
         .filter_map(|NeedsDiagnostics(url)| {
-            // url is already a url::Url
             backend
                 .db
                 .workspace()
@@ -377,10 +368,6 @@ pub async fn handle_files_need_diagnostics(
         use crate::lsp_diagnostics::LspDiagnostics;
         let diagnostics_map = backend.db.diagnostics_for_ingot(ingot);
 
-        info!(
-            "Computed diagnostics: {:?}",
-            diagnostics_map.keys().collect::<Vec<_>>()
-        );
         for uri in diagnostics_map.keys() {
             let diagnostic = diagnostics_map.get(uri).cloned().unwrap_or_default();
             let diagnostics_params = async_lsp::lsp_types::PublishDiagnosticsParams {
@@ -388,10 +375,9 @@ pub async fn handle_files_need_diagnostics(
                 diagnostics: diagnostic,
                 version: None,
             };
-            info!("Publishing diagnostics for URI: {:?}", uri);
-            let _ = client
-                .publish_diagnostics(diagnostics_params)
-                .map_err(|e| error!("Failed to publish diagnostics for {}: {:?}", uri, e));
+            if let Err(e) = client.publish_diagnostics(diagnostics_params) {
+                error!("Failed to publish diagnostics for {}: {:?}", uri, e);
+            }
         }
     }
     Ok(())
@@ -430,4 +416,49 @@ pub async fn handle_hover_request(
 pub async fn handle_shutdown(_backend: &Backend, _message: ()) -> Result<(), ResponseError> {
     info!("received shutdown request");
     Ok(())
+}
+
+pub async fn handle_formatting(
+    backend: &Backend,
+    params: DocumentFormattingParams,
+) -> Result<Option<Vec<TextEdit>>, ResponseError> {
+    let path_str = params.text_document.uri.path();
+
+    let Ok(url) = url::Url::from_file_path(path_str) else {
+        warn!("handle_formatting: invalid path `{path_str}`");
+        return Ok(None);
+    };
+
+    let Some(file) = backend.db.workspace().get(&backend.db, &url) else {
+        warn!("handle_formatting: file not found `{url}`");
+        return Ok(None);
+    };
+
+    let source = file.text(&backend.db);
+
+    match fmt::format_str(source, &fmt::Config::default()) {
+        Ok(formatted) => {
+            let end_line = source.split('\n').count().saturating_sub(1) as u32;
+            let end_character = source.rsplit('\n').next().map_or(0, |l| l.len()) as u32;
+            let range = Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: end_line,
+                    character: end_character,
+                },
+            };
+            Ok(Some(vec![TextEdit {
+                range,
+                new_text: formatted,
+            }]))
+        }
+        Err(fmt::FormatError::ParseErrors(errs)) => {
+            info!("formatting skipped: {} parse error(s)", errs.len());
+            Ok(None)
+        }
+        Err(fmt::FormatError::Io(_)) => Ok(None),
+    }
 }

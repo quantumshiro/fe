@@ -1,0 +1,17 @@
+---
+source: crates/codegen/tests/yul.rs
+expression: output
+input_file: tests/fixtures/match_return.fe
+---
+function f(e) {
+  let v0 := mload(e)
+  switch v0
+    case 0 {
+      return(0, 0)
+    }
+    case 1 {
+      return(0, 0)
+    }
+    default {
+    }
+}

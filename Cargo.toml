@@ -8,11 +8,13 @@ edition = "2024"
 [workspace.dependencies]
 common = { path = "crates/common", package = "fe-common" }
 driver = { path = "crates/driver", package = "fe-driver" }
+fmt = { path = "crates/fmt", package = "fe-fmt" }
 hir = { path = "crates/hir", package = "fe-hir" }
-hir-analysis = { path = "crates/hir-analysis", package = "fe-hir-analysis" }
 parser = { path = "crates/parser", package = "fe-parser" }
 test-utils = { path = "crates/test-utils", package = "fe-test-utils" }
 resolver = { path = "crates/resolver", package = "fe-resolver" }
+mir = { path = "crates/mir", package = "fe-mir" }
+cranelift-entity = "0.115"
 
 url = "2.5.4"
 camino = "1.1.9"
@@ -26,9 +28,10 @@ dir-test = "0.4"
 glob = "0.3.2"
 rustc-hash = "2.1.0"
 num-bigint = "0.4"
+num-traits = "0.2"
 paste = "1.0.15"
 salsa = "0.20"
-smallvec = { version = "2.0.0-alpha.10" }
+smallvec = { version = "2.0.0-alpha.11" }
 smallvec1 = { version = "1", package = "smallvec" }
 thin-vec = "0.2.14"
 smol_str = { version = "0.1", features = ["serde"] }

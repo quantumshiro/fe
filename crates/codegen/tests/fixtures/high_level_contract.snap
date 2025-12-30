@@ -1,0 +1,319 @@
+---
+source: crates/codegen/tests/yul.rs
+expression: output
+input_file: tests/fixtures/high_level_contract.fe
+---
+object "EchoContract" {
+  code {
+    function calldata_byteinput_word_at(self, byte_offset) -> ret {
+      let v0 := calldataload(byte_offset)
+      ret := v0
+      leave
+    }
+    function cursor_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(0x40, add(v0, 32))
+      pop(v0)
+      mstore(v0, 0)
+      let v1 := v0
+      ret := v1
+      leave
+    }
+    function cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self) -> ret {
+      pop(self)
+      let v0 := mload(self)
+      let v1 := calldata_byteinput_word_at(0, v0)
+      let v2 := mload(self)
+      mstore(self, add(v2, 32))
+      ret := v1
+      leave
+    }
+    function init() {
+      let v0 := 0
+      let v1 := soldecoder_i__new__CallData__b9ab8dc8a4b2f9e(0)
+      let v2 := calldatasize()
+      let v3 := lt(v2, add(32, 32))
+      if v3 {
+        revert(0, 0)
+      }
+      let v4 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v1)
+      let v5 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v1)
+      let v6 := v0
+      init_contract(v4, v5, v6)
+      let v7 := datasize("EchoContract_deployed")
+      let v8 := dataoffset("EchoContract_deployed")
+      codecopy(0, v8, v7)
+      return(0, v7)
+    }
+    function init_contract(x, y, state) {
+      sstore(state, x)
+      sstore(add(state, 1), y)
+      leave
+    }
+    function soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(self) -> ret {
+      let v0 := cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self)
+      ret := v0
+      leave
+    }
+    function soldecoder_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
+      let v0 := cursor_i__new__CallData__b9ab8dc8a4b2f9e(input)
+      let v1 := mload(0x40)
+      if iszero(v1) {
+        v1 := 0x80
+      }
+      mstore(0x40, add(v1, 64))
+      let v2 := v0
+      mstore(v1, mload(v2))
+      mstore(add(v1, 32), 0)
+      let v3 := v1
+      ret := v3
+      leave
+    }
+    function u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
+      let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
+      ret := v0
+      leave
+    }
+    init()
+  }
+
+  object "EchoContract_deployed" {
+    code {
+      function ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) {
+        leave
+      }
+      function _t0__decode_decode__Sol_u256_SolDecoder_CallData___51fc2f6931ec5edc(d) -> ret {
+        let v0 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
+        let v1 := mload(0x40)
+        if iszero(v1) {
+          v1 := 0x80
+        }
+        mstore(0x40, add(v1, 32))
+        mstore(v1, v0)
+        ret := v1
+        leave
+      }
+      function alloc(size) -> ret {
+        let v0 := mload(64)
+        let v1 := eq(v0, 0)
+        if v1 {
+          v0 := 128
+        }
+        mstore(64, add(v0, size))
+        ret := v0
+        leave
+      }
+      function calldata_byteinput_word_at(self, byte_offset) -> ret {
+        let v0 := calldataload(byte_offset)
+        ret := v0
+        leave
+      }
+      function cursor_i__fork_mem__CallData__b9ab8dc8a4b2f9e(self, pos) -> ret {
+        pop(self)
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        pop(v0)
+        mstore(v0, pos)
+        let v1 := v0
+        ret := v1
+        leave
+      }
+      function cursor_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        pop(v0)
+        mstore(v0, 0)
+        let v1 := v0
+        ret := v1
+        leave
+      }
+      function cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self) -> ret {
+        pop(self)
+        let v0 := mload(self)
+        let v1 := calldata_byteinput_word_at(0, v0)
+        let v2 := mload(self)
+        mstore(self, add(v2, 32))
+        ret := v1
+        leave
+      }
+      function recv_EchoMsg_Answer_0_0(args) -> ret {
+        ret := 42
+        leave
+      }
+      function recv_EchoMsg_Echo_0_1(args) -> ret {
+        let v0 := mload(args)
+        ret := v0
+        leave
+      }
+      function recv_EchoMsg_GetX_0_2(args, state) -> ret {
+        let v0 := sload(state)
+        ret := v0
+        leave
+      }
+      function runtime() {
+        let v0 := 0
+        let v1 := calldatasize()
+        let v2 := lt(v1, 4)
+        if v2 {
+          revert(0, 0)
+        }
+        let v3 := calldataload(0)
+        let v4 := sol_abi_selector_from_prefix(v3)
+        switch v4
+          case 1 {
+            let v5 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
+            let v6 := calldatasize()
+            let v7 := lt(v6, add(4, 0))
+            if v7 {
+              revert(0, 0)
+            }
+            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v5)
+            let v8 := recv_EchoMsg_Answer_0_0(0)
+            let v9 := solencoder_new()
+            let v10 := solencoder_abiencoder_reserve_head(v9, 32)
+            pop(v10)
+            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v8, v9)
+            let v11 := solencoder_abiencoder_finish(v9)
+            let v12 := mload(v11)
+            let v13 := mload(add(v11, 32))
+            return(v12, v13)
+          }
+          case 2 {
+            let v14 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
+            let v15 := calldatasize()
+            let v16 := lt(v15, add(4, 32))
+            if v16 {
+              revert(0, 0)
+            }
+            let v17 := _t0__decode_decode__Sol_u256_SolDecoder_CallData___51fc2f6931ec5edc(v14)
+            let v18 := recv_EchoMsg_Echo_0_1(v17)
+            let v19 := solencoder_new()
+            let v20 := solencoder_abiencoder_reserve_head(v19, 32)
+            pop(v20)
+            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v18, v19)
+            let v21 := solencoder_abiencoder_finish(v19)
+            let v22 := mload(v21)
+            let v23 := mload(add(v21, 32))
+            return(v22, v23)
+          }
+          case 3 {
+            let v24 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
+            let v25 := calldatasize()
+            let v26 := lt(v25, add(4, 0))
+            if v26 {
+              revert(0, 0)
+            }
+            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v24)
+            let v27 := v0
+            let v28 := recv_EchoMsg_GetX_0_2(0, v27)
+            let v29 := v28
+            let v30 := solencoder_new()
+            let v31 := solencoder_abiencoder_reserve_head(v30, 32)
+            pop(v31)
+            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v29, v30)
+            let v32 := solencoder_abiencoder_finish(v30)
+            let v33 := mload(v32)
+            let v34 := mload(add(v32, 32))
+            return(v33, v34)
+          }
+          default {
+            revert(0, 0)
+          }
+      }
+      function sol_abi_selector_from_prefix(prefix) -> ret {
+        let v0 := shr(224, prefix)
+        ret := v0
+        leave
+      }
+      function soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(self) -> ret {
+        let v0 := cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self)
+        ret := v0
+        leave
+      }
+      function soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(input, base) -> ret {
+        let v0 := cursor_i__new__CallData__b9ab8dc8a4b2f9e(input)
+        let v1 := cursor_i__fork_mem__CallData__b9ab8dc8a4b2f9e(v0, base)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        let v3 := v1
+        mstore(v2, mload(v3))
+        mstore(add(v2, 32), base)
+        let v4 := v2
+        ret := v4
+        leave
+      }
+      function solencoder_abiencoder_finish(self) -> ret {
+        let v0 := mload(self)
+        let v1 := mload(add(self, 64))
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        mstore(v2, v0)
+        mstore(add(v2, 32), sub(v1, v0))
+        ret := v2
+        leave
+      }
+      function solencoder_abiencoder_reserve_head(self, bytes) -> ret {
+        solencoder_ensure_init_mem(self, bytes)
+        let v0 := mload(self)
+        ret := v0
+        leave
+      }
+      function solencoder_abiencoder_write_word(self, v) {
+        let v0 := mload(add(self, 32))
+        mstore(v0, v)
+        mstore(add(self, 32), add(v0, 32))
+        leave
+      }
+      function solencoder_ensure_init_mem(self, bytes) {
+        let v0 := mload(self)
+        let v1 := eq(v0, 0)
+        if v1 {
+          let v2 := alloc(bytes)
+          mstore(self, v2)
+          mstore(add(self, 32), v2)
+          mstore(add(self, 64), add(v2, bytes))
+        }
+        leave
+      }
+      function solencoder_new() -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 96))
+        mstore(v0, 0)
+        mstore(add(v0, 32), 0)
+        mstore(add(v0, 64), 0)
+        let v1 := v0
+        ret := v1
+        leave
+      }
+      function u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
+        let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
+        ret := v0
+        leave
+      }
+      function u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(self, e) {
+        solencoder_abiencoder_write_word(e, self)
+        leave
+      }
+      runtime()
+      return(0, 0)
+    }
+  }
+}

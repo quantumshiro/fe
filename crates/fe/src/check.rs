@@ -1,16 +1,19 @@
 use camino::Utf8PathBuf;
+use codegen::emit_module_yul;
 use common::InputDb;
 use driver::DriverDataBase;
+use hir::hir_def::{HirIngot, TopLevelMod};
+use mir::lower_module;
 use url::Url;
 
-pub fn check(path: &Utf8PathBuf) {
+pub fn check(path: &Utf8PathBuf, dump_mir: bool, emit_yul_min: bool) {
     let mut db = DriverDataBase::default();
 
     // Determine if we're dealing with a single file or an ingot directory
     let has_errors = if path.is_file() && path.extension() == Some("fe") {
-        check_single_file(&mut db, path)
+        check_single_file(&mut db, path, dump_mir, emit_yul_min)
     } else if path.is_dir() {
-        check_ingot(&mut db, path)
+        check_ingot(&mut db, path, dump_mir, emit_yul_min)
     } else {
         eprintln!("❌ Error: Path must be either a .fe file or a directory containing fe.toml");
         std::process::exit(1);
@@ -21,7 +24,12 @@ pub fn check(path: &Utf8PathBuf) {
     }
 }
 
-fn check_single_file(db: &mut DriverDataBase, file_path: &Utf8PathBuf) -> bool {
+fn check_single_file(
+    db: &mut DriverDataBase,
+    file_path: &Utf8PathBuf,
+    dump_mir: bool,
+    emit_yul_min: bool,
+) -> bool {
     // Create a file URL for the single .fe file
     let file_url = match Url::from_file_path(file_path.canonicalize_utf8().unwrap()) {
         Ok(url) => url,
@@ -53,6 +61,12 @@ fn check_single_file(db: &mut DriverDataBase, file_path: &Utf8PathBuf) -> bool {
             diags.emit(db);
             return true;
         }
+        if dump_mir {
+            dump_module_mir(db, top_mod);
+        }
+        if emit_yul_min {
+            emit_yul(db, top_mod);
+        }
     } else {
         eprintln!("❌ Error: Could not process file {file_path}");
         return true;
@@ -61,7 +75,12 @@ fn check_single_file(db: &mut DriverDataBase, file_path: &Utf8PathBuf) -> bool {
     false
 }
 
-fn check_ingot(db: &mut DriverDataBase, dir_path: &Utf8PathBuf) -> bool {
+fn check_ingot(
+    db: &mut DriverDataBase,
+    dir_path: &Utf8PathBuf,
+    dump_mir: bool,
+    emit_yul_min: bool,
+) -> bool {
     let canonical_path = match dir_path.canonicalize_utf8() {
         Ok(path) => path,
         Err(_) => {
@@ -78,18 +97,9 @@ fn check_ingot(db: &mut DriverDataBase, dir_path: &Utf8PathBuf) -> bool {
             return true;
         }
     };
-    let init_diagnostics = driver::init_ingot(db, &ingot_url);
-
-    // Handle workspace setup diagnostics if any
-    if !init_diagnostics.is_empty() {
-        let mut has_init_issues = false;
-        for diagnostic in &init_diagnostics {
-            eprintln!("❌ {diagnostic}");
-            has_init_issues = true;
-        }
-        if has_init_issues {
-            return true;
-        }
+    let had_init_diagnostics = driver::init_ingot(db, &ingot_url);
+    if had_init_diagnostics {
+        return true;
     }
 
     let Some(ingot) = db.workspace().containing_ingot(db, ingot_url.clone()) else {
@@ -128,11 +138,19 @@ fn check_ingot(db: &mut DriverDataBase, dir_path: &Utf8PathBuf) -> bool {
     if !diags.is_empty() {
         diags.emit(db);
         has_errors = true;
+    } else {
+        let root_mod = ingot.root_mod(db);
+        if dump_mir {
+            dump_module_mir(db, root_mod);
+        }
+        if emit_yul_min {
+            emit_yul(db, root_mod);
+        }
     }
 
     // Collect all dependencies with errors
     let mut dependency_errors = Vec::new();
-    for dependency_url in db.graph().dependency_urls(db, &ingot_url) {
+    for dependency_url in db.dependency_graph().dependency_urls(db, &ingot_url) {
         let Some(ingot) = db.workspace().containing_ingot(db, dependency_url.clone()) else {
             // Skip dependencies that can't be resolved
             continue;
@@ -182,4 +200,24 @@ fn print_dependency_info(db: &DriverDataBase, dependency_url: &Url) {
 
     eprintln!("🔗 {dependency_url}");
     eprintln!();
+}
+
+fn emit_yul(db: &DriverDataBase, top_mod: TopLevelMod<'_>) {
+    match emit_module_yul(db, top_mod) {
+        Ok(yul) => {
+            println!("=== Yul ===");
+            println!("{yul}");
+        }
+        Err(err) => eprintln!("⚠️  failed to emit Yul: {err}"),
+    }
+}
+
+fn dump_module_mir(db: &DriverDataBase, top_mod: TopLevelMod<'_>) {
+    match lower_module(db, top_mod) {
+        Ok(mir_module) => {
+            println!("=== MIR for module ===");
+            print!("{}", mir::fmt::format_module(db, &mir_module));
+        }
+        Err(err) => eprintln!("failed to lower MIR: {err}"),
+    }
 }

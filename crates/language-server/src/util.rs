@@ -57,6 +57,44 @@ pub fn to_lsp_location_from_scope(
     db: &dyn SpannedHirDb,
     scope: ScopeId,
 ) -> Result<async_lsp::lsp_types::Location, Box<dyn std::error::Error>> {
+    use hir::hir_def::ItemKind;
+    use hir::span::DynLazySpan;
+
+    // For file modules (TopLevelMod), navigate to the start of the file
+    if let ScopeId::Item(ItemKind::TopMod(top_mod)) = scope
+        && let Some(resolved_span) = top_mod.span().resolve(db)
+    {
+        let uri = resolved_span.file.url(db).ok_or("Failed to get file URL")?;
+        return Ok(async_lsp::lsp_types::Location {
+            uri,
+            range: async_lsp::lsp_types::Range {
+                start: async_lsp::lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: async_lsp::lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+            },
+        });
+    }
+
+    // For impl blocks (Impl, ImplTrait), navigate to the start of the impl block
+    // since they don't have a single "name" to point to
+    if let ScopeId::Item(ItemKind::Impl(impl_)) = scope {
+        let lazy_span: DynLazySpan = impl_.span().into();
+        let span = lazy_span.resolve(db).ok_or("Failed to resolve impl span")?;
+        return to_lsp_location_from_span(db, span);
+    }
+    if let ScopeId::Item(ItemKind::ImplTrait(impl_trait)) = scope {
+        let lazy_span: DynLazySpan = impl_trait.span().into();
+        let span = lazy_span
+            .resolve(db)
+            .ok_or("Failed to resolve impl trait span")?;
+        return to_lsp_location_from_span(db, span);
+    }
+
     let lazy_span = scope.name_span(db).ok_or("Failed to get name span")?;
     let span = lazy_span.resolve(db).ok_or("Failed to resolve span")?;
     to_lsp_location_from_span(db, span)
@@ -142,6 +180,17 @@ fn to_lsp_location_from_span(
     let url = span.file.url(db).expect("Failed to get file URL");
     let range = to_lsp_range_from_span(span, db)?;
     Ok(async_lsp::lsp_types::Location { uri: url, range })
+}
+
+/// Convert a lazy span to an LSP location.
+///
+/// Returns an error if the span cannot be resolved or if the location cannot be created.
+pub fn to_lsp_location_from_lazy_span<'db>(
+    db: &'db dyn hir::SpannedHirDb,
+    lazy_span: hir::span::DynLazySpan<'db>,
+) -> Result<async_lsp::lsp_types::Location, Box<dyn std::error::Error>> {
+    let span = lazy_span.resolve(db).ok_or("Failed to resolve lazy span")?;
+    to_lsp_location_from_span(db, span)
 }
 
 #[cfg(target_arch = "wasm32")]

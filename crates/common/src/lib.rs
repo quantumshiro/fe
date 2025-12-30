@@ -1,21 +1,21 @@
+pub mod cache;
 pub mod config;
-pub mod core;
+pub mod dependencies;
 pub mod diagnostics;
 pub mod file;
-pub mod graph;
 pub mod indexmap;
 pub mod ingot;
-pub mod tree;
+pub mod stdlib;
 pub mod urlext;
 
+use dependencies::DependencyGraph;
 use file::Workspace;
-use graph::Graph;
 
 #[salsa::db]
 // Each database must implement InputDb explicitly with its own storage mechanism
 pub trait InputDb: salsa::Database {
     fn workspace(&self) -> Workspace;
-    fn graph(&self) -> Graph;
+    fn dependency_graph(&self) -> DependencyGraph;
 }
 
 #[doc(hidden)]
@@ -31,7 +31,7 @@ macro_rules! impl_input_db {
             fn workspace(&self) -> $crate::file::Workspace {
                 self.index.clone().expect("Workspace not initialized")
             }
-            fn graph(&self) -> $crate::graph::Graph {
+            fn dependency_graph(&self) -> $crate::dependencies::DependencyGraph {
                 self.graph.clone().expect("Graph not initialized")
             }
         }
@@ -47,7 +47,7 @@ macro_rules! impl_db_default {
     ($db_type:ty) => {
         impl Default for $db_type
         where
-            $db_type: $crate::core::HasBuiltinCore,
+            $db_type: $crate::stdlib::HasBuiltinCore + $crate::stdlib::HasBuiltinStd,
         {
             fn default() -> Self {
                 let mut db = Self {
@@ -57,9 +57,10 @@ macro_rules! impl_db_default {
                 };
                 let index = $crate::file::Workspace::default(&db);
                 db.index = Some(index);
-                let graph = $crate::graph::Graph::default(&db);
+                let graph = $crate::dependencies::DependencyGraph::default(&db);
                 db.graph = Some(graph);
-                $crate::core::HasBuiltinCore::initialize_builtin_core(&mut db);
+                $crate::stdlib::HasBuiltinCore::initialize_builtin_core(&mut db);
+                $crate::stdlib::HasBuiltinStd::initialize_builtin_std(&mut db);
                 db
             }
         }
@@ -75,7 +76,7 @@ macro_rules! define_input_db {
         pub struct $db_name {
             storage: salsa::Storage<Self>,
             index: Option<$crate::file::Workspace>,
-            graph: Option<$crate::graph::Graph>,
+            graph: Option<$crate::dependencies::DependencyGraph>,
         }
 
         #[salsa::db]

@@ -5,11 +5,14 @@ pub use radix_immutable::StringPrefixView;
 use smol_str::SmolStr;
 use url::Url;
 
-use crate::InputDb;
-use crate::config::{Config, ConfigDiagnostic};
-use crate::core::BUILTIN_CORE_BASE_URL;
-use crate::file::{File, Workspace};
-use crate::urlext::UrlExt;
+use crate::{
+    InputDb,
+    config::Config,
+    dependencies::DependencyLocation,
+    file::{File, Workspace},
+    stdlib::{BUILTIN_CORE_BASE_URL, BUILTIN_STD_BASE_URL},
+    urlext::UrlExt,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IngotKind {
@@ -25,6 +28,9 @@ pub enum IngotKind {
 
     /// Core library ingot.
     Core,
+
+    /// Standard library ingot.
+    Std,
 }
 
 pub trait IngotBaseUrl {
@@ -105,21 +111,24 @@ impl<'db> Ingot<'db> {
     }
 
     #[salsa::tracked]
+    pub fn config_file(self, db: &'db dyn InputDb) -> Option<File> {
+        db.workspace().containing_ingot_config(db, self.base(db))
+    }
+
+    #[salsa::tracked]
+    fn parse_config(self, db: &'db dyn InputDb) -> Option<Result<Config, String>> {
+        self.config_file(db)
+            .map(|config_file| Config::parse(config_file.text(db)))
+    }
+
+    #[salsa::tracked]
     pub fn config(self, db: &'db dyn InputDb) -> Option<Config> {
-        db.workspace()
-            .containing_ingot_config(db, self.base(db))
-            .map(|config_file| match Config::parse(config_file.text(db)) {
-                Ok(config) => config,
-                Err(err) => {
-                    // Create a Config with just the parse error as a diagnostic
-                    let diagnostics = vec![ConfigDiagnostic::InvalidTomlSyntax(err.to_string())];
-                    Config {
-                        metadata: Default::default(),
-                        diagnostics,
-                        dependencies: Vec::new(),
-                    }
-                }
-            })
+        self.parse_config(db).and_then(|result| result.ok())
+    }
+
+    #[salsa::tracked]
+    pub fn config_parse_error(self, db: &'db dyn InputDb) -> Option<String> {
+        self.parse_config(db).and_then(|result| result.err())
     }
 
     #[salsa::tracked]
@@ -132,18 +141,38 @@ impl<'db> Ingot<'db> {
         let base_url = self.base(db);
         let mut deps = match self.config(db) {
             Some(config) => config
-                .forward_edges(&base_url)
+                .dependencies(&base_url)
                 .into_iter()
-                .map(|(url, weight)| (weight.alias, url))
+                .map(|dependency| {
+                    let url = match &dependency.location {
+                        DependencyLocation::Remote(remote) => db
+                            .dependency_graph()
+                            .local_for_remote_git(db, remote)
+                            .unwrap_or_else(|| remote.source.clone()),
+                        DependencyLocation::Local(local) => local.url.clone(),
+                    };
+                    (dependency.alias.clone(), url)
+                })
                 .collect(),
             None => vec![],
         };
 
-        if self.kind(db) != IngotKind::Core {
+        let kind = self.kind(db);
+
+        // every ingot has access to `core`
+        if kind != IngotKind::Core {
             deps.push((
                 "core".into(),
                 Url::parse(BUILTIN_CORE_BASE_URL).expect("couldn't parse core ingot URL"),
             ))
+        }
+
+        // every ingot except `core` has access to `std` (until we have a no_std option)
+        if !matches!(kind, IngotKind::Core | IngotKind::Std) {
+            deps.push((
+                "std".into(),
+                Url::parse(BUILTIN_STD_BASE_URL).expect("couldn't parse std ingot URL"),
+            ));
         }
         deps
     }
@@ -201,10 +230,10 @@ impl Workspace {
                 .directory()
                 .expect("Config URL should have a directory");
 
-            let kind = if base_url.scheme().contains("core") {
-                IngotKind::Core
-            } else {
-                IngotKind::Local
+            let kind = match base_url.scheme() {
+                "builtin-core" => IngotKind::Core,
+                "builtin-std" => IngotKind::Std,
+                _ => IngotKind::Local,
             };
 
             Some(Ingot::new(db, base_url.clone(), None, kind))

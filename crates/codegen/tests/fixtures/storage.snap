@@ -1,0 +1,194 @@
+---
+source: crates/codegen/tests/yul.rs
+expression: output
+input_file: tests/fixtures/storage.fe
+---
+object "Coin" {
+  code {
+    function init() {
+      let v0 := datasize("Coin_deployed")
+      let v1 := dataoffset("Coin_deployed")
+      codecopy(0, v1, v0)
+      leave
+    }
+    init()
+  }
+
+  object "Coin_deployed" {
+    code {
+      function abi_encode(value) {
+        let v0 := 0
+        mstore(v0, value)
+        return(v0, 32)
+      }
+      function balance_of_raw(user, store) -> ret {
+        let v0 := 0
+        switch user
+          case 0 {
+            let v1 := sload(store)
+            v0 := v1
+          }
+          default {
+            let v2 := sload(add(store, 1))
+            v0 := v2
+          }
+        ret := v0
+        leave
+      }
+      function credit_alice(amount, store, supply) -> ret {
+        let v0 := sload(store)
+        sstore(store, add(v0, amount))
+        let v1 := sload(supply)
+        sstore(supply, add(v1, amount))
+        let v2 := sload(store)
+        ret := v2
+        leave
+      }
+      function credit_bob(amount, store, supply) -> ret {
+        let v0 := sload(add(store, 1))
+        sstore(add(store, 1), add(v0, amount))
+        let v1 := sload(supply)
+        sstore(supply, add(v1, amount))
+        let v2 := sload(add(store, 1))
+        ret := v2
+        leave
+      }
+      function runtime() {
+        let v0 := 0
+        let v1 := 2
+        let v2 := v0
+        let v3 := v1
+        let v4 := calldataload(0)
+        let v5 := shr(224, v4)
+        switch v5
+          case 2877082652 {
+            let v6 := calldataload(4)
+            let v7 := calldataload(36)
+            let v8 := 0
+            switch v6
+              case 0 {
+                let v9 := credit_alice(v7, v2, v3)
+                v8 := v9
+              }
+              default {
+                let v10 := credit_bob(v7, v2, v3)
+                v8 := v10
+              }
+            let v11 := v8
+            abi_encode(v11)
+            return(0, 0)
+          }
+          case 1818602213 {
+            let v12 := calldataload(4)
+            let v13 := balance_of_raw(v12, v2)
+            abi_encode(v13)
+            return(0, 0)
+          }
+          case 217554442 {
+            let v14 := calldataload(4)
+            let v15 := calldataload(36)
+            let v16 := 0
+            switch v14
+              case 0 {
+                let v17 := transfer_from_alice(v15, v2)
+                v16 := v17
+              }
+              default {
+                let v18 := transfer_from_bob(v15, v2)
+                v16 := v18
+              }
+            let v19 := v16
+            let v20 := transfer_result_code(v19)
+            abi_encode(v20)
+            return(0, 0)
+          }
+          case 960555502 {
+            let v21 := total_supply(v3)
+            abi_encode(v21)
+            return(0, 0)
+          }
+          default {
+            return(0, 0)
+          }
+      }
+      function total_supply(supply) -> ret {
+        let v0 := sload(supply)
+        ret := v0
+        leave
+      }
+      function transfer_from_alice(amount, store) -> ret {
+        let v0 := sload(store)
+        let v1 := lt(v0, amount)
+        if v1 {
+          let v2 := mload(0x40)
+          if iszero(v2) {
+            v2 := 0x80
+          }
+          mstore(0x40, add(v2, 32))
+          mstore(v2, 1)
+          ret := v2
+          leave
+        }
+        if iszero(v1) {
+          let v3 := sload(store)
+          sstore(store, sub(v3, amount))
+          let v4 := sload(add(store, 1))
+          sstore(add(store, 1), add(v4, amount))
+          let v5 := mload(0x40)
+          if iszero(v5) {
+            v5 := 0x80
+          }
+          mstore(0x40, add(v5, 32))
+          mstore(v5, 0)
+          ret := v5
+          leave
+        }
+      }
+      function transfer_from_bob(amount, store) -> ret {
+        let v0 := sload(add(store, 1))
+        let v1 := lt(v0, amount)
+        if v1 {
+          let v2 := mload(0x40)
+          if iszero(v2) {
+            v2 := 0x80
+          }
+          mstore(0x40, add(v2, 32))
+          mstore(v2, 1)
+          ret := v2
+          leave
+        }
+        if iszero(v1) {
+          let v3 := sload(add(store, 1))
+          sstore(add(store, 1), sub(v3, amount))
+          let v4 := sload(store)
+          sstore(store, add(v4, amount))
+          let v5 := mload(0x40)
+          if iszero(v5) {
+            v5 := 0x80
+          }
+          mstore(0x40, add(v5, 32))
+          mstore(v5, 0)
+          ret := v5
+          leave
+        }
+      }
+      function transfer_result_code(res) -> ret {
+        let v0 := 0
+        let v1 := mload(res)
+        switch v1
+          case 0 {
+            v0 := 0
+          }
+          case 1 {
+            v0 := 1
+          }
+          default {
+          }
+        ret := v0
+        leave
+      }
+      runtime()
+      return(0, 0)
+    }
+  }
+}

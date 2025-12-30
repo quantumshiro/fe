@@ -1,0 +1,346 @@
+---
+source: crates/language-server/src/functionality/references.rs
+expression: snapshot
+input_file: test_files/hoverable/src/stuff.fe
+---
+note: 
+  ┌─ lib.fe:1:5
+  │
+1 │ use stuff::calculations::{ return_three, return_four }
+  │     ^^^^^ ref: 1:4
+
+note: 
+  ┌─ lib.fe:1:12
+  │
+1 │ use stuff::calculations::{ return_three, return_four }
+  │            ^^^^^^^^^^^^ ref: 1:11
+
+note: 
+  ┌─ lib.fe:1:28
+  │
+1 │ use stuff::calculations::{ return_three, return_four }
+  │                            ^^^^^^^^^^^^ ref: 1:27
+
+note: 
+  ┌─ lib.fe:1:42
+  │
+1 │ use stuff::calculations::{ return_three, return_four }
+  │                                          ^^^^^^^^^^^ ref: 1:41
+
+note: 
+  ┌─ lib.fe:2:5
+  │
+2 │ use stuff::calculations::ambiguous
+  │     ^^^^^ ref: 2:4
+
+note: 
+  ┌─ lib.fe:2:12
+  │
+2 │ use stuff::calculations::ambiguous
+  │            ^^^^^^^^^^^^ ref: 2:11
+
+note: 
+  ┌─ lib.fe:2:26
+  │
+2 │ use stuff::calculations::ambiguous
+  │                          ^^^^^^^^^ ref: 2:25
+
+note: 
+  ┌─ lib.fe:7:8
+  │
+7 │ pub fn return_seven() {
+  │        ^^^^^^^^^^^^ def: defined here @ 7:7 (2 refs)
+
+note: 
+  ┌─ lib.fe:8:3
+  │
+8 │   return_three() + return_four()
+  │   ^^^^^^^^^^^^ ref: 8:2
+
+note: 
+  ┌─ lib.fe:8:20
+  │
+8 │   return_three() + return_four()
+  │                    ^^^^^^^^^^^ ref: 8:19
+
+note: 
+   ┌─ lib.fe:11:4
+   │
+11 │ fn calculate() {
+   │    ^^^^^^^^^ def: defined here @ 11:3 (1 refs)
+
+note: 
+   ┌─ lib.fe:12:3
+   │
+12 │   return_seven()
+   │   ^^^^^^^^^^^^ ref: 12:2
+
+note: 
+   ┌─ lib.fe:13:7
+   │
+13 │   let x: stuff::calculations::ambiguous
+   │       ^ def: defined here @ 13:6 (1 refs)
+
+note: 
+   ┌─ lib.fe:13:10
+   │
+13 │   let x: stuff::calculations::ambiguous
+   │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ref: 13:9
+
+note: 
+   ┌─ lib.fe:18:11
+   │
+18 │ pub trait Calculatable {
+   │           ^^^^^^^^^^^^ def: defined here @ 18:10 (4 refs)
+
+note: 
+   ┌─ lib.fe:19:6
+   │
+19 │   fn calculate(self) -> i32
+   │      ^^^^^^^^^ def: defined here @ 19:5 (1 refs)
+
+note: 
+   ┌─ lib.fe:19:16
+   │
+19 │   fn calculate(self) -> i32
+   │                ^^^^ ref: 19:15
+
+note: 
+   ┌─ lib.fe:23:8
+   │
+23 │ struct Numbers {
+   │        ^^^^^^^ def: defined here @ 23:7 (4 refs)
+
+note: 
+   ┌─ lib.fe:28:4
+   │
+28 │ fn add(x: i32, y: i32) -> i32 {
+   │    ^^^ def: defined here @ 28:3 (2 refs)
+
+note: 
+   ┌─ lib.fe:28:8
+   │
+28 │ fn add(x: i32, y: i32) -> i32 {
+   │        ^ def: defined here @ 28:7 (2 refs)
+
+note: 
+   ┌─ lib.fe:28:16
+   │
+28 │ fn add(x: i32, y: i32) -> i32 {
+   │                ^ def: defined here @ 28:15 (2 refs)
+
+note: 
+   ┌─ lib.fe:29:5
+   │
+29 │     x + y
+   │     ^ ref: 29:4
+
+note: 
+   ┌─ lib.fe:29:9
+   │
+29 │     x + y
+   │         ^ ref: 29:8
+
+note: 
+   ┌─ lib.fe:32:6
+   │
+32 │ impl Calculatable for Numbers {
+   │      ^^^^^^^^^^^^ ref: 32:5
+
+note: 
+   ┌─ lib.fe:32:23
+   │
+32 │ impl Calculatable for Numbers {
+   │                       ^^^^^^^ ref: 32:22
+
+note: 
+   ┌─ lib.fe:33:6
+   │
+33 │   fn calculate(self) -> i32 {
+   │      ^^^^^^^^^ def: defined here @ 33:5 (1 refs)
+
+note: 
+   ┌─ lib.fe:33:16
+   │
+33 │   fn calculate(self) -> i32 {
+   │                ^^^^ def: defined here @ 33:15 (3 refs)
+
+note: 
+   ┌─ lib.fe:34:11
+   │
+34 │       let z = self.x
+   │           ^ def: defined here @ 34:10 (2 refs)
+
+note: 
+   ┌─ lib.fe:34:15
+   │
+34 │       let z = self.x
+   │               ^^^^ ref: 34:14
+
+note: 
+   ┌─ lib.fe:35:11
+   │
+35 │       let w = self.y
+   │           ^ def: defined here @ 35:10 (2 refs)
+
+note: 
+   ┌─ lib.fe:35:15
+   │
+35 │       let w = self.y
+   │               ^^^^ ref: 35:14
+
+note: 
+   ┌─ lib.fe:36:7
+   │
+36 │       add(z, w)
+   │       ^^^ ref: 36:6
+
+note: 
+   ┌─ lib.fe:36:11
+   │
+36 │       add(z, w)
+   │           ^ ref: 36:10
+
+note: 
+   ┌─ lib.fe:36:14
+   │
+36 │       add(z, w)
+   │              ^ ref: 36:13
+
+note: 
+   ┌─ lib.fe:40:6
+   │
+40 │ enum Option {
+   │      ^^^^^^ def: defined here @ 40:5 (2 refs)
+
+note: 
+   ┌─ lib.fe:46:4
+   │
+46 │ fn test_locals(x: i32) -> i32 {
+   │    ^^^^^^^^^^^ def: defined here @ 46:3 (1 refs)
+
+note: 
+   ┌─ lib.fe:46:16
+   │
+46 │ fn test_locals(x: i32) -> i32 {
+   │                ^ def: defined here @ 46:15 (2 refs)
+
+note: 
+   ┌─ lib.fe:47:7
+   │
+47 │   let a = x
+   │       ^ def: defined here @ 47:6 (2 refs)
+
+note: 
+   ┌─ lib.fe:47:11
+   │
+47 │   let a = x
+   │           ^ ref: 47:10
+
+note: 
+   ┌─ lib.fe:48:7
+   │
+48 │   let x = a + 1
+   │       ^ def: defined here @ 48:6 (2 refs)
+
+note: 
+   ┌─ lib.fe:48:11
+   │
+48 │   let x = a + 1
+   │           ^ ref: 48:10
+
+note: 
+   ┌─ lib.fe:50:9
+   │
+50 │     let x = x + 1
+   │         ^ def: defined here @ 50:8 (2 refs)
+
+note: 
+   ┌─ lib.fe:50:13
+   │
+50 │     let x = x + 1
+   │             ^ ref: 50:12
+
+note: 
+   ┌─ lib.fe:51:5
+   │
+51 │     x
+   │     ^ ref: 51:4
+
+note: 
+   ┌─ lib.fe:56:4
+   │
+56 │ fn test_match(opt: Option) -> i32 {
+   │    ^^^^^^^^^^ def: defined here @ 56:3 (1 refs)
+
+note: 
+   ┌─ lib.fe:56:15
+   │
+56 │ fn test_match(opt: Option) -> i32 {
+   │               ^^^ def: defined here @ 56:14 (2 refs)
+
+note: 
+   ┌─ lib.fe:56:20
+   │
+56 │ fn test_match(opt: Option) -> i32 {
+   │                    ^^^^^^ ref: 56:19
+
+note: 
+   ┌─ lib.fe:57:9
+   │
+57 │   match opt {
+   │         ^^^ ref: 57:8
+
+note: 
+   ┌─ lib.fe:58:5
+   │
+58 │     Option::Some(val) => val
+   │     ^^^^^^^^^^^^ ref: 58:4
+
+note: 
+   ┌─ lib.fe:58:18
+   │
+58 │     Option::Some(val) => val
+   │                  ^^^ def: defined here @ 58:17 (2 refs)
+
+note: 
+   ┌─ lib.fe:58:26
+   │
+58 │     Option::Some(val) => val
+   │                          ^^^ ref: 58:25
+
+note: 
+   ┌─ lib.fe:59:5
+   │
+59 │     Option::None => 0
+   │     ^^^^^^^^^^^^ ref: 59:4
+
+note: 
+  ┌─ stuff.fe:2:9
+  │
+2 │ pub mod calculations {
+  │         ^^^^^^^^^^^^ def: defined here @ 2:8 (4 refs)
+
+note: 
+  ┌─ stuff.fe:4:10
+  │
+4 │   pub fn return_three() -> u32 {
+  │          ^^^^^^^^^^^^ def: defined here @ 4:9 (3 refs)
+
+note: 
+  ┌─ stuff.fe:9:10
+  │
+9 │   pub fn return_four() {
+  │          ^^^^^^^^^^^ def: defined here @ 9:9 (3 refs)
+
+note: 
+   ┌─ stuff.fe:14:11
+   │
+14 │   pub mod ambiguous {
+   │           ^^^^^^^^^ def: defined here @ 14:10 (3 refs)
+
+note: 
+   ┌─ stuff.fe:18:10
+   │
+18 │   pub fn ambiguous() {}
+   │          ^^^^^^^^^ def: defined here @ 18:9 (1 refs)

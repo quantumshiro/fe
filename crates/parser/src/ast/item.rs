@@ -34,6 +34,7 @@ impl Item {
             .or_else(|| support::child(self.syntax()).map(ItemKind::Func))
             .or_else(|| support::child(self.syntax()).map(ItemKind::Struct))
             .or_else(|| support::child(self.syntax()).map(ItemKind::Contract))
+            .or_else(|| support::child(self.syntax()).map(ItemKind::Msg))
             .or_else(|| support::child(self.syntax()).map(ItemKind::Enum))
             .or_else(|| support::child(self.syntax()).map(ItemKind::TypeAlias))
             .or_else(|| support::child(self.syntax()).map(ItemKind::Impl))
@@ -68,11 +69,14 @@ ast_node! {
     pub struct Func,
     SK::Func,
 }
-impl super::GenericParamsOwner for Func {}
-impl super::WhereClauseOwner for Func {}
-impl super::AttrListOwner for Func {}
-impl super::ItemModifierOwner for Func {}
-impl Func {
+ast_node! {
+    /// `foo<T>(a: T) -> T where T: Clone`
+    pub struct FuncSignature,
+    SK::FuncSignature,
+}
+impl super::GenericParamsOwner for FuncSignature {}
+impl super::WhereClauseOwner for FuncSignature {}
+impl FuncSignature {
     /// Returns the name of the function.
     pub fn name(&self) -> Option<SyntaxToken> {
         support::token(self.syntax(), SK::Ident)
@@ -86,6 +90,32 @@ impl Func {
     /// Returns the function's return type.
     pub fn ret_ty(&self) -> Option<super::Type> {
         support::child(self.syntax())
+    }
+
+    /// Returns the optional `uses` clause of the function.
+    pub fn uses_clause(&self) -> Option<super::UsesClause> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the where clause of the function.
+    pub fn where_clause(&self) -> Option<super::WhereClause> {
+        support::child(self.syntax())
+    }
+}
+impl super::AttrListOwner for Func {}
+impl super::ItemModifierOwner for Func {}
+impl Func {
+    /// Returns the function's signature if present in the syntax tree.
+    /// This is primarily for consumers (like lazy spans) that need to handle
+    /// malformed code without panicking.
+    pub fn signature_opt(&self) -> Option<FuncSignature> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the function's signature.
+    pub fn sig(&self) -> FuncSignature {
+        self.signature_opt()
+            .expect("a function must always contain a signature node")
     }
 
     /// Returns the function's body.
@@ -127,8 +157,100 @@ impl Contract {
         support::token(self.syntax(), SK::Ident)
     }
 
-    /// Returns the contract's field def list.
-    pub fn fields(&self) -> Option<RecordFieldDefList> {
+    /// Returns the contract's leading fields section.
+    pub fn fields(&self) -> Option<ContractFields> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the optional `uses` clause of the contract.
+    pub fn uses_clause(&self) -> Option<super::UsesClause> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the optional `init` block of the contract.
+    pub fn init_block(&self) -> Option<ContractInit> {
+        support::child(self.syntax())
+    }
+
+    /// Returns all `recv` blocks declared in the contract.
+    pub fn recvs(&self) -> rowan::ast::AstChildren<ContractRecv> {
+        support::children(self.syntax())
+    }
+}
+
+ast_node! {
+    /// A section containing the leading contract fields.
+    pub struct ContractFields,
+    SK::ContractFields,
+    IntoIterator<Item=RecordFieldDef>
+}
+
+ast_node! {
+    /// The contract initialization block: `init(...) uses (...) { ... }`.
+    pub struct ContractInit,
+    SK::ContractInit,
+}
+impl ContractInit {
+    pub fn params(&self) -> Option<super::FuncParamList> {
+        support::child(self.syntax())
+    }
+
+    pub fn uses_clause(&self) -> Option<super::UsesClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn body(&self) -> Option<super::BlockExpr> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
+    /// A `recv` block inside a contract. Supports both typed and untyped forms.
+    pub struct ContractRecv,
+    SK::ContractRecv,
+}
+impl ContractRecv {
+    /// Optional root message type path (`recv Type { ... }`).
+    pub fn path(&self) -> Option<super::Path> {
+        support::child(self.syntax())
+    }
+
+    /// The list of arms in this recv block.
+    pub fn arms(&self) -> Option<RecvArmList> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
+    /// List of recv arms inside a recv block.
+    pub struct RecvArmList,
+    SK::RecvArmList,
+    IntoIterator<Item=RecvArm>
+}
+
+ast_node! {
+    /// A single recv arm: `Pattern -> RetTy uses (...) { body }`
+    pub struct RecvArm,
+    SK::RecvArm,
+}
+impl RecvArm {
+    /// The pattern being matched (e.g., `Transfer { to, amount }`).
+    pub fn pat(&self) -> Option<super::Pat> {
+        support::child(self.syntax())
+    }
+
+    /// Optional return type.
+    pub fn ret_ty(&self) -> Option<super::Type> {
+        support::child(self.syntax())
+    }
+
+    /// Optional uses clause.
+    pub fn uses_clause(&self) -> Option<super::UsesClause> {
+        support::child(self.syntax())
+    }
+
+    /// The body block.
+    pub fn body(&self) -> Option<super::BlockExpr> {
         support::child(self.syntax())
     }
 }
@@ -236,8 +358,32 @@ impl TraitTypeItem {
 }
 
 ast_node! {
+    /// `const FOO: Ty` in trait definition
+    /// or `const FOO: Ty = expr` in trait implementation
+    pub struct TraitConstItem,
+    SK::TraitConstItem,
+}
+impl super::AttrListOwner for TraitConstItem {}
+impl TraitConstItem {
+    /// Returns the name of the associated const
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::Ident)
+    }
+
+    /// Returns the type of the associated const
+    pub fn ty(&self) -> Option<super::Type> {
+        support::child(self.syntax())
+    }
+
+    /// Returns the optional default value of the associated const
+    pub fn value(&self) -> Option<super::Expr> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
     pub struct TraitItem,
-    SK::Func | SK::TraitTypeItem
+    SK::Func | SK::TraitTypeItem | SK::TraitConstItem
 }
 impl TraitItem {
     pub fn kind(&self) -> TraitItemKind {
@@ -245,6 +391,9 @@ impl TraitItem {
             SK::Func => TraitItemKind::Func(AstNode::cast(self.syntax().clone()).unwrap()),
             SK::TraitTypeItem => {
                 TraitItemKind::Type(TraitTypeItem::cast(self.syntax().clone()).unwrap())
+            }
+            SK::TraitConstItem => {
+                TraitItemKind::Const(TraitConstItem::cast(self.syntax().clone()).unwrap())
             }
             _ => unreachable!(),
         }
@@ -254,6 +403,7 @@ impl TraitItem {
 pub enum TraitItemKind {
     Func(Func),
     Type(TraitTypeItem),
+    Const(TraitConstItem),
 }
 
 ast_node! {
@@ -376,11 +526,17 @@ ast_node! {
     pub struct RecordFieldDef,
     SK::RecordFieldDef,
 }
+
 impl super::AttrListOwner for RecordFieldDef {}
 impl RecordFieldDef {
     /// Returns the pub keyword if exists.
     pub fn pub_kw(&self) -> Option<SyntaxToken> {
         support::token(self.syntax(), SK::PubKw)
+    }
+
+    /// Returns the mut keyword if exists.
+    pub fn mut_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::MutKw)
     }
 
     /// Returns the name of the field.
@@ -478,12 +634,69 @@ pub trait ItemModifierOwner: AstNode<Language = FeLang> {
     }
 }
 
+ast_node! {
+    /// `msg Erc20Msg { ... }`
+    pub struct Msg,
+    SK::Msg,
+}
+
+impl super::AttrListOwner for Msg {}
+impl super::ItemModifierOwner for Msg {}
+impl Msg {
+    /// Returns the name of the message interface.
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::Ident)
+    }
+
+    /// Returns the message variants.
+    pub fn variants(&self) -> Option<MsgVariantList> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
+    /// A list of message variants.
+    pub struct MsgVariantList,
+    SK::MsgVariantList,
+    IntoIterator<Item=MsgVariant>
+}
+
+ast_node! {
+    /// A single message variant.
+    /// `Transfer { to: Address, amount: u256 } -> bool`
+    pub struct MsgVariant,
+    SK::MsgVariant,
+}
+impl super::AttrListOwner for MsgVariant {}
+impl MsgVariant {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::Ident)
+    }
+
+    pub fn params(&self) -> Option<MsgVariantParams> {
+        support::child(self.syntax())
+    }
+
+    pub fn ret_ty(&self) -> Option<super::Type> {
+        support::child(self.syntax())
+    }
+}
+
+ast_node! {
+    /// Message variant parameters.
+    /// `{ to: Address, amount: u256 }`
+    pub struct MsgVariantParams,
+    SK::MsgVariantParams,
+    IntoIterator<Item=RecordFieldDef>
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::TryInto)]
 pub enum ItemKind {
     Mod(Mod),
     Func(Func),
     Struct(Struct),
     Contract(Contract),
+    Msg(Msg),
     Enum(Enum),
     TypeAlias(TypeAlias),
     Impl(Impl),
@@ -521,6 +734,9 @@ mod tests {
         }
         let item_list = ItemList::cast(node).unwrap();
         let mut items = item_list.into_iter().collect::<Vec<_>>();
+        if items.len() > 1 {
+            error!("expected one item, got: {:?}", &items);
+        }
         assert_eq!(items.len(), 1);
         items.pop().unwrap().kind().unwrap().try_into().unwrap()
     }
@@ -542,7 +758,7 @@ mod tests {
                 0 => {
                     assert!(matches!(item.kind().unwrap(), ItemKind::Func(_)));
                     let func: Func = item.kind().unwrap().try_into().unwrap();
-                    assert_eq!(func.name().unwrap().text(), "bar");
+                    assert_eq!(func.sig().name().unwrap().text(), "bar");
                 }
                 1 => {
                     assert!(matches!(item.kind().unwrap(), ItemKind::Struct(_)));
@@ -562,17 +778,20 @@ mod tests {
     fn func() {
         let source = r#"
                 /// This is doc comment
-                #evm
+                #[evm]
                 pub unsafe fn foo<T, U: Trait>(_ x: T, from u: U) -> (T, U) where T: Trait2 { return }
             "#;
         let func: Func = parse_item(source);
 
-        assert_eq!(func.name().unwrap().text(), "foo");
+        assert_eq!(func.sig().name().unwrap().text(), "foo");
         assert_eq!(func.attr_list().unwrap().iter().count(), 2);
-        assert_eq!(func.generic_params().unwrap().iter().count(), 2);
-        assert!(func.where_clause().is_some());
+        assert_eq!(func.sig().generic_params().unwrap().iter().count(), 2);
+        assert!(func.sig().where_clause().is_some());
         assert!(func.body().is_some());
-        assert!(matches!(func.ret_ty().unwrap().kind(), TypeKind::Tuple(_)));
+        assert!(matches!(
+            func.sig().ret_ty().unwrap().kind(),
+            TypeKind::Tuple(_)
+        ));
         let modifier = func.modifier().unwrap();
         assert!(modifier.pub_kw().is_some());
         assert!(modifier.unsafe_kw().is_some());
@@ -881,5 +1100,44 @@ mod tests {
             assert!(f.body().is_none());
         }
         assert_eq!(e.extern_block().unwrap().iter().count(), 2);
+    }
+    #[test]
+    #[wasm_bindgen_test]
+    fn msg_() {
+        let source = r#"
+            msg Erc20Msg {
+                Transfer { to: Address, amount: u256 } -> bool,
+                Balance { addr: Address } -> u256,
+                TotalSupply -> u256,
+            }
+        "#;
+        let m: Msg = parse_item(source);
+        assert_eq!(m.name().unwrap().text(), "Erc20Msg");
+
+        let mut count = 0;
+        for variant in m.variants().unwrap() {
+            match count {
+                0 => {
+                    assert_eq!(variant.name().unwrap().text(), "Transfer");
+                    assert!(variant.params().is_some());
+                    assert!(variant.ret_ty().is_some());
+                    assert_eq!(variant.params().unwrap().into_iter().count(), 2);
+                }
+                1 => {
+                    assert_eq!(variant.name().unwrap().text(), "Balance");
+                    assert!(variant.params().is_some());
+                    assert!(variant.ret_ty().is_some());
+                    assert_eq!(variant.params().unwrap().into_iter().count(), 1);
+                }
+                2 => {
+                    assert_eq!(variant.name().unwrap().text(), "TotalSupply");
+                    assert!(variant.params().is_none());
+                    assert!(variant.ret_ty().is_some());
+                }
+                _ => panic!("unexpected variant"),
+            }
+            count += 1;
+        }
+        assert_eq!(count, 3);
     }
 }

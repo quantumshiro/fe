@@ -1,0 +1,24 @@
+---
+source: crates/codegen/tests/yul.rs
+expression: output
+input_file: tests/fixtures/contract_dispatch.fe
+---
+object "MinimalDispatcher" {
+  code {
+  }
+
+  object "MinimalDispatcher_deployed" {
+    code {
+      function dispatch() {
+        let v0 := emit_code()
+        leave
+      }
+      function emit_code() -> ret {
+        ret := 1
+        leave
+      }
+      dispatch()
+      return(0, 0)
+    }
+  }
+}

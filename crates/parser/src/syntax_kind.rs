@@ -144,12 +144,18 @@ pub enum SyntaxKind {
     /// `break`
     #[token("break")]
     BreakKw,
+    /// `uses`
+    #[token("uses")]
+    UsesKw,
     /// `continue`
     #[token("continue")]
     ContinueKw,
     /// `contract`
     #[token("contract")]
     ContractKw,
+    /// `msg`
+    #[token("msg")]
+    MsgKw,
     /// `fn`
     #[token("fn")]
     FnKw,
@@ -281,12 +287,18 @@ pub enum SyntaxKind {
     ArrayExpr,
     /// `[x; 4]`
     ArrayRepExpr,
+    /// `(Effect = value, ..)` list for `with`
+    WithParamList,
+    /// `Effect = value` entry for `with`
+    WithParam,
     /// `1`
     LitExpr,
     /// `if x { 1 } else { 2 }`
     IfExpr,
     /// `match x { pat => { .. } }`
     MatchExpr,
+    /// `with (Effect = value, ..) { Block }`
+    WithExpr,
     /// `(1 + 2)`
     ParenExpr,
     /// x = 1
@@ -350,6 +362,16 @@ pub enum SyntaxKind {
     Struct,
     /// `contract Foo { .. }`
     Contract,
+    /// leading fields inside a contract body
+    ContractFields,
+    /// `init(...) { ... }` block inside a contract
+    ContractInit,
+    /// `recv ... { ... }` block inside a contract
+    ContractRecv,
+    /// list of arms inside a recv block
+    RecvArmList,
+    /// `Pattern -> RetTy uses (...) { body }`
+    RecvArm,
     /// `enum Foo { .. }`
     Enum,
     /// `type Foo = i32`
@@ -364,6 +386,8 @@ pub enum SyntaxKind {
     SuperTraitList,
     /// `type Foo` or `type Foo: SomeTrait = Bar`
     TraitTypeItem,
+    /// `const FOO: Ty` or `const FOO: Ty = expr`
+    TraitConstItem,
     /// `{ fn foo() {..} }`
     TraitItemList,
     /// `impl Trait for Foo { .. }`
@@ -372,6 +396,8 @@ pub enum SyntaxKind {
     Const,
     /// `use foo::{Foo as Foo1, bar::Baz}`
     Use,
+    /// `msg Erc20Msg { ... }`
+    Msg,
     /// `foo::{Foo as Foo1, bar::Baz}`
     UseTree,
     /// `{Foo as Foo1, bar::Baz}`
@@ -413,12 +439,14 @@ pub enum SyntaxKind {
     /// `<Foo as SomeTrait>`
     QualifiedType,
 
-    /// `#attr`
+    /// `#[attr]`
     Attr,
     /// `(key1: value1, key2: value2)`
     AttrArgList,
     /// `key: value`
     AttrArg,
+    /// `value` in an attribute argument
+    AttrArgValue,
     /// `/// Comment`
     DocCommentAttr,
     AttrList,
@@ -450,6 +478,13 @@ pub enum SyntaxKind {
     /// `_ x: mut i32`
     FnParam,
 
+    /// `uses` clause attached to a function signature
+    UsesClause,
+    /// `uses` parameter list
+    UsesParamList,
+    /// a single `uses` parameter
+    UsesParam,
+
     /// `foo::Trait1 + Trait2`
     TypeBoundList,
     /// `TraitBound` or `TypeKind`.
@@ -464,6 +499,12 @@ pub enum SyntaxKind {
     WhereClause,
     /// `Option<T>: Trait1 + Trait2`
     WherePredicate,
+    /// `Transfer { to: Address, amount: u256 } -> bool`
+    MsgVariant,
+    /// `{ to: Address, amount: u256 }`
+    MsgVariantParams,
+    /// `TotalSupply, Balance { addr: Address }`
+    MsgVariantList,
 
     /// Root node of the input source.
     Root,
@@ -517,6 +558,7 @@ impl SyntaxKind {
                     | SyntaxKind::FnKw
                     | SyntaxKind::StructKw
                     | SyntaxKind::ContractKw
+                    | SyntaxKind::MsgKw
                     | SyntaxKind::EnumKw
                     | SyntaxKind::TypeKw
                     | SyntaxKind::ImplKw
@@ -571,8 +613,10 @@ impl SyntaxKind {
             SyntaxKind::TrueKw => "`true`",
             SyntaxKind::FalseKw => "`false`",
             SyntaxKind::BreakKw => "`break`",
+            SyntaxKind::UsesKw => "`uses`",
             SyntaxKind::ContinueKw => "`continue`",
             SyntaxKind::ContractKw => "`contract`",
+            SyntaxKind::MsgKw => "`msg`",
             SyntaxKind::FnKw => "`fn`",
             SyntaxKind::ModKw => "`mod`",
             SyntaxKind::ConstKw => "`const`",
@@ -639,9 +683,12 @@ impl SyntaxKind {
             SyntaxKind::FieldExpr => "field",
             SyntaxKind::TupleExpr => "tuple expression",
             SyntaxKind::ArrayRepExpr => "array expression",
+            SyntaxKind::WithParamList => "`with` parameter list",
+            SyntaxKind::WithParam => "`with` parameter",
             SyntaxKind::LitExpr => "literal expression",
             SyntaxKind::IfExpr => "`if` expression",
             SyntaxKind::MatchExpr => "`match` expression",
+            SyntaxKind::WithExpr => "`with` expression",
             SyntaxKind::ParenExpr => "parenthesized expression",
             SyntaxKind::AssignExpr => "assignment expression",
             SyntaxKind::AugAssignExpr => "augmented assignment expression",
@@ -669,6 +716,13 @@ impl SyntaxKind {
             SyntaxKind::Func => "function definition",
             SyntaxKind::Struct => "struct definition",
             SyntaxKind::Contract => "contract definition",
+            SyntaxKind::ContractFields => "contract fields",
+            SyntaxKind::ContractInit => "contract init block",
+            SyntaxKind::ContractRecv => "contract recv block",
+            SyntaxKind::Msg => "message definition",
+            SyntaxKind::MsgVariant => "message variant",
+            SyntaxKind::MsgVariantParams => "message variant parameters",
+            SyntaxKind::MsgVariantList => "message variants",
             SyntaxKind::Enum => "enum definition",
             SyntaxKind::TypeAlias => "type alias",
             SyntaxKind::Impl => "`impl` block",
@@ -677,6 +731,7 @@ impl SyntaxKind {
             SyntaxKind::SuperTraitList => "supertrait list",
             SyntaxKind::TraitItemList => "`trait` item list",
             SyntaxKind::TraitTypeItem => "`trait` type item",
+            SyntaxKind::TraitConstItem => "`trait` const item",
             SyntaxKind::ImplTrait => "`impl` trait block",
             SyntaxKind::Const => "const definition",
             SyntaxKind::Use => "`use` statement",
@@ -698,6 +753,7 @@ impl SyntaxKind {
             SyntaxKind::Attr => "attribute",
             SyntaxKind::AttrArgList => "attribute argument list",
             SyntaxKind::AttrArg => "attribute argument",
+            SyntaxKind::AttrArgValue => "attribute argument value",
             SyntaxKind::DocCommentAttr => "doc comment",
             SyntaxKind::AttrList => "attribute list",
             SyntaxKind::Visibility => "visibility modifier",
@@ -715,6 +771,11 @@ impl SyntaxKind {
             SyntaxKind::KindBoundMono => "kind bound",
             SyntaxKind::WhereClause => "`where` clause",
             SyntaxKind::WherePredicate => "`where` predicate",
+            SyntaxKind::UsesClause => "`uses` clause",
+            SyntaxKind::UsesParamList => "`uses` parameter list",
+            SyntaxKind::UsesParam => "`uses` parameter",
+            SyntaxKind::RecvArmList => "recv arm list",
+            SyntaxKind::RecvArm => "recv arm",
             SyntaxKind::Root => "module",
             SyntaxKind::Error => todo!(),
         }
@@ -765,6 +826,7 @@ impl SyntaxKind {
                 | SyntaxKind::TrueKw
                 | SyntaxKind::FalseKw
                 | SyntaxKind::BreakKw
+                | SyntaxKind::UsesKw
                 | SyntaxKind::ContinueKw
                 | SyntaxKind::ContractKw
                 | SyntaxKind::FnKw
