@@ -1,0 +1,1 @@
+Remove redundant `EvmResultExt` trait and `unwrap_or_revert()` method. Since `Result::unwrap()` already ABI-encodes errors on revert via `panic_with_value`, `unwrap_or_revert()` was a leftover that duplicated this behavior.

@@ -6,8 +6,6 @@ input_file: tests/fixtures/fe_test_runner/revert_and_unwrap_or_revert.fe
 === STDOUT ===
 PASS  [<time>] test_revert_with_error
 PASS  [<time>] test_revert_with_u256
-PASS  [<time>] test_unwrap_or_revert_ok
-PASS  [<time>] test_unwrap_or_revert_err
 PASS  [<time>] test_unwrap_ok
 PASS  [<time>] test_unwrap_err
 PASS  [<time>] test_unwrap_primitive_ok
@@ -15,6 +13,6 @@ PASS  [<time>] test_unwrap_primitive_err
 PASS  [<time>] test_unwrap_struct_ok
 PASS  [<time>] test_unwrap_struct_err
 
-test result: ok. 10 passed; 0 failed
+test result: ok. 8 passed; 0 failed
 
 === EXIT CODE: 0 ===

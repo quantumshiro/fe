@@ -53,21 +53,6 @@ fn test_revert_with_u256() uses (evm: mut Evm) {
     revert(code)
 }
 
-// --- unwrap_or_revert tests ---
-
-#[test]
-fn test_unwrap_or_revert_ok() uses (evm: mut Evm) {
-    let result = fallible_operation(ok: true)
-    let val = result.unwrap_or_revert()
-    assert(val == 42)
-}
-
-#[test(should_revert)]
-fn test_unwrap_or_revert_err() uses (evm: mut Evm) {
-    let result = fallible_operation(ok: false)
-    result.unwrap_or_revert()
-}
-
 // --- unwrap tests (ABI-encoded error via panic_with_value) ---
 
 #[test]

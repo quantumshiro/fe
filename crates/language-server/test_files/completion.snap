@@ -24,7 +24,6 @@ completions:
   - Encode (Interface)
   - Err (EnumMember)
   - Evm (Struct)
-  - EvmResultExt (Interface)
   - Helpable (Interface) [use utils::Helpable [Helpable]] {+0:use utils::Helpable}
   - Helper (Struct) [use utils::Helper [Helper]] {+0:use utils::Helper}
   - Helper (Struct) [use shadow_test::Helper [Helper]] {+0:use shadow_test::Helper}
