@@ -4,12 +4,33 @@ pub struct InsufficientBalance {
     pub required: u256,
 }
 
+// --- should_revert (any) ---
+
 #[test(should_revert)]
-fn test_revert_error_with_custom_error() uses (evm: mut Evm) {
+fn test_revert_error_any() uses (evm: mut Evm) {
     revert_error(InsufficientBalance { balance: 100, required: 200 })
 }
 
-#[test(should_revert)]
-fn test_revert_error_with_panic() uses (evm: mut Evm) {
+// --- should_revert with selector ---
+
+#[test(should_revert, selector = 0x4e487b71)]
+fn test_revert_panic_selector() uses (evm: mut Evm) {
     revert_error(Panic { code: 0x11 })
+}
+
+// --- should_revert with panic code ---
+
+#[test(should_revert, panic = 0x11)]
+fn test_revert_panic_overflow() uses (evm: mut Evm) {
+    revert_error(Panic { code: 0x11 })
+}
+
+#[test(should_revert, panic = 0x12)]
+fn test_revert_panic_division_by_zero() uses (evm: mut Evm) {
+    revert_error(Panic { code: 0x12 })
+}
+
+#[test(should_revert, panic = 0x01)]
+fn test_revert_panic_assert() uses (evm: mut Evm) {
+    revert_error(Panic { code: 0x01 })
 }

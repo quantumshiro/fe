@@ -3124,23 +3124,66 @@ fn execute_test(
                 gas_profile,
             )
         }
-        // Expected revert: execution reverted (success)
-        (Err(contract_harness::HarnessError::Revert(_)), Some(ExpectedRevert::Any)) => (
-            TestResult {
-                name: name.to_string(),
-                passed: true,
-                error_message: None,
-                gas_used: None,
-                deploy_gas_used: Some(deploy_gas_used),
-                total_gas_used: None,
-            },
-            Vec::new(),
-            trace,
-            step_count,
-            gas_profile,
-        ),
+        // Expected revert: execution reverted — check revert data against expectation
+        (Err(contract_harness::HarnessError::Revert(data)), Some(expected)) => {
+            let mismatch = match expected {
+                ExpectedRevert::Any => None,
+                ExpectedRevert::Selector(sel) => {
+                    if data.0.len() >= 4 && data.0[..4] == sel[..] {
+                        None
+                    } else {
+                        Some(format!(
+                            "Expected revert with selector 0x{}, but got revert data: {}",
+                            hex::encode(sel),
+                            data,
+                        ))
+                    }
+                }
+                ExpectedRevert::PanicCode(expected_bytes) => {
+                    if data.0 == *expected_bytes {
+                        None
+                    } else {
+                        Some(format!(
+                            "Expected revert data 0x{}, but got: {}",
+                            hex::encode(expected_bytes),
+                            data,
+                        ))
+                    }
+                }
+            };
+            match mismatch {
+                None => (
+                    TestResult {
+                        name: name.to_string(),
+                        passed: true,
+                        error_message: None,
+                        gas_used: None,
+                        deploy_gas_used: Some(deploy_gas_used),
+                        total_gas_used: None,
+                    },
+                    Vec::new(),
+                    trace,
+                    step_count,
+                    gas_profile,
+                ),
+                Some(msg) => (
+                    TestResult {
+                        name: name.to_string(),
+                        passed: false,
+                        error_message: Some(msg),
+                        gas_used: None,
+                        deploy_gas_used: Some(deploy_gas_used),
+                        total_gas_used: None,
+                    },
+                    Vec::new(),
+                    trace,
+                    step_count,
+                    gas_profile,
+                ),
+            }
+        }
         // Expected revert: execution failed for a different reason (failure)
-        (Err(err), Some(ExpectedRevert::Any)) => {
+        (Err(err), Some(_)) => {
             let gas_used = harness_error_gas_used(&err);
             let total_gas_used = gas_used.map(|call_gas| deploy_gas_used.saturating_add(call_gas));
             (

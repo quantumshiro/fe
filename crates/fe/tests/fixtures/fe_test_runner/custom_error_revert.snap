@@ -4,9 +4,12 @@ expression: output
 input_file: tests/fixtures/fe_test_runner/custom_error_revert.fe
 ---
 === STDOUT ===
-PASS  [<time>] test_revert_error_with_custom_error
-PASS  [<time>] test_revert_error_with_panic
+PASS  [<time>] test_revert_error_any
+PASS  [<time>] test_revert_panic_selector
+PASS  [<time>] test_revert_panic_overflow
+PASS  [<time>] test_revert_panic_division_by_zero
+PASS  [<time>] test_revert_panic_assert
 
-test result: ok. 2 passed; 0 failed
+test result: ok. 5 passed; 0 failed
 
 === EXIT CODE: 0 ===

@@ -302,6 +302,24 @@ impl<'db> NormalAttr<'db> {
         })
     }
 
+    /// Returns the integer value for an attribute argument with the given key.
+    ///
+    /// For example, `#[test(panic = 0x11)]` with key `"panic"` returns `Some(BigUint(0x11))`.
+    pub fn int_arg(&self, db: &'db dyn HirDb, key: &str) -> Option<num_bigint::BigUint> {
+        self.args.iter().find_map(|arg| {
+            let ident = arg.key.to_opt().and_then(|p| p.as_ident(db))?;
+            if ident.data(db) != key {
+                return None;
+            }
+            match &arg.value {
+                Some(AttrArgValue::Lit(super::LitKind::Int(int_id))) => {
+                    Some(int_id.data(db).clone())
+                }
+                _ => None,
+            }
+        })
+    }
+
     pub fn arithmetic_mode_arg(&self, db: &'db dyn HirDb) -> Option<ArithmeticMode> {
         let [arg] = self.args.as_slice() else {
             return None;

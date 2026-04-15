@@ -59,9 +59,11 @@ pub struct TestMetadata {
 pub enum ExpectedRevert {
     /// Test should revert with any data.
     Any,
-    // Future phases:
-    // ExactData(Vec<u8>),
-    // Selector([u8; 4]),
+    /// Test should revert with data starting with the given 4-byte selector.
+    Selector([u8; 4]),
+    /// Test should revert with a Panic(uint256) whose code matches.
+    /// Stores the expected full revert payload: selector (4 bytes) + ABI-encoded code (32 bytes).
+    PanicCode(Vec<u8>),
 }
 
 /// Output returned by `emit_test_module_yul`.
@@ -860,19 +862,15 @@ fn collect_test_infos(
             };
             let attrs = ItemKind::from(hir_func).attrs(db)?;
             let test_attr = attrs.get_attr(db, "test")?;
-
-            // Check for #[test(should_revert)]
-            let expected_revert = if test_attr.has_arg(db, "should_revert") {
-                Some(ExpectedRevert::Any)
-            } else {
-                None
-            };
-
             let hir_name = hir_func
                 .name(db)
                 .to_opt()
                 .map(|n| n.data(db).to_string())
                 .unwrap_or_else(|| "<anonymous>".to_string());
+            let expected_revert = match parse_expected_revert(db, &hir_name, test_attr) {
+                Ok(expected_revert) => expected_revert,
+                Err(err) => return Some(Err(EmitModuleError::Yul(YulError::Unsupported(err)))),
+            };
             // Check for #[test(balance = N)]
             let initial_balance = match parse_test_balance_arg(db, &hir_name, test_attr) {
                 Ok(balance) => balance,
@@ -931,6 +929,121 @@ fn parse_test_balance_arg<'db>(
 
     Ok(None)
 }
+/// Parses the expected revert behavior from a `#[test(...)]` attribute.
+///
+/// Supported forms:
+/// - `#[test(should_revert)]` — any revert
+/// - `#[test(should_revert, selector = 0x4e487b71)]` — revert with matching 4-byte selector
+/// - `#[test(should_revert, panic = 0x11)]` — revert with Panic(uint256) and matching code
+pub fn parse_expected_revert<'db>(
+    db: &'db dyn HirDb,
+    test_name: &str,
+    test_attr: &hir::hir_def::attr::NormalAttr<'db>,
+) -> Result<Option<ExpectedRevert>, String> {
+    let should_revert = test_attr.has_arg(db, "should_revert");
+    let has_panic = has_test_attr_key(db, test_attr, "panic");
+    let has_selector = has_test_attr_key(db, test_attr, "selector");
+
+    if !should_revert {
+        if has_panic && has_selector {
+            return Err(format!(
+                "invalid #[test] function `{test_name}`: `panic = ...` and `selector = ...` require `should_revert`"
+            ));
+        }
+        if has_panic {
+            return Err(format!(
+                "invalid #[test] function `{test_name}`: `panic = ...` requires `should_revert`"
+            ));
+        }
+        if has_selector {
+            return Err(format!(
+                "invalid #[test] function `{test_name}`: `selector = ...` requires `should_revert`"
+            ));
+        }
+        return Ok(None);
+    }
+
+    let panic = parse_test_attr_int_arg(db, test_name, test_attr, "panic", "u256", 32)?;
+    let selector = parse_test_attr_int_arg(db, test_name, test_attr, "selector", "u32", 4)?;
+
+    if panic.is_some() && selector.is_some() {
+        return Err(format!(
+            "invalid #[test] function `{test_name}`: #[test(should_revert)] cannot combine `panic = ...` and `selector = ...`"
+        ));
+    }
+
+    if let Some(code) = panic {
+        let panic_selector: [u8; 4] = [0x4e, 0x48, 0x7b, 0x71];
+        let mut payload = Vec::with_capacity(36);
+        payload.extend_from_slice(&panic_selector);
+        // ABI-encode the uint256 code: pad to 32 bytes big-endian
+        let code_bytes = code.to_bytes_be();
+        let mut padded = [0u8; 32];
+        let start = 32 - code_bytes.len();
+        padded[start..].copy_from_slice(&code_bytes);
+        payload.extend_from_slice(&padded);
+        return Ok(Some(ExpectedRevert::PanicCode(payload)));
+    }
+
+    if let Some(sel) = selector {
+        let bytes = sel.to_bytes_be();
+        let mut selector = [0u8; 4];
+        let start = 4 - bytes.len();
+        selector[start..].copy_from_slice(&bytes);
+        return Ok(Some(ExpectedRevert::Selector(selector)));
+    }
+
+    Ok(Some(ExpectedRevert::Any))
+}
+
+fn has_test_attr_key<'db>(
+    db: &'db dyn HirDb,
+    test_attr: &hir::hir_def::attr::NormalAttr<'db>,
+    key: &str,
+) -> bool {
+    test_attr
+        .args
+        .iter()
+        .any(|arg| arg.key_str(db) == Some(key))
+}
+
+fn parse_test_attr_int_arg<'db>(
+    db: &'db dyn HirDb,
+    test_name: &str,
+    test_attr: &hir::hir_def::attr::NormalAttr<'db>,
+    key: &str,
+    type_name: &str,
+    max_bytes: usize,
+) -> Result<Option<BigUint>, String> {
+    for arg in &test_attr.args {
+        if arg.key_str(db) != Some(key) {
+            continue;
+        }
+
+        let Some(value) = arg.value.as_ref() else {
+            return Err(format!(
+                "invalid #[test] function `{test_name}`: #[test(should_revert, {key} = ...)] expects an integer literal"
+            ));
+        };
+        let hir::hir_def::attr::AttrArgValue::Lit(hir::hir_def::LitKind::Int(int_id)) = value
+        else {
+            return Err(format!(
+                "invalid #[test] function `{test_name}`: #[test(should_revert, {key} = ...)] expects an integer literal"
+            ));
+        };
+
+        let value = int_id.data(db).clone();
+        if value.to_bytes_be().len() > max_bytes {
+            return Err(format!(
+                "invalid #[test] function `{test_name}`: #[test(should_revert, {key} = ...)] must fit in {type_name}"
+            ));
+        }
+        return Ok(Some(value));
+    }
+
+    Ok(None)
+}
+
 fn test_info_matches_filter(test: &TestInfo, filter: Option<&str>) -> bool {
     let Some(pattern) = filter else {
         return true;

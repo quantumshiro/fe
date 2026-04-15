@@ -24,7 +24,7 @@ use sonatina_ir::{
 };
 use sonatina_verifier::{VerificationLevel, VerifierConfig};
 
-use crate::{ExpectedRevert, OptLevel, TestMetadata, TestModuleOutput};
+use crate::{ExpectedRevert, OptLevel, TestMetadata, TestModuleOutput, parse_expected_revert};
 
 use super::{ContractObjectSelection, LowerError, ModuleLowerer};
 
@@ -165,18 +165,15 @@ fn collect_tests(
             };
             let attrs = ItemKind::from(hir_func).attrs(db)?;
             let test_attr = attrs.get_attr(db, "test")?;
-
-            let expected_revert = if test_attr.has_arg(db, "should_revert") {
-                Some(ExpectedRevert::Any)
-            } else {
-                None
-            };
-
             let hir_name = hir_func
                 .name(db)
                 .to_opt()
                 .map(|n| n.data(db).to_string())
                 .unwrap_or_else(|| "<anonymous>".to_string());
+            let expected_revert = match parse_expected_revert(db, &hir_name, test_attr) {
+                Ok(expected_revert) => expected_revert,
+                Err(err) => return Some(Err(LowerError::Unsupported(err))),
+            };
             let initial_balance = match parse_test_balance_arg(db, &hir_name, test_attr) {
                 Ok(balance) => balance,
                 Err(err) => return Some(Err(err)),
