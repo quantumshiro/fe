@@ -1,0 +1,15 @@
+#[error]
+pub struct Panic {
+    pub code: u256
+}
+
+pub const PANIC_GENERIC: u256 = 0x00
+pub const PANIC_ASSERT: u256 = 0x01
+pub const PANIC_OVERFLOW: u256 = 0x11
+pub const PANIC_DIVISION_BY_ZERO: u256 = 0x12
+pub const PANIC_ENUM_CONVERSION: u256 = 0x21
+pub const PANIC_STORAGE_ENCODING: u256 = 0x22
+pub const PANIC_POP_EMPTY: u256 = 0x31
+pub const PANIC_INDEX_OUT_OF_BOUNDS: u256 = 0x32
+pub const PANIC_OUT_OF_MEMORY: u256 = 0x41
+pub const PANIC_ZERO_INIT_FUNCTION_POINTER: u256 = 0x51

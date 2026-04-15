@@ -5,6 +5,7 @@ pub use clone::Clone
 pub use marker::Copy
 pub use abi::{self, *}
 pub use message::MsgVariant
+pub use error::ErrorVariant
 pub use ops::{self, *}
 pub use bytes::{AsBytes, keccak}
 pub use intrinsic::{addr_of, contract_field_slot, size_of}

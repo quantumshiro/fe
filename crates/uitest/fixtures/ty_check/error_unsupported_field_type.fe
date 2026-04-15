@@ -1,0 +1,6 @@
+use std::evm::{Address, StorageMap}
+
+#[error]
+struct Bad {
+    value: StorageMap<Address, u256, 0>,
+}

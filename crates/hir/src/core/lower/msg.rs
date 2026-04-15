@@ -245,8 +245,11 @@ fn lower_msg_variant_encode_impl<'db>(
     )
 }
 
-fn create_direct_encode_assoc_const<'db>(
-    builder: &mut HirBuilder<'_, 'db, MsgDesugared>,
+pub(super) fn create_direct_encode_assoc_const<
+    'db,
+    O: Clone + Into<crate::span::DesugaredOrigin>,
+>(
+    builder: &mut HirBuilder<'_, 'db, O>,
     fields: &[(IdentId<'db>, TypeId<'db>)],
 ) -> AssocConstDef<'db> {
     let db = builder.db();
@@ -379,22 +382,25 @@ fn abi_size_assoc_expr<'db>(
     )
 }
 
-fn create_is_dynamic_assoc_const<'db>(
-    builder: &mut HirBuilder<'_, 'db, MsgDesugared>,
+pub(super) fn create_is_dynamic_assoc_const<'db, O: Clone + Into<crate::span::DesugaredOrigin>>(
+    builder: &mut HirBuilder<'_, 'db, O>,
     fields: &[(IdentId<'db>, TypeId<'db>)],
 ) -> AssocConstDef<'db> {
     create_bool_assoc_const(builder, "IS_DYNAMIC", fields)
 }
 
-fn create_needs_parent_wrapper_assoc_const<'db>(
-    builder: &mut HirBuilder<'_, 'db, MsgDesugared>,
+pub(super) fn create_needs_parent_wrapper_assoc_const<
+    'db,
+    O: Clone + Into<crate::span::DesugaredOrigin>,
+>(
+    builder: &mut HirBuilder<'_, 'db, O>,
     fields: &[(IdentId<'db>, TypeId<'db>)],
 ) -> AssocConstDef<'db> {
     create_bool_assoc_const(builder, "NEEDS_PARENT_WRAPPER", fields)
 }
 
-fn create_bool_assoc_const<'db>(
-    builder: &mut HirBuilder<'_, 'db, MsgDesugared>,
+fn create_bool_assoc_const<'db, O: Clone + Into<crate::span::DesugaredOrigin>>(
+    builder: &mut HirBuilder<'_, 'db, O>,
     name: &str,
     fields: &[(IdentId<'db>, TypeId<'db>)],
 ) -> AssocConstDef<'db> {
@@ -466,8 +472,11 @@ fn build_is_dynamic_expr<'db>(
     }
 }
 
-fn create_encoded_size_assoc_const<'db>(
-    builder: &mut HirBuilder<'_, 'db, MsgDesugared>,
+pub(super) fn create_encoded_size_assoc_const<
+    'db,
+    O: Clone + Into<crate::span::DesugaredOrigin>,
+>(
+    builder: &mut HirBuilder<'_, 'db, O>,
     fields: &[(IdentId<'db>, TypeId<'db>)],
 ) -> AssocConstDef<'db> {
     let db = builder.db();
@@ -535,8 +544,8 @@ fn build_encoded_size_expr<'db>(
     }
 }
 
-fn build_encoded_size_body_expr<'db>(
-    body: &mut super::hir_builder::BodyBuilder<'_, 'db, MsgDesugared>,
+pub(super) fn build_encoded_size_body_expr<'db, O: Clone + Into<crate::span::DesugaredOrigin>>(
+    body: &mut super::hir_builder::BodyBuilder<'_, 'db, O>,
     ty: TypeId<'db>,
 ) -> crate::hir_def::ExprId {
     let db = body.db();

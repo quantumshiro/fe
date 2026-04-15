@@ -67,6 +67,7 @@ impl<'db> ItemKind<'db> {
             ast::ItemKind::Mod(mod_) => {
                 super::arithmetic::report_invalid_mod_arithmetic_attrs(ctxt, mod_.attr_list());
                 super::event::report_event_attr_on_non_struct_item(ctxt, mod_.attr_list(), "mod");
+                super::error::report_error_attr_on_non_struct_item(ctxt, mod_.attr_list(), "mod");
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     mod_.attr_list(),
@@ -77,6 +78,7 @@ impl<'db> ItemKind<'db> {
             ast::ItemKind::Func(fn_) => {
                 super::arithmetic::report_invalid_function_arithmetic_attrs(ctxt, &fn_);
                 super::event::report_event_attr_on_non_struct_item(ctxt, fn_.attr_list(), "fn");
+                super::error::report_error_attr_on_non_struct_item(ctxt, fn_.attr_list(), "fn");
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     fn_.attr_list(),
@@ -108,6 +110,11 @@ impl<'db> ItemKind<'db> {
                     contract.attr_list(),
                     "contract",
                 );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    contract.attr_list(),
+                    "contract",
+                );
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     contract.attr_list(),
@@ -122,6 +129,7 @@ impl<'db> ItemKind<'db> {
                     "enum",
                 );
                 super::event::report_event_attr_on_non_struct_item(ctxt, enum_.attr_list(), "enum");
+                super::error::report_error_attr_on_non_struct_item(ctxt, enum_.attr_list(), "enum");
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     enum_.attr_list(),
@@ -136,6 +144,7 @@ impl<'db> ItemKind<'db> {
                     "msg",
                 );
                 super::event::report_event_attr_on_non_struct_item(ctxt, msg.attr_list(), "msg");
+                super::error::report_error_attr_on_non_struct_item(ctxt, msg.attr_list(), "msg");
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     msg.attr_list(),
@@ -154,6 +163,11 @@ impl<'db> ItemKind<'db> {
                     alias.attr_list(),
                     "type alias",
                 );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    alias.attr_list(),
+                    "type alias",
+                );
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     alias.attr_list(),
@@ -168,6 +182,7 @@ impl<'db> ItemKind<'db> {
                     "impl",
                 );
                 super::event::report_event_attr_on_non_struct_item(ctxt, impl_.attr_list(), "impl");
+                super::error::report_error_attr_on_non_struct_item(ctxt, impl_.attr_list(), "impl");
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     impl_.attr_list(),
@@ -182,6 +197,11 @@ impl<'db> ItemKind<'db> {
                     "trait",
                 );
                 super::event::report_event_attr_on_non_struct_item(
+                    ctxt,
+                    trait_.attr_list(),
+                    "trait",
+                );
+                super::error::report_error_attr_on_non_struct_item(
                     ctxt,
                     trait_.attr_list(),
                     "trait",
@@ -204,6 +224,11 @@ impl<'db> ItemKind<'db> {
                     impl_trait.attr_list(),
                     "impl trait",
                 );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    impl_trait.attr_list(),
+                    "impl trait",
+                );
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     impl_trait.attr_list(),
@@ -222,6 +247,11 @@ impl<'db> ItemKind<'db> {
                     const_.attr_list(),
                     "const",
                 );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    const_.attr_list(),
+                    "const",
+                );
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     const_.attr_list(),
@@ -236,6 +266,7 @@ impl<'db> ItemKind<'db> {
                     "use",
                 );
                 super::event::report_event_attr_on_non_struct_item(ctxt, use_.attr_list(), "use");
+                super::error::report_error_attr_on_non_struct_item(ctxt, use_.attr_list(), "use");
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     use_.attr_list(),
@@ -254,6 +285,11 @@ impl<'db> ItemKind<'db> {
                     extern_.attr_list(),
                     "extern",
                 );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    extern_.attr_list(),
+                    "extern",
+                );
                 super::payable::report_payable_attr_on_unsupported_item(
                     ctxt,
                     extern_.attr_list(),
@@ -267,6 +303,11 @@ impl<'db> ItemKind<'db> {
                             "extern fn",
                         );
                         super::event::report_event_attr_on_non_struct_item(
+                            ctxt,
+                            fn_.attr_list(),
+                            "extern fn",
+                        );
+                        super::error::report_error_attr_on_non_struct_item(
                             ctxt,
                             fn_.attr_list(),
                             "extern fn",
@@ -422,8 +463,18 @@ fn lower_inline_attr_error(
 
 impl<'db> Struct<'db> {
     pub(super) fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Struct) -> Self {
-        if super::event::is_event_struct(&ast) {
+        let is_event_struct = super::event::is_event_struct(&ast);
+        let is_error_struct = super::error::is_error_struct(&ast);
+
+        if is_event_struct && is_error_struct {
+            super::error::report_event_error_attr_conflict(ctxt, &ast);
+        }
+        if is_event_struct {
             return super::event::lower_event_struct(ctxt, ast);
+        }
+        if is_error_struct {
+            super::event::report_indexed_attrs_outside_event_struct(ctxt, &ast);
+            return super::error::lower_error_struct(ctxt, ast);
         }
 
         super::event::report_indexed_attrs_outside_event_struct(ctxt, &ast);

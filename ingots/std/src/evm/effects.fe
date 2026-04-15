@@ -2,6 +2,7 @@ use core::effect_ref::{EffectHandle, EffectHandleMut, EffectRef, EffectRefMut}
 use core::{size_of}
 use core::abi::{Abi, AbiDecoder, AbiEncoder, AbiSize, AbiSpan, Decode, Encode, abi_root_head_size, encode_root}
 use core::contracts::ContractHost
+use core::error::ErrorVariant
 use core::message::MsgVariant
 
 use ingot::evm::intrinsic::{
@@ -706,6 +707,17 @@ pub fn revert<T>(_ value: own T) -> !
     encode_root<Sol, T, SolEncoder>(value, mut enc)
     let (result_ptr, result_len) = enc.finish()
     ops::revert(offset: result_ptr, len: result_len)
+}
+
+/// Revert with a Solidity-compatible custom error.
+///
+/// Encodes the error with its 4-byte selector prefix followed by
+/// ABI-encoded fields, matching Solidity's custom error encoding.
+pub fn revert_error<T>(_ error: own T) -> !
+    where T: ErrorVariant<Sol> + Encode<Sol>
+{
+    let (ptr, len) = encode_calldata(<T as ErrorVariant<Sol>>::SELECTOR, error)
+    ops::revert(offset: ptr, len: len)
 }
 
 impl Super for Evm {}

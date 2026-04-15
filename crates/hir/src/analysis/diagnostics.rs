@@ -657,6 +657,61 @@ impl DiagnosticVoucher for crate::EventError {
     }
 }
 
+impl DiagnosticVoucher for crate::ErrorDiagnostic {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        use crate::ErrorDiagnosticKind;
+
+        let primary_span = Span::new(self.file, self.primary_range, SpanKind::Original);
+
+        let (code, message, label, notes) = match &self.kind {
+            ErrorDiagnosticKind::ErrorAttrOnNonStruct { item_kind } => (
+                1,
+                format!("`#[error]` is only valid on structs (found on {item_kind})"),
+                "`#[error]` must be placed on a `struct` item".to_string(),
+                vec!["move `#[error]` to a struct declaration".to_string()],
+            ),
+            ErrorDiagnosticKind::InvalidErrorAttrForm => (
+                2,
+                "invalid `#[error]` attribute form".to_string(),
+                "expected `#[error]` without arguments".to_string(),
+                vec!["remove arguments and use `#[error]`".to_string()],
+            ),
+            ErrorDiagnosticKind::GenericErrorStruct => (
+                3,
+                "`#[error]` structs must be non-generic".to_string(),
+                "generics are not supported on `#[error]` structs".to_string(),
+                vec!["remove generic parameters from the error struct".to_string()],
+            ),
+            ErrorDiagnosticKind::UnsupportedFieldType { ty } => (
+                4,
+                "unsupported error field type".to_string(),
+                format!("`{ty}` is not supported as an error field"),
+                vec!["error field types must be named types (e.g. `u256`, `Address`)".to_string()],
+            ),
+            ErrorDiagnosticKind::EventErrorAttrConflict => (
+                5,
+                "`#[error]` cannot be combined with `#[event]`".to_string(),
+                "`#[error]` conflicts with `#[event]` on the same struct".to_string(),
+                vec!["split this into separate structs or remove one attribute".to_string()],
+            ),
+        };
+
+        let error_code = GlobalErrorCode::new(DiagnosticPass::ErrorLower, code);
+
+        CompleteDiagnostic::new(
+            Severity::Error,
+            message,
+            vec![SubDiagnostic::new(
+                LabelStyle::Primary,
+                label,
+                Some(primary_span),
+            )],
+            notes,
+            error_code,
+        )
+    }
+}
+
 impl DiagnosticVoucher for crate::InlineAttrError {
     fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
         use crate::hir_def::InlineAttrErrorKind;
