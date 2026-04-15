@@ -13,6 +13,7 @@ use ingot::abi::Sol
 use ingot::abi::sol::{decode_input_at, decode_output, encoded_size, SolEncoder}
 use super::calldata::CallData
 use super::contract_field_slot
+use super::panic::Panic
 use ingot::evm::mem
 use ingot::evm::memory_input::MemoryBytes
 use ingot::evm::ops
@@ -692,7 +693,7 @@ impl Call for Evm {
 }
 
 pub fn assert(_ b: own bool) {
-    if !b { ops::revert(offset: 0, len: 0) }
+    if !b { revert_error(Panic { code: 0x01 }) }
 }
 
 /// Revert the current transaction with ABI-encoded data.

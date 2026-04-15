@@ -9,7 +9,8 @@ PASS  [<time>] test_revert_panic_selector
 PASS  [<time>] test_revert_panic_overflow
 PASS  [<time>] test_revert_panic_division_by_zero
 PASS  [<time>] test_revert_panic_assert
+PASS  [<time>] test_assert_emits_panic
 
-test result: ok. 5 passed; 0 failed
+test result: ok. 6 passed; 0 failed
 
 === EXIT CODE: 0 ===

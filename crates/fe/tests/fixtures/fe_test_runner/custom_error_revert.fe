@@ -34,3 +34,10 @@ fn test_revert_panic_division_by_zero() uses (evm: mut Evm) {
 fn test_revert_panic_assert() uses (evm: mut Evm) {
     revert_error(Panic { code: 0x01 })
 }
+
+// --- assert() now emits Panic(0x01) ---
+
+#[test(should_revert, panic = 0x01)]
+fn test_assert_emits_panic() uses (evm: mut Evm) {
+    assert(false)
+}
