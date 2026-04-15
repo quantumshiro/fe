@@ -23,7 +23,9 @@ func private %test_module_qualifier_flatten_collision() -> i32 {
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v2;
@@ -51,7 +53,9 @@ func private %test_trait_method_collision() -> i32 {
         br v4 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v3;
@@ -63,14 +67,16 @@ func private %param_local_collision(v0.i32) -> i32 {
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
-        (v6.i32, v7.i1) = uaddo v2 2.i32;
-        br v7 block1 block3;
+        (v10.i32, v11.i1) = uaddo v2 2.i32;
+        br v11 block1 block3;
 
     block3:
-        return v6;
+        return v10;
 }
 
 func private %test_param_local_collision() -> i32 {
@@ -96,7 +102,9 @@ func private %ret_param_collision(v0.i32) -> i32 {
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v2;
@@ -148,7 +156,9 @@ func private %widget_h8588afca9d68e578_process(v0.i32) -> i32 {
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v2;
@@ -160,7 +170,9 @@ func private %widget_h6847c0e3e0e4aa1e_process(v0.i64) -> i64 {
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v2;
@@ -172,7 +184,9 @@ func private %multitraitimpl_h60cc862fc809464_trait_h79853acec5b2b3ad_same_metho
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v2;
@@ -184,7 +198,9 @@ func private %multitraitimpl_h60cc862fc809464_trait_ha6da5e54b37dd39c_same_metho
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v2;

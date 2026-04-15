@@ -26,7 +26,9 @@ func private %f(v0.i256) -> i256 {
         evm_invalid;
 
     block6:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block7:
         return v4;

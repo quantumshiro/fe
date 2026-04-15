@@ -2,6 +2,28 @@
 //!
 //! Contains all `lower_*` free functions that operate on `LowerCtx`.
 
+/// Solidity `Panic(uint256)` selector: `keccak256("Panic(uint256)")[:4]`.
+///
+/// Stored as a 32-byte big-endian word with the selector left-aligned,
+/// ready for an EVM `MSTORE` at offset 0.
+const PANIC_SELECTOR_WORD: [u8; 32] = {
+    let mut bytes = [0u8; 32];
+    bytes[0] = 0x4e;
+    bytes[1] = 0x48;
+    bytes[2] = 0x7b;
+    bytes[3] = 0x71;
+    bytes
+};
+
+/// Panic code for arithmetic overflow / underflow.
+const PANIC_CODE_OVERFLOW: u64 = 0x11;
+
+/// Panic code for division or modulo by zero.
+const PANIC_CODE_DIVISION_BY_ZERO: u64 = 0x12;
+
+/// Panic code for array index out of bounds.
+const PANIC_CODE_INDEX_OUT_OF_BOUNDS: u64 = 0x32;
+
 use common::ingot::IngotKind;
 use driver::DriverDataBase;
 use hir::analysis::ty::adt_def::AdtRef;
@@ -3834,7 +3856,8 @@ fn lower_place_address_gep<'db, C: sonatina_ir::func_cursor::FuncCursor>(
                         if let Some(len) = arr_len
                             && *idx >= len
                         {
-                            let revert_block = ensure_overflow_revert_block(ctx)?;
+                            let revert_block =
+                                ensure_panic_revert_block(ctx, PANIC_CODE_INDEX_OUT_OF_BOUNDS)?;
                             ctx.fb
                                 .insert_inst_no_result(Jump::new(ctx.is, revert_block));
                             let unreachable_block = ctx.fb.append_block();
@@ -3849,7 +3872,7 @@ fn lower_place_address_gep<'db, C: sonatina_ir::func_cursor::FuncCursor>(
                             let in_bounds =
                                 ctx.fb.insert_inst(Lt::new(ctx.is, val, len_val), Type::I1);
                             let oob = ctx.fb.insert_inst(IsZero::new(ctx.is, in_bounds), Type::I1);
-                            emit_overflow_revert(ctx, oob)?;
+                            emit_panic_revert(ctx, oob, PANIC_CODE_INDEX_OUT_OF_BOUNDS)?;
                         }
                         val
                     }
@@ -3952,7 +3975,7 @@ fn lower_array_index_with_bounds_check<'db, C: sonatina_ir::func_cursor::FuncCur
     match idx_source {
         IndexSource::Constant(idx) => {
             if *idx >= arr_len {
-                let revert_block = ensure_overflow_revert_block(ctx)?;
+                let revert_block = ensure_panic_revert_block(ctx, PANIC_CODE_INDEX_OUT_OF_BOUNDS)?;
                 ctx.fb
                     .insert_inst_no_result(Jump::new(ctx.is, revert_block));
                 let unreachable_block = ctx.fb.append_block();
@@ -3965,7 +3988,7 @@ fn lower_array_index_with_bounds_check<'db, C: sonatina_ir::func_cursor::FuncCur
             let len_val = ctx.fb.make_imm_value(I256::from(arr_len as u64));
             let in_bounds = ctx.fb.insert_inst(Lt::new(ctx.is, idx, len_val), Type::I1);
             let oob = ctx.fb.insert_inst(IsZero::new(ctx.is, in_bounds), Type::I1);
-            emit_overflow_revert(ctx, oob)?;
+            emit_panic_revert(ctx, oob, PANIC_CODE_INDEX_OUT_OF_BOUNDS)?;
             Ok(idx)
         }
     }
@@ -4047,7 +4070,8 @@ fn lower_place_address_arithmetic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
                         if let Some(len) = arr_len
                             && *idx >= len
                         {
-                            let revert_block = ensure_overflow_revert_block(ctx)?;
+                            let revert_block =
+                                ensure_panic_revert_block(ctx, PANIC_CODE_INDEX_OUT_OF_BOUNDS)?;
                             ctx.fb
                                 .insert_inst_no_result(Jump::new(ctx.is, revert_block));
                             let unreachable_block = ctx.fb.append_block();
@@ -4075,7 +4099,7 @@ fn lower_place_address_arithmetic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
                                 .fb
                                 .insert_inst(Lt::new(ctx.is, idx_val, len_val), Type::I1);
                             let oob = ctx.fb.insert_inst(IsZero::new(ctx.is, in_bounds), Type::I1);
-                            emit_overflow_revert(ctx, oob)?;
+                            emit_panic_revert(ctx, oob, PANIC_CODE_INDEX_OUT_OF_BOUNDS)?;
                         }
 
                         // Compute dynamic index offset: idx * stride
@@ -5068,10 +5092,12 @@ fn bitcast_ptr<'db, C: sonatina_ir::func_cursor::FuncCursor>(
         .insert_inst(Bitcast::new(ctx.is, ptr, ptr_ty), ptr_ty)
 }
 
-fn ensure_overflow_revert_block<'db, C: sonatina_ir::func_cursor::FuncCursor>(
+/// Returns (or lazily creates) a revert block that emits `Panic(uint256)` with the given code.
+fn ensure_panic_revert_block<'db, C: sonatina_ir::func_cursor::FuncCursor>(
     ctx: &mut LowerCtx<'_, 'db, C>,
+    panic_code: u64,
 ) -> Result<BlockId, LowerError> {
-    if let Some(block) = *ctx.overflow_revert_block {
+    if let Some(&block) = ctx.panic_revert_blocks.get(&panic_code) {
         return Ok(block);
     }
 
@@ -5081,20 +5107,35 @@ fn ensure_overflow_revert_block<'db, C: sonatina_ir::func_cursor::FuncCursor>(
         .ok_or_else(|| LowerError::Internal("missing current block".to_string()))?;
     let revert_block = ctx.fb.append_block();
     ctx.fb.switch_to_block(revert_block);
+
+    // Emit Panic(uint256) revert payload.
+    // Layout at memory offset 0: [selector 4 bytes][uint256 code 32 bytes] = 36 bytes.
+    let selector_val = ctx
+        .fb
+        .make_imm_value(I256::from_be_bytes(&PANIC_SELECTOR_WORD));
     let zero = ctx.fb.make_imm_value(I256::zero());
     ctx.fb
-        .insert_inst_no_result(EvmRevert::new(ctx.is, zero, zero));
+        .insert_inst_no_result(Mstore::new(ctx.is, zero, selector_val, Type::I256));
+    let four = ctx.fb.make_imm_value(I256::from(4u64));
+    let code_val = ctx.fb.make_imm_value(I256::from(panic_code));
+    ctx.fb
+        .insert_inst_no_result(Mstore::new(ctx.is, four, code_val, Type::I256));
+    let thirty_six = ctx.fb.make_imm_value(I256::from(36u64));
+    ctx.fb
+        .insert_inst_no_result(EvmRevert::new(ctx.is, zero, thirty_six));
+
     ctx.fb.switch_to_block(origin_block);
-    *ctx.overflow_revert_block = Some(revert_block);
+    ctx.panic_revert_blocks.insert(panic_code, revert_block);
     Ok(revert_block)
 }
 
-/// Emit a conditional branch to the shared overflow revert block if `overflow_flag` (I1) is true.
-fn emit_overflow_revert<'db, C: sonatina_ir::func_cursor::FuncCursor>(
+/// Emit a conditional branch to a Panic revert block if `overflow_flag` (I1) is true.
+fn emit_panic_revert<'db, C: sonatina_ir::func_cursor::FuncCursor>(
     ctx: &mut LowerCtx<'_, 'db, C>,
     overflow_flag: ValueId,
+    panic_code: u64,
 ) -> Result<(), LowerError> {
-    let revert_block = ensure_overflow_revert_block(ctx)?;
+    let revert_block = ensure_panic_revert_block(ctx, panic_code)?;
     let continue_block = ctx.fb.append_block();
     ctx.fb
         .insert_inst_no_result(Br::new(ctx.is, overflow_flag, revert_block, continue_block));
@@ -5244,7 +5285,7 @@ fn lower_checked_intrinsic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
             } else {
                 ctx.fb.insert_uaddo(lhs, rhs)
             };
-            emit_overflow_revert(ctx, overflow)?;
+            emit_panic_revert(ctx, overflow, PANIC_CODE_OVERFLOW)?;
             Ok(raw)
         }
         CheckedArithmeticOp::Sub => {
@@ -5263,7 +5304,7 @@ fn lower_checked_intrinsic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
             } else {
                 ctx.fb.insert_usubo(lhs, rhs)
             };
-            emit_overflow_revert(ctx, overflow)?;
+            emit_panic_revert(ctx, overflow, PANIC_CODE_OVERFLOW)?;
             Ok(raw)
         }
         CheckedArithmeticOp::Mul => {
@@ -5282,7 +5323,7 @@ fn lower_checked_intrinsic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
             } else {
                 ctx.fb.insert_umulo(lhs, rhs)
             };
-            emit_overflow_revert(ctx, overflow)?;
+            emit_panic_revert(ctx, overflow, PANIC_CODE_OVERFLOW)?;
             Ok(raw)
         }
         CheckedArithmeticOp::Div => {
@@ -5297,11 +5338,20 @@ fn lower_checked_intrinsic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
             let lhs = lower_checked_operand(ctx.fb, ctx.is, lhs_word, op_ty, signed);
             let rhs = lower_checked_operand(ctx.fb, ctx.is, rhs_word, op_ty, signed);
             let [raw, overflow] = if signed {
-                ctx.fb.insert_evm_sdivo(lhs, rhs)
+                let [raw, overflow] = ctx.fb.insert_evm_sdivo(lhs, rhs);
+                let zero = ctx.fb.make_imm_value(I256::zero());
+                let div_by_zero = ctx.fb.insert_inst(Eq::new(ctx.is, rhs, zero), Type::I1);
+                emit_panic_revert(ctx, div_by_zero, PANIC_CODE_DIVISION_BY_ZERO)?;
+                [raw, overflow]
             } else {
                 ctx.fb.insert_evm_udivo(lhs, rhs)
             };
-            emit_overflow_revert(ctx, overflow)?;
+            let panic_code = if signed {
+                PANIC_CODE_OVERFLOW
+            } else {
+                PANIC_CODE_DIVISION_BY_ZERO
+            };
+            emit_panic_revert(ctx, overflow, panic_code)?;
             Ok(raw)
         }
         CheckedArithmeticOp::Rem => {
@@ -5320,7 +5370,7 @@ fn lower_checked_intrinsic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
             } else {
                 ctx.fb.insert_evm_umodo(lhs, rhs)
             };
-            emit_overflow_revert(ctx, overflow)?;
+            emit_panic_revert(ctx, overflow, PANIC_CODE_DIVISION_BY_ZERO)?;
             Ok(raw)
         }
         CheckedArithmeticOp::Neg => {
@@ -5339,7 +5389,7 @@ fn lower_checked_intrinsic<'db, C: sonatina_ir::func_cursor::FuncCursor>(
             let val_word = lower_value(ctx, *arg)?;
             let val = lower_checked_operand(ctx.fb, ctx.is, val_word, op_ty, true);
             let [raw, overflow] = ctx.fb.insert_snego(val);
-            emit_overflow_revert(ctx, overflow)?;
+            emit_panic_revert(ctx, overflow, PANIC_CODE_OVERFLOW)?;
             Ok(raw)
         }
     }

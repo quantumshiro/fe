@@ -22,16 +22,18 @@ func private %__GuardContract_recv_0_0(v0.i256, v1.i256) -> i1 {
         br v5 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         evm_sstore v1 v4;
-        v9.i256 = evm_tload v0;
-        v10.i1 = ne v9 0.i256;
-        v11.i1 = is_zero v10;
-        v12.i256 = zext v11 i256;
-        evm_tstore v0 v12;
-        return v10;
+        v13.i256 = evm_tload v0;
+        v14.i1 = ne v13 0.i256;
+        v15.i1 = is_zero v14;
+        v16.i256 = zext v15 i256;
+        evm_tstore v0 v16;
+        return v14;
 }
 
 func private %__GuardContract_init() {
@@ -247,15 +249,17 @@ func private %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v
         br v8 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
-        v9.objref<@__fe_obj_tuple_1> = obj.alloc @__fe_obj_tuple_1;
-        v11.objref<i256> = obj.proj v9 0.i256;
-        obj.store v11 v3;
-        v13.objref<i256> = obj.proj v9 1.i256;
-        obj.store v13 v7;
-        return v9;
+        v13.objref<@__fe_obj_tuple_1> = obj.alloc @__fe_obj_tuple_1;
+        v15.objref<i256> = obj.proj v13 0.i256;
+        obj.store v15 v3;
+        v17.objref<i256> = obj.proj v13 1.i256;
+        obj.store v17 v7;
+        return v13;
 }
 
 func private %evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v0.i256, v1.i256) {
@@ -299,11 +303,13 @@ func private %calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v0.i256
         br v7 block4 block5;
 
     block3:
-        v8.i256 = phi (0.i256 block1) (v6 block5);
-        return v8;
+        v12.i256 = phi (0.i256 block1) (v6 block5);
+        return v12;
 
     block4:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block5:
         jump block3;
@@ -370,16 +376,18 @@ func private %encode_field__Sol_hfd482bb803ad8c5f_bool_SolEncoder_h1b9228b90dad6
         return;
 
     block3:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block4:
         call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word v1 v7;
-        v11.i256 = call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos v1;
+        v15.i256 = call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos v1;
         call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base v1 v6;
         call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos v1 v6;
         call %bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383 v0 v1;
         call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base v1 v4;
-        call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos v1 v11;
+        call %solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos v1 v15;
         return;
 }
 

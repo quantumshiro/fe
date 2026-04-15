@@ -206,15 +206,17 @@ func private %erc20_______h94f6fe6e679122ca_transfer_stor_arg0_root_stor__0_1_Ev
         br v14 block3 block4;
 
     block3:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block4:
         call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3 v1 v13;
-        (v18.i256, v19.i1) = uaddo v10 v3;
-        br v19 block3 block5;
+        (v22.i256, v23.i1) = uaddo v10 v3;
+        br v23 block3 block5;
 
     block5:
-        call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3 v2 v18;
+        call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3 v2 v22;
         return;
 }
 
@@ -250,7 +252,9 @@ func private %erc20_______h94f6fe6e679122ca_transfer_from_stor_arg0_root_stor__0
         br v21 block3 block4;
 
     block3:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block4:
         call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor___Address__Address__u256_1__12414c27d5bfff1f v14 v20;
@@ -274,16 +278,18 @@ func private %erc20_______h94f6fe6e679122ca_mint_stor_arg0_root_stor__0_1_Evm_he
         br v16 block3 block4;
 
     block3:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block4:
         call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3 v1 v15;
-        v19.i256 = evm_sload v0;
-        (v21.i256, v22.i1) = uaddo v19 v2;
-        br v22 block3 block5;
+        v23.i256 = evm_sload v0;
+        (v25.i256, v26.i1) = uaddo v23 v2;
+        br v26 block3 block5;
 
     block5:
-        evm_sstore v0 v21;
+        evm_sstore v0 v25;
         return;
 }
 
@@ -377,16 +383,18 @@ func private %storagemap_storage_slot_with_salt__Address_h257056268eac7027__5ab9
         br v7 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         mstore v6 v1 i256;
-        (v11.i256, v12.i1) = uaddo v5 32.i256;
-        br v12 block1 block3;
+        (v15.i256, v16.i1) = uaddo v5 32.i256;
+        br v16 block1 block3;
 
     block3:
-        v14.i256 = evm_keccak256 v4 v11;
-        return v14;
+        v18.i256 = evm_keccak256 v4 v15;
+        return v18;
 }
 
 func private %storagemap_storage_slot_with_salt___Address__Address___c32d499da259c78e(v0.objref<@__fe_obj_tuple_0>, v1.i256) -> i256 {
@@ -398,16 +406,18 @@ func private %storagemap_storage_slot_with_salt___Address__Address___c32d499da25
         br v7 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         mstore v6 v1 i256;
-        (v11.i256, v12.i1) = uaddo v5 32.i256;
-        br v12 block1 block3;
+        (v15.i256, v16.i1) = uaddo v5 32.i256;
+        br v16 block1 block3;
 
     block3:
-        v14.i256 = evm_keccak256 v4 v11;
-        return v14;
+        v18.i256 = evm_keccak256 v4 v15;
+        return v18;
 }
 
 func private %u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word(v0.i256) -> i256 {
@@ -456,17 +466,19 @@ func private %_a__b__h47f120de72304a2d_storagekey_hf9e3d38a13ff4409_write_key__A
         br v7 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
-        v10.objref<i256> = obj.proj v1 1.i256;
-        v11.i256 = obj.load v10;
-        v12.i256 = call %address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key v6 v11;
-        (v14.i256, v15.i1) = uaddo v5 v12;
-        br v15 block1 block3;
+        v14.objref<i256> = obj.proj v1 1.i256;
+        v15.i256 = obj.load v14;
+        v16.i256 = call %address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key v6 v15;
+        (v18.i256, v19.i1) = uaddo v5 v16;
+        br v19 block1 block3;
 
     block3:
-        return v14;
+        return v18;
 }
 
 func private %u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0.i256, v1.i256) -> i1 {

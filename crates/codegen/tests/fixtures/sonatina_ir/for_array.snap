@@ -289,25 +289,27 @@ func private %for_array_sum() -> i64 {
         jump block1;
 
     block1:
-        v269.i64 = phi (0.i64 block0) (v261 block3);
-        v254.i256 = phi (0.i256 block0) (v264 block3);
+        v271.i64 = phi (0.i64 block0) (v261 block3);
+        v254.i256 = phi (0.i256 block0) (v266 block3);
         v256.i1 = lt v254 v253;
         br v256 block2 block4;
 
     block2:
         v259.i64 = call %_t__const_n__usize__h8b63f3f6d3df6413_seq_ha637d2df505bccf2_get__u64_25__540b817a073b29f5 v0 v254;
-        (v261.i64, v262.i1) = uaddo v269 v259;
+        (v261.i64, v262.i1) = uaddo v271 v259;
         br v262 block5 block6;
 
     block3:
-        v264.i256 = add v254 1.i256;
+        v266.i256 = add v254 1.i256;
         jump block1;
 
     block4:
-        return v269;
+        return v271;
 
     block5:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block6:
         jump block3;
@@ -325,12 +327,14 @@ func private %_t__const_n__usize__h8b63f3f6d3df6413_seq_ha637d2df505bccf2_get__u
         br v4 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 50.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
-        v6.objref<i64> = obj.index v0 v1;
-        v7.i64 = obj.load v6;
-        return v7;
+        v10.objref<i64> = obj.index v0 v1;
+        v11.i64 = obj.load v10;
+        return v11;
 }
 
 func private %__fe_sonatina_entry() {

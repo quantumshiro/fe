@@ -35,17 +35,19 @@ func private %match_tuple_extract(v0.objref<@__fe_obj_tuple_0>) -> i8 {
         br v17 block7 block8;
 
     block5:
-        v19.objref<i8> = obj.proj v0 0.i256;
-        v20.i8 = obj.load v19;
-        br_table v20 block6 (0.i8 block1);
+        v23.objref<i8> = obj.proj v0 0.i256;
+        v24.i8 = obj.load v23;
+        br_table v24 block6 (0.i8 block1);
 
     block6:
-        v22.objref<i8> = obj.proj v0 1.i256;
-        v23.i8 = obj.load v22;
-        br_table v23 block4 (0.i8 block3);
+        v26.objref<i8> = obj.proj v0 1.i256;
+        v27.i8 = obj.load v26;
+        br_table v27 block4 (0.i8 block3);
 
     block7:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block8:
         jump block2;
@@ -61,7 +63,7 @@ func private %match_nested_extract(v0.objref<@__fe_obj_tuple_1>) -> i8 {
         jump block2;
 
     block2:
-        v7.i8 = phi (v6 block1) (v15 block10) (v23 block11);
+        v7.i8 = phi (v6 block1) (v15 block10) (v27 block11);
         return v7;
 
     block3:
@@ -75,38 +77,40 @@ func private %match_nested_extract(v0.objref<@__fe_obj_tuple_1>) -> i8 {
         br v16 block9 block10;
 
     block4:
-        v18.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
-        v19.objref<i8> = obj.proj v18 0.i256;
-        v20.i8 = obj.load v19;
-        v21.objref<i8> = obj.proj v0 1.i256;
-        v22.i8 = obj.load v21;
-        (v23.i8, v24.i1) = uaddo v20 v22;
-        br v24 block9 block11;
+        v22.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v23.objref<i8> = obj.proj v22 0.i256;
+        v24.i8 = obj.load v23;
+        v25.objref<i8> = obj.proj v0 1.i256;
+        v26.i8 = obj.load v25;
+        (v27.i8, v28.i1) = uaddo v24 v26;
+        br v28 block9 block11;
 
     block5:
-        v26.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
-        v27.objref<i8> = obj.proj v26 1.i256;
-        v28.i8 = obj.load v27;
-        br_table v28 block8 (0.i8 block6);
+        v30.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v31.objref<i8> = obj.proj v30 1.i256;
+        v32.i8 = obj.load v31;
+        br_table v32 block8 (0.i8 block6);
 
     block6:
-        v30.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
-        v31.objref<i8> = obj.proj v30 0.i256;
-        v32.i8 = obj.load v31;
-        br_table v32 block7 (0.i8 block1);
+        v34.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v35.objref<i8> = obj.proj v34 0.i256;
+        v36.i8 = obj.load v35;
+        br_table v36 block7 (0.i8 block1);
 
     block7:
-        v34.objref<i8> = obj.proj v0 1.i256;
-        v35.i8 = obj.load v34;
-        br_table v35 block4 (0.i8 block3);
+        v38.objref<i8> = obj.proj v0 1.i256;
+        v39.i8 = obj.load v38;
+        br_table v39 block4 (0.i8 block3);
 
     block8:
-        v37.objref<i8> = obj.proj v0 1.i256;
-        v38.i8 = obj.load v37;
-        br_table v38 block4 (0.i8 block3);
+        v41.objref<i8> = obj.proj v0 1.i256;
+        v42.i8 = obj.load v41;
+        br_table v42 block4 (0.i8 block3);
 
     block9:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block10:
         jump block2;
