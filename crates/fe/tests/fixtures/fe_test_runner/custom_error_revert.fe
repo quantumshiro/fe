@@ -41,3 +41,26 @@ fn test_revert_panic_assert() uses (evm: mut Evm) {
 fn test_assert_emits_panic() uses (evm: mut Evm) {
     assert(false)
 }
+
+// --- unwrap() on Result<ErrorVariant, T> emits selector ---
+
+fn fallible_panic() -> Result<Panic, u256> {
+    Err(Panic { code: 0x11 })
+}
+
+#[test(should_revert, panic = 0x11)]
+fn test_unwrap_error_variant_emits_selector() uses (evm: mut Evm) {
+    let result = fallible_panic()
+    result.unwrap()
+}
+
+fn fallible_custom() -> Result<InsufficientBalance, u256> {
+    Err(InsufficientBalance { balance: 100, required: 200 })
+}
+
+// selector for InsufficientBalance(uint256,uint256) = 0xcf479181
+#[test(should_revert, selector = 0xcf479181)]
+fn test_unwrap_custom_error_emits_selector() uses (evm: mut Evm) {
+    let result = fallible_custom()
+    result.unwrap()
+}
