@@ -54,8 +54,8 @@ where
             defs.entry(name).or_default().push(i as u16);
         }
     }
-    defs.into_iter()
-        .filter_map(|(_name, idxs)| (idxs.len() > 1).then_some(create_diag(idxs)))
+    defs.into_values()
+        .filter_map(|idxs| (idxs.len() > 1).then_some(create_diag(idxs)))
         .collect()
 }
 

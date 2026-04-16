@@ -1,4 +1,4 @@
-use parser::ast::{self, prelude::*};
+use parser::ast::{self, WhereClauseOwner as _, prelude::*};
 use salsa::Accumulator as _;
 
 use super::{FileLowerCtxt, attr::named_attr_specs};

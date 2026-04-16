@@ -28,10 +28,8 @@ pub(super) fn is_std_evm_ops(db: &DriverDataBase, func: Func<'_>) -> bool {
                     path.push(name.data(db).to_string());
                 }
             }
-            ScopeId::Item(ItemKind::TopMod(top_mod)) => {
-                if top_mod != root_mod {
-                    path.push(top_mod.name(db).data(db).to_string());
-                }
+            ScopeId::Item(ItemKind::TopMod(top_mod)) if top_mod != root_mod => {
+                path.push(top_mod.name(db).data(db).to_string());
             }
             _ => {}
         }

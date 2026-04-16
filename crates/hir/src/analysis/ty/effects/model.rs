@@ -233,7 +233,7 @@ impl<'db> TraitKeySchema<'db> {
     ) -> Self {
         let mut assoc_bindings: SmallVec<[(IdentId<'db>, TyId<'db>); 2]> =
             trait_inst.assoc_ty_bindings(db).into();
-        assoc_bindings.sort_by(|(lhs, _), (rhs, _)| lhs.cmp(rhs));
+        assoc_bindings.sort_by_key(|(lhs, _)| *lhs);
         Self {
             def: trait_inst.def(db),
             args_no_self: trait_inst.args(db)[1..].iter().copied().collect(),

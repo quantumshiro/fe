@@ -1935,24 +1935,21 @@ pub fn store_place_root_projection_rewrites_through_spill_and_reloads_owner(x: m
         let mut saw_owner_reload = false;
         for inst in &body.blocks[0].insts {
             match inst {
-                MirInst::Store { place, .. } => {
+                MirInst::Store { place, .. }
                     if projection_is_field1(&place.projection)
-                        && place_base_roots_local(&body, place.base, spill)
-                    {
-                        saw_spill_store = true;
-                    }
+                        && place_base_roots_local(&body, place.base, spill) =>
+                {
+                    saw_spill_store = true;
                 }
                 MirInst::Assign {
                     dest: Some(local),
                     rvalue: Rvalue::Load { place },
                     ..
-                } => {
-                    if *local == owner
-                        && place.projection.is_empty()
-                        && place_base_roots_local(&body, place.base, spill)
-                    {
-                        saw_owner_reload = true;
-                    }
+                } if *local == owner
+                    && place.projection.is_empty()
+                    && place_base_roots_local(&body, place.base, spill) =>
+                {
+                    saw_owner_reload = true;
                 }
                 _ => {}
             }
@@ -2020,24 +2017,21 @@ pub fn init_aggregate_place_root_projection_rewrites_through_spill_and_reloads_o
         let mut saw_owner_reload = false;
         for inst in &body.blocks[0].insts {
             match inst {
-                MirInst::InitAggregate { place, .. } => {
+                MirInst::InitAggregate { place, .. }
                     if projection_is_field1(&place.projection)
-                        && place_base_roots_local(&body, place.base, spill)
-                    {
-                        saw_spill_init = true;
-                    }
+                        && place_base_roots_local(&body, place.base, spill) =>
+                {
+                    saw_spill_init = true;
                 }
                 MirInst::Assign {
                     dest: Some(local),
                     rvalue: Rvalue::Load { place },
                     ..
-                } => {
-                    if *local == owner
-                        && place.projection.is_empty()
-                        && place_base_roots_local(&body, place.base, spill)
-                    {
-                        saw_owner_reload = true;
-                    }
+                } if *local == owner
+                    && place.projection.is_empty()
+                    && place_base_roots_local(&body, place.base, spill) =>
+                {
+                    saw_owner_reload = true;
                 }
                 _ => {}
             }
@@ -2110,24 +2104,21 @@ pub fn set_discriminant_place_root_projection_rewrites_through_spill_and_reloads
         let mut saw_owner_reload = false;
         for inst in &body.blocks[0].insts {
             match inst {
-                MirInst::SetDiscriminant { place, .. } => {
+                MirInst::SetDiscriminant { place, .. }
                     if projection_is_field0(&place.projection)
-                        && place_base_roots_local(&body, place.base, spill)
-                    {
-                        saw_spill_discriminant = true;
-                    }
+                        && place_base_roots_local(&body, place.base, spill) =>
+                {
+                    saw_spill_discriminant = true;
                 }
                 MirInst::Assign {
                     dest: Some(local),
                     rvalue: Rvalue::Load { place },
                     ..
-                } => {
-                    if *local == owner
-                        && place.projection.is_empty()
-                        && place_base_roots_local(&body, place.base, spill)
-                    {
-                        saw_owner_reload = true;
-                    }
+                } if *local == owner
+                    && place.projection.is_empty()
+                    && place_base_roots_local(&body, place.base, spill) =>
+                {
+                    saw_owner_reload = true;
                 }
                 _ => {}
             }

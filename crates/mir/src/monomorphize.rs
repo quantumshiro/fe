@@ -1458,10 +1458,8 @@ impl<'db> Monomorphizer<'db> {
                         parts.push(name.data(self.db).to_string());
                     }
                 }
-                ScopeId::Item(ItemKind::TopMod(top_mod)) => {
-                    if top_mod != root_mod {
-                        parts.push(top_mod.name(self.db).data(self.db).to_string());
-                    }
+                ScopeId::Item(ItemKind::TopMod(top_mod)) if top_mod != root_mod => {
+                    parts.push(top_mod.name(self.db).data(self.db).to_string());
                 }
                 _ => {}
             }

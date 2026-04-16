@@ -21,6 +21,7 @@ use revm::{
 };
 use solc_runner::{ContractBytecode, YulcError, compile_single_contract};
 use std::{
+    cmp::Reverse,
     collections::{HashMap, VecDeque},
     fmt,
     io::Write,
@@ -446,7 +447,7 @@ impl CallTrace {
         let mut result = hex_str.to_string();
         // Sort by longest hex representation first to avoid partial replacements
         let mut entries: Vec<_> = addr_map.iter().collect();
-        entries.sort_by(|a, b| b.0.to_string().len().cmp(&a.0.to_string().len()));
+        entries.sort_by_key(|(addr, _)| Reverse(addr.to_string().len()));
 
         for (addr, id) in entries {
             let addr_hex = hex::encode(addr.as_slice()); // 40 hex chars

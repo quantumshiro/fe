@@ -35,6 +35,7 @@ use async_lsp::{
 };
 use std::{
     backtrace::Backtrace,
+    cmp::Reverse,
     fs::{File, OpenOptions},
     io::Write as _,
     path::{Path, PathBuf},
@@ -241,7 +242,7 @@ pub fn gc_old_log_files() {
     if files.len() <= retention {
         return;
     }
-    files.sort_by(|a, b| b.1.cmp(&a.1)); // newest first
+    files.sort_by_key(|(_, modified)| Reverse(*modified)); // newest first
     for (path, _) in files.iter().skip(retention) {
         let _ = std::fs::remove_file(path);
     }

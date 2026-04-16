@@ -237,11 +237,12 @@ pub fn discover_context(
                 }
                 return Ok(discovery);
             }
-            Some(DiscoveredConfig::Ingot) | Some(DiscoveredConfig::Invalid) => {
-                if first_ingot_root.is_none() {
-                    first_ingot_root = Some(dir_url);
-                }
+            Some(DiscoveredConfig::Ingot) | Some(DiscoveredConfig::Invalid)
+                if first_ingot_root.is_none() =>
+            {
+                first_ingot_root = Some(dir_url);
             }
+            Some(DiscoveredConfig::Ingot) | Some(DiscoveredConfig::Invalid) => {}
             None => {}
         }
 

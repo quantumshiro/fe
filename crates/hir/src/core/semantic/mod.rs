@@ -187,7 +187,7 @@ fn canonicalize_effect_binding_trait_inst<'db>(
         .assoc_ty_bindings(db)
         .into_iter()
         .collect::<Vec<_>>();
-    assoc.sort_by(|(lhs, _), (rhs, _)| lhs.cmp(rhs));
+    assoc.sort_by_key(|(lhs, _)| *lhs);
     TraitInstId::new(
         db,
         trait_inst.def(db),

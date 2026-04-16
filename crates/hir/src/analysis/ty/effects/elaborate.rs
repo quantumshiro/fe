@@ -640,7 +640,7 @@ fn normalize_stored_trait_key<'db>(
             (name, rigidify_layout_holes_for_storage(db, scope, ty))
         })
         .collect();
-    assoc_bindings.sort_by(|(lhs, _), (rhs, _)| lhs.cmp(rhs));
+    assoc_bindings.sort_by_key(|(lhs, _)| *lhs);
     StoredTraitKey {
         def: key.def,
         args_no_self,
