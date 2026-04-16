@@ -1,0 +1,5 @@
+#[test(should_revert, panic = 0x10000000000000000000000000000000000000000000000000000000000000000)]
+fn test_panic_code_too_wide() {
+    let code: u256 = 1
+    revert(code)
+}

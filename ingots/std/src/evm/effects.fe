@@ -2,6 +2,7 @@ use core::effect_ref::{EffectHandle, EffectHandleMut, EffectRef, EffectRefMut}
 use core::{size_of}
 use core::abi::{Abi, AbiDecoder, AbiEncoder, AbiSize, AbiSpan, Decode, Encode, abi_root_head_size, encode_root}
 use core::contracts::ContractHost
+use core::error::ErrorVariant
 use core::message::MsgVariant
 
 use ingot::evm::intrinsic::{
@@ -12,6 +13,7 @@ use ingot::abi::Sol
 use ingot::abi::sol::{decode_input_at, decode_output, encoded_size, SolEncoder}
 use super::calldata::CallData
 use super::contract_field_slot
+use super::panic::Panic
 use ingot::evm::mem
 use ingot::evm::memory_input::MemoryBytes
 use ingot::evm::ops
@@ -691,7 +693,7 @@ impl Call for Evm {
 }
 
 pub fn assert(_ b: own bool) {
-    if !b { ops::revert(offset: 0, len: 0) }
+    if !b { revert_error(Panic { code: 0x01 }) }
 }
 
 /// Revert the current transaction with ABI-encoded data.
@@ -708,23 +710,15 @@ pub fn revert<T>(_ value: own T) -> !
     ops::revert(offset: result_ptr, len: result_len)
 }
 
-/// EVM-specific extension methods for `Result`.
-pub trait EvmResultExt<T> {
-    /// Reverts with the ABI-encoded error on `Err`, or returns the `Ok` value.
-    fn unwrap_or_revert(own self) -> T
-}
-
-impl<T, E> EvmResultExt<T> for Result<E, T>
-    where E: Encode<Sol> + AbiSize
+/// Revert with a Solidity-compatible custom error.
+///
+/// Encodes the error with its 4-byte selector prefix followed by
+/// ABI-encoded fields, matching Solidity's custom error encoding.
+pub fn revert_error<T>(_ error: own T) -> !
+    where T: ErrorVariant<Sol> + Encode<Sol>
 {
-    fn unwrap_or_revert(own self) -> T {
-        let mut val: T
-        match self {
-            Ok(v) => { val = v }
-            Err(e) => revert(e)
-        }
-        val
-    }
+    let (ptr, len) = encode_calldata(<T as ErrorVariant<Sol>>::SELECTOR, error)
+    ops::revert(offset: ptr, len: len)
 }
 
 impl Super for Evm {}

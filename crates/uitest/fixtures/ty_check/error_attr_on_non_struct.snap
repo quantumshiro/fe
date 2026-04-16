@@ -1,0 +1,12 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/error_attr_on_non_struct.fe
+---
+error[16-0001]: `#[error]` is only valid on structs (found on fn)
+  ┌─ error_attr_on_non_struct.fe:1:1
+  │
+1 │ #[error]
+  │ ^^^^^^^^ `#[error]` must be placed on a `struct` item
+  │
+  = move `#[error]` to a struct declaration

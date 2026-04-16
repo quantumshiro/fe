@@ -1264,7 +1264,7 @@ impl<'db, 'a> ModuleLowerer<'db, 'a> {
 
         {
             let mut const_data_globals = FxHashMap::default();
-            let mut overflow_revert_block = None;
+            let mut panic_revert_blocks = FxHashMap::default();
             let mut ctx = LowerCtx {
                 fb: &mut fb,
                 db: self.db,
@@ -1286,7 +1286,7 @@ impl<'db, 'a> ModuleLowerer<'db, 'a> {
                 data_globals: &mut self.data_globals,
                 data_global_counter: &mut self.data_global_counter,
                 const_data_globals: &mut const_data_globals,
-                overflow_revert_block: &mut overflow_revert_block,
+                panic_revert_blocks: &mut panic_revert_blocks,
             };
             for (idx, block) in ctx.body.blocks.iter().enumerate() {
                 let block_id = mir::BasicBlockId(idx as u32);
@@ -1342,8 +1342,8 @@ pub(super) struct LowerCtx<'a, 'db, C: sonatina_ir::func_cursor::FuncCursor> {
     pub(super) data_global_counter: &'a mut usize,
     /// Per-function dedupe for constant aggregate payloads.
     pub(super) const_data_globals: &'a mut FxHashMap<Vec<u8>, GlobalVariableRef>,
-    /// Lazily-created shared overflow trap block for checked arithmetic in this function.
-    pub(super) overflow_revert_block: &'a mut Option<BlockId>,
+    /// Lazily-created panic revert blocks, keyed by Panic(uint256) code.
+    pub(super) panic_revert_blocks: &'a mut FxHashMap<u64, BlockId>,
 }
 
 impl<'a, 'db, C: sonatina_ir::func_cursor::FuncCursor> LowerCtx<'a, 'db, C> {

@@ -105,15 +105,17 @@ func private %transfer__0_StorageMap_u256__u256__0___2ec0e7c12ea7de91(v0.i256, v
         br v12 block3 block4;
 
     block3:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block4:
         call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_0__6a346ad3c930d971 v0 v11;
-        (v17.i256, v18.i1) = uaddo v8 v2;
-        br v18 block3 block5;
+        (v21.i256, v22.i1) = uaddo v8 v2;
+        br v22 block3 block5;
 
     block5:
-        call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_0__6a346ad3c930d971 v1 v17;
+        call %storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_0__6a346ad3c930d971 v1 v21;
         return 0.i256;
 }
 
@@ -196,16 +198,18 @@ func private %storagemap_storage_slot_with_salt__u256__3271ca15373d4483(v0.i256,
         br v7 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         mstore v6 v1 i256;
-        (v11.i256, v12.i1) = uaddo v5 32.i256;
-        br v12 block1 block3;
+        (v15.i256, v16.i1) = uaddo v5 32.i256;
+        br v16 block1 block3;
 
     block3:
-        v14.i256 = evm_keccak256 v4 v11;
-        return v14;
+        v18.i256 = evm_keccak256 v4 v15;
+        return v18;
 }
 
 func private %u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key(v0.i256, v1.i256) -> i256 {

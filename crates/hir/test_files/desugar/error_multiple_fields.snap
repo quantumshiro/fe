@@ -1,0 +1,37 @@
+---
+source: crates/hir/tests/desugar.rs
+expression: output
+input_file: test_files/desugar/error_multiple_fields.fe
+---
+use core::prelude::*
+use std::prelude::*
+
+pub struct InsufficientBalance {
+    pub balance: u256,
+    pub required: u256,
+}
+
+impl core::error::ErrorVariant<std::abi::Sol> for InsufficientBalance {
+    const SELECTOR: u32 = std::abi::sol::sol(("InsufficientBalance", "(", u256::SOL_TYPE, ",", u256::SOL_TYPE, ")"))
+}
+
+impl core::abi::AbiSize for InsufficientBalance {
+    const ENCODED_SIZE: u256 = 0 + u256::ENCODED_SIZE + u256::ENCODED_SIZE
+    const IS_DYNAMIC: bool = false || u256::IS_DYNAMIC || u256::IS_DYNAMIC
+    const NEEDS_PARENT_WRAPPER: bool = false || u256::IS_DYNAMIC || u256::IS_DYNAMIC
+}
+
+impl core::abi::Encode<std::abi::Sol> for InsufficientBalance {
+    const DIRECT_ENCODE: bool = true && <u256 as core::abi::Encode<std::abi::Sol> >::DIRECT_ENCODE && <u256 as core::abi::Encode<std::abi::Sol> >::DIRECT_ENCODE
+
+    fn encode<E: core::abi::AbiEncoder<std::abi::Sol>>(own self, _ e: mut E) {
+        core::abi::encode_field<std::abi::Sol, u256, E>(self.balance, e)
+        core::abi::encode_field<std::abi::Sol, u256, E>(self.required, e)
+    }
+
+    fn encode_to_ptr(own self, _ ptr: u256) {
+        self.balance.encode_to_ptr(ptr)
+        let __field_ptr0 = ptr + u256::ENCODED_SIZE
+        self.required.encode_to_ptr(__field_ptr0)
+    }
+}

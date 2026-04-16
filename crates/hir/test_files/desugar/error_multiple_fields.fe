@@ -1,0 +1,5 @@
+#[error]
+pub struct InsufficientBalance {
+    pub balance: u256,
+    pub required: u256,
+}

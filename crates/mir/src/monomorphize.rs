@@ -812,13 +812,38 @@ impl<'db> Monomorphizer<'db> {
                 };
 
             if let Some(scope) = can_encode {
-                let revert_symbol =
-                    resolve_lib_func_path(self.db, scope, "std::evm::effects::revert").and_then(
-                        |revert_func| {
-                            self.ensure_instance(revert_func, &[concrete_t], None, &[], &[])
-                                .map(|(_, symbol)| symbol)
-                        },
+                // Check if T also implements ErrorVariant<Sol>; if so, use
+                // revert_error (selector-prefixed) instead of plain revert.
+                let is_error_variant = (|| {
+                    let solve_cx = TraitSolveCx::new(self.db, scope);
+                    let error_variant_trait =
+                        resolve_core_trait(self.db, scope, &["error", "ErrorVariant"])?;
+                    let sol_ty = resolve_lib_type_path(self.db, scope, "std::abi::Sol")?;
+                    let inst = TraitInstId::new(
+                        self.db,
+                        error_variant_trait,
+                        vec![concrete_t, sol_ty],
+                        IndexMap::new(),
                     );
+                    if is_goal_satisfiable(self.db, solve_cx, inst).is_satisfied() {
+                        Some(())
+                    } else {
+                        None
+                    }
+                })()
+                .is_some();
+
+                let revert_path = if is_error_variant {
+                    "std::evm::effects::revert_error"
+                } else {
+                    "std::evm::effects::revert"
+                };
+
+                let revert_symbol =
+                    resolve_lib_func_path(self.db, scope, revert_path).and_then(|revert_func| {
+                        self.ensure_instance(revert_func, &[concrete_t], None, &[], &[])
+                            .map(|(_, symbol)| symbol)
+                    });
 
                 let Some(symbol) = revert_symbol else {
                     let ty_name = concrete_t.pretty_print(self.db);
@@ -829,7 +854,7 @@ impl<'db> Monomorphizer<'db> {
                     self.defer_error(MirLowerError::Unsupported {
                         func_name,
                         message: format!(
-                            "failed to instantiate `revert<{ty_name}>()` for `unwrap()`"
+                            "failed to instantiate `{revert_path}<{ty_name}>()` for `unwrap()`"
                         ),
                     });
                     return;

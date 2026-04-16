@@ -5,8 +5,8 @@ pub mod diagnostics;
 pub mod place;
 
 use self::analysis_pass::{
-    AnalysisPassManager, ArithmeticAttrPass, EventLowerPass, InlineAttrPass, LoopUnrollAttrPass,
-    MsgLowerPass, ParsingPass, PayableAttrPass,
+    AnalysisPassManager, ArithmeticAttrPass, ErrorLowerPass, EventLowerPass, InlineAttrPass,
+    LoopUnrollAttrPass, MsgLowerPass, ParsingPass, PayableAttrPass,
 };
 use self::name_resolution::ImportAnalysisPass;
 use self::ty::{
@@ -31,6 +31,7 @@ pub fn initialize_analysis_pass() -> AnalysisPassManager {
     pass_manager.add_module_pass("PayableAttr", Box::new(PayableAttrPass {}));
     pass_manager.add_module_pass("MsgLower", Box::new(MsgLowerPass {}));
     pass_manager.add_module_pass("EventLower", Box::new(EventLowerPass {}));
+    pass_manager.add_module_pass("ErrorLower", Box::new(ErrorLowerPass {}));
     pass_manager.add_module_pass("InlineAttr", Box::new(InlineAttrPass {}));
     pass_manager.add_module_pass("LoopUnrollAttr", Box::new(LoopUnrollAttrPass {}));
     pass_manager.add_module_pass("MsgSelector", Box::new(MsgSelectorAnalysisPass {}));

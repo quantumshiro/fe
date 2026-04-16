@@ -15,17 +15,17 @@ func private %cast_u8_usize_cmp(v0.objref<[i8; 8]>, v1.i256, v2.i256) -> i8 {
         return 1.i8;
 
     block2:
-        v15.i256 = zext v8 i256;
-        v16.i1 = call %usize_ha12462c6d36e68b0_eq_he50383edd273619f_eq v2 v15;
-        br v16 block3 block4;
+        v19.i256 = zext v12 i256;
+        v20.i1 = call %usize_ha12462c6d36e68b0_eq_he50383edd273619f_eq v2 v19;
+        br v20 block3 block4;
 
     block3:
         return 2.i8;
 
     block4:
-        v20.i256 = zext v8 i256;
-        v21.i1 = call %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_gt v2 v20;
-        br v21 block5 block6;
+        v24.i256 = zext v12 i256;
+        v25.i1 = call %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_gt v2 v24;
+        br v25 block5 block6;
 
     block5:
         return 3.i8;
@@ -34,14 +34,16 @@ func private %cast_u8_usize_cmp(v0.objref<[i8; 8]>, v1.i256, v2.i256) -> i8 {
         return 0.i8;
 
     block7:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 50.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block8:
-        v7.objref<i8> = obj.index v0 v1;
-        v8.i8 = obj.load v7;
-        v10.i256 = zext v8 i256;
-        v11.i1 = call %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_lt v2 v10;
-        br v11 block1 block2;
+        v11.objref<i8> = obj.index v0 v1;
+        v12.i8 = obj.load v11;
+        v14.i256 = zext v12 i256;
+        v15.i1 = call %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_lt v2 v14;
+        br v15 block1 block2;
 }
 
 func private %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_lt(v0.i256, v1.i256) -> i1 {

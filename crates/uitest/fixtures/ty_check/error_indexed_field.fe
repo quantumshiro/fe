@@ -1,0 +1,5 @@
+#[error]
+struct BadError {
+    #[indexed]
+    code: u256,
+}

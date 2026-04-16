@@ -232,6 +232,8 @@ pub enum DesugaredOrigin {
     Msg(MsgDesugared),
     /// The HIR node is the result of desugaring a `#[event]` struct.
     Event(EventDesugared),
+    /// The HIR node is the result of desugaring a `#[error]` struct.
+    Error(ErrorDesugared),
 }
 
 /// Tracks the origin of HIR nodes desugared from a `msg` block.
@@ -262,6 +264,13 @@ pub enum MsgDesugaredFocus {
 pub struct EventDesugared {
     /// The original `struct` AST node annotated with `#[event]`.
     pub event_struct: AstPtr<ast::Struct>,
+}
+
+/// Tracks the origin of HIR nodes desugared from an `#[error]` struct.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ErrorDesugared {
+    /// The original `struct` AST node annotated with `#[error]`.
+    pub error_struct: AstPtr<ast::Struct>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

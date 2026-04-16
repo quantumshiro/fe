@@ -35,16 +35,18 @@ func private %call_internal_helpers(v0.i64, v1.i64) -> objref<@__fe_obj_tuple_0>
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
-        v7.i64 = call %u64_haee7f05a097ffa16_saturatingadd_h7ca6e43aca8f23bb_saturating_add v0 v1;
-        v8.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
-        v9.objref<i64> = obj.proj v8 0.i256;
-        obj.store v9 v2;
-        v11.objref<i64> = obj.proj v8 1.i256;
-        obj.store v11 v7;
-        return v8;
+        v11.i64 = call %u64_haee7f05a097ffa16_saturatingadd_h7ca6e43aca8f23bb_saturating_add v0 v1;
+        v12.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v13.objref<i64> = obj.proj v12 0.i256;
+        obj.store v13 v2;
+        v15.objref<i64> = obj.proj v12 1.i256;
+        obj.store v15 v11;
+        return v12;
 }
 
 func private %u64_haee7f05a097ffa16_saturatingadd_h7ca6e43aca8f23bb_saturating_add(v0.i64, v1.i64) -> i64 {

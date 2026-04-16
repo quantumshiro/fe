@@ -123,7 +123,9 @@ func private %u256_h3271ca15373d4483_mul_h290dcc921ed80777_mul(v0.i256, v1.i256)
         br v3 block1 block2;
 
     block1:
-        evm_revert 0.i256 0.i256;
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
 
     block2:
         return v2;
