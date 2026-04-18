@@ -1,12 +1,11 @@
 ---
 source: crates/uitest/tests/ty_check.rs
+assertion_line: 27
 expression: diags
 input_file: fixtures/ty_check/effect_type_mismatch.fe
 ---
-error[8-0038]: effect `Storage` provided to `needs_storage` has type `Other`, but `Storage` is required
-   ┌─ effect_type_mismatch.fe:18:9
+error[8-0076]: keyed effect binding `Storage` requires a provider compatible with `effect_type_mismatch::Storage`, but `effect_type_mismatch::Other` is given
+   ┌─ effect_type_mismatch.fe:16:21
    │
-17 │     with (Storage = other) {
-   │                     ----- effect `Storage` is provided here
-18 │         needs_storage()
-   │         ^^^^^^^^^^^^^^^ expected `Storage` for effect `Storage`, found `Other`
+16 │     with (Storage = other) {
+   │                     ^^^^^ `effect_type_mismatch::Other` is not compatible with keyed effect `Storage`

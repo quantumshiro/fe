@@ -1,0 +1,33 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/array_mut.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %array_mut(v0.i8) -> objref<[i8; 4]> {
+    block0:
+        v1.objref<[i8; 4]> = obj.alloc [i8; 4];
+        v3.objref<i8> = obj.index v1 0.i256;
+        obj.store v3 v0;
+        v6.objref<i8> = obj.index v1 1.i256;
+        obj.store v6 2.i8;
+        v9.objref<i8> = obj.index v1 2.i256;
+        obj.store v9 3.i8;
+        v12.objref<i8> = obj.index v1 3.i256;
+        obj.store v12 4.i8;
+        return v1;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v2.objref<[i8; 4]> = call %array_mut 0.i8;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

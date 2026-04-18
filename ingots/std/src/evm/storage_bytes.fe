@@ -1,0 +1,202 @@
+use core::abi::{ByteInput, BytesView}
+
+use super::mem
+use super::ops
+use super::storage_map::{StorageKey, StorageMap}
+
+/// Round `len` up to the number of whole EVM words required to store it.
+pub fn ceil_words(_ len: u256) -> u256 {
+    if len == 0 {
+        return 0
+    }
+    ((len - 1) / 32) + 1
+}
+
+/// Mask that preserves the first `rem` bytes of a 32-byte word.
+pub fn mask_for_bytes(rem: u256) -> u256 {
+    if rem == 0 {
+        return 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    }
+
+    let shift = (32 - rem) * 8
+    0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff << shift
+}
+
+/// Zero the right-padding bytes after copying a dynamic byte slice into memory.
+pub fn zero_pad_memory_bytes(ptr: u256, len: u256) {
+    let rem = len % 32
+    if rem == 0 {
+        return
+    }
+
+    let tail_ptr = ptr + (len / 32) * 32
+    let word = ops::mload(tail_ptr)
+    ops::mstore(addr: tail_ptr, value: word & mask_for_bytes(rem))
+}
+
+fn copy_view_words_to_memory<I>(_ view: BytesView<I>, _ dest: u256)
+    where I: ByteInput
+{
+    let word_count = ceil_words(view.len())
+    let mut i: u256 = 0
+    while i < word_count {
+        let mut word = view.word_at(i * 32)
+        if i + 1 == word_count {
+            let rem = view.len() % 32
+            if rem != 0 {
+                word = word & mask_for_bytes(rem)
+            }
+        }
+        ops::mstore(addr: dest + i * 32, value: word)
+        i += 1
+    }
+}
+
+/// Return ABI-encoded `bytes` copied directly from calldata.
+///
+/// `data_ptr` is a raw calldata byte offset.
+pub fn encode_bytes_return_from_calldata(data_ptr: u256, len: u256) -> ! {
+    ops::mstore(addr: 0, value: 32)
+    ops::mstore(addr: 32, value: len)
+    ops::calldatacopy(dest: 64, offset: data_ptr, len: len)
+    zero_pad_memory_bytes(ptr: 64, len: len)
+    ops::return_data(offset: 0, len: 64 + ceil_words(len) * 32)
+}
+
+/// Return ABI-encoded `bytes` copied from an arbitrary byte view.
+pub fn encode_bytes_return_view<I>(view: BytesView<I>) -> !
+    where I: ByteInput
+{
+    ops::mstore(addr: 0, value: 32)
+    ops::mstore(addr: 32, value: view.len())
+    copy_view_words_to_memory(view, 64)
+    ops::return_data(offset: 0, len: 64 + ceil_words(view.len()) * 32)
+}
+
+/// Emit a Solidity-compatible event with a single dynamic `bytes` payload.
+///
+/// `data_ptr` is a raw calldata byte offset.
+pub fn emit_bytes_event(topic0: u256, data_ptr: u256, data_len: u256) {
+    let total_len = 64 + ceil_words(data_len) * 32
+    let ptr = mem::alloc(total_len)
+    ops::mstore(addr: ptr, value: 32)
+    ops::mstore(addr: ptr + 32, value: data_len)
+    ops::calldatacopy(dest: ptr + 64, offset: data_ptr, len: data_len)
+    zero_pad_memory_bytes(ptr: ptr + 64, len: data_len)
+    ops::log1(offset: ptr, len: total_len, topic0: topic0)
+}
+
+/// Emit a Solidity-compatible event with a single dynamic `bytes` payload.
+pub fn emit_bytes_event_view<I>(topic0: u256, view: BytesView<I>)
+    where I: ByteInput
+{
+    let total_len = 64 + ceil_words(view.len()) * 32
+    let ptr = mem::alloc(total_len)
+    ops::mstore(addr: ptr, value: 32)
+    ops::mstore(addr: ptr + 32, value: view.len())
+    copy_view_words_to_memory(view, ptr + 64)
+    ops::log1(offset: ptr, len: total_len, topic0: topic0)
+}
+
+/// Storage-backed dynamic bytes keyed by `K`.
+///
+/// This uses two scalar `StorageMap`s internally:
+/// - `LEN_SALT`: byte lengths
+/// - `WORD_SALT`: 32-byte payload words
+pub struct StorageBytes<K, const LEN_SALT: u256 = _, const WORD_SALT: u256 = _> {}
+
+impl<K: StorageKey + Copy, const LEN_SALT: u256, const WORD_SALT: u256>
+    StorageBytes<K, LEN_SALT, WORD_SALT>
+{
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn len(self, key: K) -> u256 {
+        let lengths: StorageMap<K, u256, LEN_SALT> = StorageMap::new()
+        lengths.get(key)
+    }
+
+    pub fn clear(self, key: K) {
+        let lengths: StorageMap<K, u256, LEN_SALT> = StorageMap::new()
+        let words: StorageMap<(K, u256), u256, WORD_SALT> = StorageMap::new()
+
+        let len = lengths.get(key)
+        let word_count = ceil_words(len)
+        let mut i: u256 = 0
+        while i < word_count {
+            words.set(key: (key, i), value: 0)
+            i += 1
+        }
+        lengths.set(key: key, value: 0)
+    }
+
+    /// Store bytes copied directly from calldata.
+    ///
+    /// `data_ptr` is a raw calldata byte offset.
+    pub fn store_from_calldata(self, key: K, data_ptr: u256, len: u256) {
+        self.clear(key)
+
+        let lengths: StorageMap<K, u256, LEN_SALT> = StorageMap::new()
+        let words: StorageMap<(K, u256), u256, WORD_SALT> = StorageMap::new()
+
+        lengths.set(key: key, value: len)
+        let word_count = ceil_words(len)
+        let mut i: u256 = 0
+        while i < word_count {
+            let mut word = ops::calldataload(data_ptr + i * 32)
+            if i + 1 == word_count {
+                let rem = len % 32
+                if rem != 0 {
+                    word = word & mask_for_bytes(rem)
+                }
+            }
+            words.set(key: (key, i), value: word)
+            i += 1
+        }
+    }
+
+    /// Store bytes from an arbitrary ABI byte view.
+    pub fn store_view<I>(self, key: K, view: BytesView<I>)
+        where I: ByteInput
+    {
+        self.clear(key)
+
+        let lengths: StorageMap<K, u256, LEN_SALT> = StorageMap::new()
+        let words: StorageMap<(K, u256), u256, WORD_SALT> = StorageMap::new()
+
+        lengths.set(key: key, value: view.len())
+        let word_count = ceil_words(view.len())
+        let mut i: u256 = 0
+        while i < word_count {
+            let mut word = view.word_at(i * 32)
+            if i + 1 == word_count {
+                let rem = view.len() % 32
+                if rem != 0 {
+                    word = word & mask_for_bytes(rem)
+                }
+            }
+            words.set(key: (key, i), value: word)
+            i += 1
+        }
+    }
+
+    /// Return ABI-encoded `bytes` from storage.
+    pub fn encode_return(self, key: K) -> ! {
+        let lengths: StorageMap<K, u256, LEN_SALT> = StorageMap::new()
+        let words: StorageMap<(K, u256), u256, WORD_SALT> = StorageMap::new()
+
+        let len = lengths.get(key)
+        ops::mstore(addr: 0, value: 32)
+        ops::mstore(addr: 32, value: len)
+
+        let word_count = ceil_words(len)
+        let mut i: u256 = 0
+        while i < word_count {
+            ops::mstore(addr: 64 + i * 32, value: words.get((key, i)))
+            i += 1
+        }
+
+        ops::return_data(offset: 0, len: 64 + word_count * 32)
+    }
+}

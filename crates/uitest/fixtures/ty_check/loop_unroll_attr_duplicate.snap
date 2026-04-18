@@ -1,0 +1,12 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/loop_unroll_attr_duplicate.fe
+---
+error[15-0001]: duplicate loop unroll attribute on `for` loop
+  ┌─ loop_unroll_attr_duplicate.fe:3:5
+  │
+3 │     #[unroll(never)]
+  │     ^^^^^^^^^^^^^^^^ remove the extra loop unroll attribute
+  │
+  = use at most one of `#[unroll]` or `#[unroll(never)]`

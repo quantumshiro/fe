@@ -7,6 +7,7 @@ mod name_resolver;
 pub mod path_resolver;
 pub(crate) mod traits_in_scope;
 mod visibility_checker;
+pub use visibility_checker::is_scope_visible_from;
 
 use crate::core::hir_def::TopLevelMod;
 use common::ingot::Ingot;
@@ -16,13 +17,13 @@ pub use name_resolver::{
     EarlyNameQueryId, NameDerivation, NameDomain, NameRes, NameResBucket, NameResKind,
     NameResolutionError, QueryDirective,
 };
+pub(crate) use path_resolver::{FindAssociatedTypeError, find_associated_type};
 pub use path_resolver::{
-    PathRes, PathResError, PathResErrorKind, ResolvedVariant, find_associated_type,
-    resolve_ident_to_bucket, resolve_name_res, resolve_path, resolve_path_with_observer,
+    PathRes, PathResError, PathResErrorKind, ResolvedVariant, resolve_ident_to_bucket,
+    resolve_name_res, resolve_path, resolve_path_with_observer,
 };
 use tracing::debug;
 pub use traits_in_scope::available_traits_in_scope;
-pub(crate) use visibility_checker::is_scope_visible_from;
 
 use self::{diagnostics::ImportDiag, import_resolver::DefaultImporter};
 use crate::analysis::{

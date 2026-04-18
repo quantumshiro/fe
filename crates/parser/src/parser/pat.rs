@@ -157,10 +157,10 @@ impl super::Parse for RecordPatFieldScope {
     type Error = Recovery<ErrProof>;
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
-        let has_label = parser.dry_run(|parser| {
-            //
-            parser.bump_if(SyntaxKind::Ident) && parser.bump_if(SyntaxKind::Colon)
-        });
+        let has_label = matches!(
+            parser.peek_n_non_trivia(2).as_slice(),
+            [SyntaxKind::Ident, SyntaxKind::Colon]
+        );
         if has_label {
             parser.bump_expected(SyntaxKind::Ident);
             parser.bump_expected(SyntaxKind::Colon);
@@ -198,6 +198,14 @@ impl super::Parse for RecvArmPatScope {
     type Error = Recovery<ErrProof>;
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        if parser.current_kind() == Some(SyntaxKind::Underscore) {
+            self.set_kind(SyntaxKind::WildCardPat);
+            parser
+                .parse(WildCardPatScope::default())
+                .expect("wildcard recv arm pattern parsing should be infallible");
+            return Ok(());
+        }
+
         parser.or_recover(|p| {
             let pos = p.current_pos;
             p.parse(PathScope::default())
@@ -255,9 +263,10 @@ impl super::Parse for RecvArmRecordPatFieldScope {
     type Error = Recovery<ErrProof>;
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
-        let has_label = parser.dry_run(|parser| {
-            parser.bump_if(SyntaxKind::Ident) && parser.bump_if(SyntaxKind::Colon)
-        });
+        let has_label = matches!(
+            parser.peek_n_non_trivia(2).as_slice(),
+            [SyntaxKind::Ident, SyntaxKind::Colon]
+        );
         if has_label {
             parser.bump_expected(SyntaxKind::Ident);
             parser.bump_expected(SyntaxKind::Colon);

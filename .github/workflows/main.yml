@@ -11,6 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
   RUST_BACKTRACE: full
   SOLC_VERSION: v0.8.30
 
@@ -21,10 +22,6 @@ jobs:
       RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v5
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libboost-all-dev
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -37,7 +34,7 @@ jobs:
       - name: Lint with rustfmt
         run: cargo fmt --all -- --check
       - name: Lint with clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D clippy::all
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D clippy::all
 
   test:
     # Build & Test runs on all platforms
@@ -47,6 +44,7 @@ jobs:
         include:
           - os: ubuntu-latest
           - os: macOS-latest
+          - os: windows-latest
     steps:
       - uses: actions/checkout@v5
       - name: Install rust
@@ -57,30 +55,42 @@ jobs:
         id: solc-cache
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/solc-${{ env.SOLC_VERSION }}
+          path: ${{ runner.os == 'Windows' && format('{0}\\solc-{1}.exe', runner.temp, env.SOLC_VERSION) || format('{0}/solc-{1}', runner.temp, env.SOLC_VERSION) }}
           key: solc-${{ runner.os }}-${{ env.SOLC_VERSION }}
-      - name: Download solc
-        if: steps.solc-cache.outputs.cache-hit != 'true'
+      - name: Download solc (Linux/macOS)
+        if: steps.solc-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         run: |
           set -euo pipefail
           if [ "${{ runner.os }}" = "Linux" ]; then
             url="https://github.com/ethereum/solidity/releases/download/${SOLC_VERSION}/solc-static-linux"
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            url="https://github.com/ethereum/solidity/releases/download/${SOLC_VERSION}/solc-macos"
           else
-            echo "Unsupported OS: ${{ runner.os }}"
-            exit 1
+            url="https://github.com/ethereum/solidity/releases/download/${SOLC_VERSION}/solc-macos"
           fi
           curl -Ls "$url" -o "$RUNNER_TEMP/solc-${SOLC_VERSION}"
           chmod +x "$RUNNER_TEMP/solc-${SOLC_VERSION}"
+      - name: Download solc (Windows)
+        if: steps.solc-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/ethereum/solidity/releases/download/$env:SOLC_VERSION/solc-windows.exe"
+          $output = "$env:RUNNER_TEMP\solc-$env:SOLC_VERSION.exe"
+          Invoke-WebRequest -Uri $url -OutFile $output
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-workspace-crates: true
       - name: Build
-        run: cargo test --workspace --all-features --no-run --locked --exclude fe-language-server --exclude fe-bench
+        run: cargo test --release --workspace --all-features --no-run --locked --exclude fe-language-server --exclude fe-bench
       - name: Run tests
         env:
-          FE_SOLC_PATH: ${{ runner.temp }}/solc-${{ env.SOLC_VERSION }}
-        run: cargo test --workspace --all-features --verbose --exclude fe-language-server --exclude fe-bench
+          FE_SOLC_PATH: ${{ runner.os == 'Windows' && format('{0}\\solc-{1}.exe', runner.temp, env.SOLC_VERSION) || format('{0}/solc-{1}', runner.temp, env.SOLC_VERSION) }}
+        run: cargo nextest run --release --workspace --all-features --no-fail-fast --locked --exclude fe-language-server --exclude fe-bench
 
   wasm-wasi-check:
     runs-on: ubuntu-latest
@@ -97,35 +107,75 @@ jobs:
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
       - name: Check core crates for wasm32-unknown-unknown
-        run: cargo check -p fe-common -p fe-parser -p fe-hir --target wasm32-unknown-unknown
+        run: cargo check --locked -p fe-common -p fe-parser -p fe-hir --target wasm32-unknown-unknown
       - name: Check filesystem crates for wasm32-wasip1
-        run: cargo check -p fe-driver -p fe-resolver -p fe --target wasm32-wasip1
+        run: cargo check --locked -p fe-driver -p fe-resolver --target wasm32-wasip1
 
   release:
     # Only run this when we push a tag
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ matrix.os }}
     needs: [lint, test, wasm-wasi-check]
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
-            BIN_FILE: fe_amd64
+            target: x86_64-unknown-linux-gnu
+            BIN_FILE: fe_linux_amd64
+            EXT: ""
+            EXTRA_FEATURES: ""
+            STRIP: strip
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            BIN_FILE: fe_linux_arm64
+            EXT: ""
+            EXTRA_FEATURES: ""
+            STRIP: aarch64-linux-gnu-strip
           - os: macOS-latest
-            BIN_FILE: fe_mac
+            target: aarch64-apple-darwin
+            BIN_FILE: fe_mac_arm64
+            EXT: ""
+            EXTRA_FEATURES: ""
+            STRIP: strip
+          - os: macOS-latest
+            target: x86_64-apple-darwin
+            BIN_FILE: fe_mac_amd64
+            EXT: ""
+            EXTRA_FEATURES: ""
+            STRIP: strip
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            BIN_FILE: fe_windows_amd64.exe
+            EXT: ".exe"
+            EXTRA_FEATURES: ""
+            STRIP: ""
 
     steps:
       - uses: actions/checkout@v5
+      - name: Install cross-compilation toolchain (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          targets: ${{ matrix.target }}
       - name: Build
-        run: cargo build --all-features --release && strip target/release/fe && mv target/release/fe target/release/${{ matrix.BIN_FILE }}
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: target/release/${{ matrix.BIN_FILE }}
-          prerelease: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --locked --release --target ${{ matrix.target }} ${{ matrix.EXTRA_FEATURES }}
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: ${{ matrix.STRIP }} target/${{ matrix.target }}/release/fe
+      - name: Rename binary
+        shell: bash
+        run: mv target/${{ matrix.target }}/release/fe${{ matrix.EXT }} target/${{ matrix.target }}/release/${{ matrix.BIN_FILE }}
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/${{ matrix.target }}/release/${{ matrix.BIN_FILE }}
+          prerelease: true

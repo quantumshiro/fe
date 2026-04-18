@@ -1,0 +1,578 @@
+---
+source: crates/mir/tests/lowering_snapshots.rs
+expression: mir_output
+---
+#[inline(never)]
+fn __LayoutHoles_recv_0_0(v0: Set, v1: u256, v2: u256) -> ():
+  ; runtime_abi values=[v0: Set] effects=[]
+  bb0:
+    v3: u256 = load mem[v0].0
+    v4: u256 = v3
+    v5: u256 = load mem[v0].1
+    v6: u256 = v5
+    eval storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_2__7d7bd47f3e4876cc(v4, v6)
+    v7: u256 = checked_add<u256>(v6, 1)
+    eval storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_4__37c47c5dffef1abd(v4, v7)
+    ret
+
+#[inline(never)]
+fn __LayoutHoles_recv_0_1(v0: Get, v1: u256, v2: u256) -> u256:
+  ; runtime_abi values=[v0: Get] effects=[]
+  bb0:
+    v3: u256 = v0
+    v4: u256 = storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_2__7d7bd47f3e4876cc(v3)
+    v5: u256 = storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_4__37c47c5dffef1abd(v3)
+    v6: u256 = checked_add<u256>(v4, v5)
+    ret v6
+
+fn __LayoutHoles_init() -> ():
+  bb0:
+    v0: u256 = callvalue()
+    br (v0 != 0) bb1 bb2
+  bb1:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+  bb2:
+    v1: u256 = code_region_offset(code_region(__LayoutHoles_runtime))
+    v2: u256 = code_region_len(code_region(__LayoutHoles_runtime))
+    eval codecopy(0, v1, v2)
+    terminate return_data(0, v2)
+
+#[inline(never)]
+fn __LayoutHoles_runtime_arm_0_0() -> ():
+  bb0:
+    v0: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field___u256__u256___f8fb67624e92e2b2(0)
+    v1: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__StorageMap_u256__u256__2___6ef63009f66beaf4(2)
+    v2: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__u256__3271ca15373d4483(3)
+    v3: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__StorageMap_u256__u256__4___173e98e83ba93f89(4)
+    v4: u256 = callvalue()
+    br (v4 != 0) bb1 bb2
+  bb1:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+  bb2:
+    v5: SolDecoder<CallData> = runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+    v6: Set = set_hc90b8ea7f5d56426_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v5)
+    eval __LayoutHoles_recv_0_0(v6)
+    terminate return_unit__Evm_hef0af3106e109414__3af54274b2985741()
+
+#[inline(never)]
+fn __LayoutHoles_runtime_arm_0_1() -> ():
+  bb0:
+    v0: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field___u256__u256___f8fb67624e92e2b2(0)
+    v1: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__StorageMap_u256__u256__2___6ef63009f66beaf4(2)
+    v2: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__u256__3271ca15373d4483(3)
+    v3: u256 = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__StorageMap_u256__u256__4___173e98e83ba93f89(4)
+    v4: u256 = callvalue()
+    br (v4 != 0) bb1 bb2
+  bb1:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+  bb2:
+    v5: SolDecoder<CallData> = runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+    v6: Get = get_h7c52564759be682_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v5)
+    v7: u256 = __LayoutHoles_recv_0_1(v6)
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v7)
+
+#[inline(never)]
+fn __LayoutHoles_runtime() -> ():
+  bb0:
+    v0: u32 = runtime_selector__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+    br (v0 == 1) bb2 bb4
+  bb1:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+  bb2:
+    terminate __LayoutHoles_runtime_arm_0_0()
+  bb3:
+    terminate __LayoutHoles_runtime_arm_0_1()
+  bb4:
+    br (v0 == 2) bb3 bb1
+
+fn storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_2__7d7bd47f3e4876cc(v0: StorageMap<u256, u256, 2>, v1: u256, v2: u256) -> ():
+  ; runtime_abi values=[v1: u256, v2: u256] effects=[]
+  bb0:
+    v3: u256 = u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word(v2)
+    eval storagemap_set_word_with_salt__u256__3271ca15373d4483(v1, 2, v3)
+    ret
+
+fn storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_4__37c47c5dffef1abd(v0: StorageMap<u256, u256, 4>, v1: u256, v2: u256) -> ():
+  ; runtime_abi values=[v1: u256, v2: u256] effects=[]
+  bb0:
+    v3: u256 = u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word(v2)
+    eval storagemap_set_word_with_salt__u256__3271ca15373d4483(v1, 4, v3)
+    ret
+
+fn storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_2__7d7bd47f3e4876cc(v0: StorageMap<u256, u256, 2>, v1: u256) -> u256:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v2: u256 = storagemap_get_word_with_salt__u256__3271ca15373d4483(v1, 2)
+    v3: u256 = u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v2)
+    ret v3
+
+fn storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_4__37c47c5dffef1abd(v0: StorageMap<u256, u256, 4>, v1: u256) -> u256:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v2: u256 = storagemap_get_word_with_salt__u256__3271ca15373d4483(v1, 4)
+    v3: u256 = u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v2)
+    ret v3
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort(v0: Evm) -> !:
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    terminate revert(0, 0)
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field___u256__u256___f8fb67624e92e2b2(v0: mut Evm, v1: u256) -> StorPtr<(u256, u256)>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v3: StorPtr<(u256, u256)> = stor_ptr__Evm_hef0af3106e109414__u256__u256___9c197f2ec4026f04(v1)
+    ret v3
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__StorageMap_u256__u256__2___6ef63009f66beaf4(v0: mut Evm, v1: u256) -> StorPtr<StorageMap<u256, u256, 2>>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v3: StorPtr<StorageMap<u256, u256, 2>> = stor_ptr__Evm_hef0af3106e109414_StorageMap_u256__u256__2___208326135adc87f4(v1)
+    ret v3
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__u256__3271ca15373d4483(v0: mut Evm, v1: u256) -> StorPtr<u256>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v3: StorPtr<u256> = stor_ptr__Evm_hef0af3106e109414_u256__3b1b0af5b20737f9(v1)
+    ret v3
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__StorageMap_u256__u256__4___173e98e83ba93f89(v0: mut Evm, v1: u256) -> StorPtr<StorageMap<u256, u256, 4>>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v3: StorPtr<StorageMap<u256, u256, 4>> = stor_ptr__Evm_hef0af3106e109414_StorageMap_u256__u256__4___c9a24c839c9d1e0b(v1)
+    ret v3
+
+fn runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2(v0: mut Evm) -> SolDecoder<CallData>:
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    v2: CallData = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input()
+    v3: SolDecoder<CallData> = sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v2, 4)
+    ret v3
+
+fn set_hc90b8ea7f5d56426_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v0: mut SolDecoder<CallData>) -> Set:
+  bb0:
+    v1: u256 = decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c(v0)
+    v2: u256 = decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c(v0)
+    v3: Set = alloc mem
+    init mem[v3] { .0 = v1, .1 = v2 }
+    ret v3
+
+fn return_unit__Evm_hef0af3106e109414__3af54274b2985741(v0: Evm) -> !:
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(0, 0)
+
+fn get_h7c52564759be682_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v0: mut SolDecoder<CallData>) -> Get:
+  bb0:
+    v1: u256 = decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c(v0)
+    ret v1
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v0: mut Evm, v1: u256) -> !:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    br (!false) bb1 bb3
+  bb1:
+    v2: bool = u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(32, 64)
+    br v2 bb4 bb6
+  bb2:
+    unreachable
+  bb3:
+    v4: SolEncoder = sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new()
+    v5: u256 = abi_root_head_size__u256__3271ca15373d4483()
+    v6: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v4, v5)
+    eval encode_root__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11(v1, &mem[v4])
+    v7: (u256, u256) = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v4)
+    v8: u256 = load mem[v7].0
+    v9: u256 = v8
+    v10: u256 = load mem[v7].1
+    v11: u256 = v10
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v9, v11)
+  bb4:
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95(v1, 0)
+    terminate return_data(0, 32)
+  bb5:
+    unreachable
+  bb6:
+    v3: u256 = alloc(32)
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95(v1, v3)
+    terminate return_data(v3, 32)
+
+fn runtime_selector__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2(v0: Evm) -> u32:
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    v1: CallData = evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input()
+    v2: u256 = calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v1)
+    v3: bool = u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v2, 4)
+    br v3 bb1 bb2
+  bb1:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+  bb2:
+    v4: u256 = calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at(v1, 0)
+    v5: u32 = sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_selector_from_prefix(v4)
+    ret v5
+
+fn u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word(v0: u256) -> u256:
+  bb0:
+    ret v0
+
+fn storagemap_set_word_with_salt__u256__3271ca15373d4483(v0: u256, v1: u256, v2: u256) -> ():
+  bb0:
+    v3: u256 = storagemap_storage_slot_with_salt__u256__3271ca15373d4483(v0, v1)
+    eval sstore(v3, v2)
+    ret
+
+fn storagemap_get_word_with_salt__u256__3271ca15373d4483(v0: u256, v1: u256) -> u256:
+  bb0:
+    v2: u256 = storagemap_storage_slot_with_salt__u256__3271ca15373d4483(v0, v1)
+    v3: u256 = sload(v2)
+    ret v3
+
+fn u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v0: u256) -> u256:
+  bb0:
+    ret v0
+
+fn stor_ptr__Evm_hef0af3106e109414__u256__u256___9c197f2ec4026f04(v0: Evm, v1: u256) -> StorPtr<(u256, u256)>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v2: StorPtr<(u256, u256)> = storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw___u256__u256___f8fb67624e92e2b2(v1)
+    ret v2
+
+fn stor_ptr__Evm_hef0af3106e109414_StorageMap_u256__u256__2___208326135adc87f4(v0: Evm, v1: u256) -> StorPtr<StorageMap<u256, u256, 2>>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v2: StorPtr<StorageMap<u256, u256, 2>> = storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__StorageMap_u256__u256__2___6ef63009f66beaf4(v1)
+    ret v2
+
+fn stor_ptr__Evm_hef0af3106e109414_u256__3b1b0af5b20737f9(v0: Evm, v1: u256) -> StorPtr<u256>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v2: StorPtr<u256> = storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__u256__3271ca15373d4483(v1)
+    ret v2
+
+fn stor_ptr__Evm_hef0af3106e109414_StorageMap_u256__u256__4___c9a24c839c9d1e0b(v0: Evm, v1: u256) -> StorPtr<StorageMap<u256, u256, 4>>:
+  ; runtime_abi values=[v1: u256] effects=[]
+  bb0:
+    v2: StorPtr<StorageMap<u256, u256, 4>> = storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__StorageMap_u256__u256__4___173e98e83ba93f89(v1)
+    ret v2
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input(v0: Evm) -> CallData:
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    v1: CallData = calldata_hf71d505b6ff5dc81_new()
+    ret v1
+
+fn sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: CallData, v1: u256) -> SolDecoder<CallData>:
+  bb0:
+    v2: SolDecoder<CallData> = soldecoder_i__ha12a03fcb5ba844b_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, v1)
+    ret v2
+
+fn decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c(v0: mut SolDecoder<CallData>) -> u256:
+  bb0:
+    br false bb1 bb2
+  bb1:
+    v1: u256 = soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0)
+    v2: u256 = soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0)
+    v3: u256 = soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0)
+    v4: u256 = checked_add<u256>(v2, v1)
+    eval soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, v4)
+    v5: u256 = soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0)
+    eval soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, v5)
+    v6: u256 = u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98(&mem[place_root(v0)])
+    eval soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, v2)
+    eval soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, v3)
+    ret v6
+  bb2:
+    v7: u256 = u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98(v0)
+    ret v7
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v0: Evm, v1: u256, v2: u256) -> !:
+  ; runtime_abi values=[v1: u256, v2: u256] effects=[]
+  bb0:
+    terminate return_data(v1, v2)
+
+fn u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(v0: u256, v1: u256) -> bool:
+  bb0:
+    v2: bool = __le_u256(v0, v1)
+    ret v2
+
+fn sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new() -> SolEncoder:
+  bb0:
+    v0: SolEncoder = solencoder_h1b9228b90dad6928_new()
+    ret v0
+
+fn abi_root_head_size__u256__3271ca15373d4483() -> u256:
+  bb0:
+    br false bb1 bb2
+  bb1:
+    ret 32
+  bb2:
+    ret 32
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v0: mut SolEncoder, v1: u256) -> u256:
+  bb0:
+    v2: u256 = load mem[v0].*.0
+    v3: bool = u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v2, 0)
+    br v3 bb1 bb2
+  bb1:
+    v4: u256 = alloc(v1)
+    store mem[v0].*.0 = v4
+    store mem[v0].*.1 = v4
+    store mem[v0].*.2 = v4
+    store mem[v0].*.3 = (v4 + v1)
+    jmp bb2
+  bb2:
+    v5: u256 = load mem[v0].*.1
+    ret v5
+
+fn encode_root__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11(v0: u256, v1: mut SolEncoder) -> ():
+  bb0:
+    br false bb1 bb2
+  bb1:
+    eval encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11(v0, &mem[place_root(v1)])
+    ret
+  bb2:
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v0, &mem[place_root(v1)])
+    ret
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v0: SolEncoder) -> (u256, u256):
+  bb0:
+    v2: u256 = load mem[v0].*.0
+    v1: u256 = v2
+    v3: u256 = load mem[v0].*.3
+    v4: u256 = checked_sub<u256>(v3, v1)
+    v5: (u256, u256) = alloc mem
+    init mem[v5] { .0 = v1, .1 = v4 }
+    ret v5
+
+fn u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95(v0: u256, v1: u256) -> ():
+  bb0:
+    eval sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word(v1, v0)
+    ret
+
+fn calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v0: CallData) -> u256:
+  bb0:
+    v1: u256 = calldatasize()
+    v2: u256 = 0
+    v3: bool = u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+    br v3 bb1 bb2
+  bb1:
+    v2 = 0
+    jmp bb3
+  bb2:
+    v4: u256 = checked_sub<u256>(v1, v0)
+    v2 = v4
+    jmp bb3
+  bb3:
+    ret v2
+
+fn u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v0: u256, v1: u256) -> bool:
+  bb0:
+    v2: bool = __lt_u256(v0, v1)
+    ret v2
+
+fn calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at(v0: CallData, v1: u256) -> u256:
+  bb0:
+    bind (v0 + v1)
+    v2: u256 = calldataload((v0 + v1))
+    ret v2
+
+fn sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_selector_from_prefix(v0: u256) -> u32:
+  bb0:
+    v1: u32 = s_h33f7c3322e562590_intdowncast_hf946d58b157999e1_downcast_unchecked__u256_u32__6e3637cd3e911b35((v0 >> 224))
+    ret v1
+
+fn storagemap_storage_slot_with_salt__u256__3271ca15373d4483(v0: u256, v1: u256) -> u256:
+  bb0:
+    v2: u256 = alloc(0)
+    v3: u256 = u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key(v2, v0)
+    v4: u256 = checked_add<u256>(v2, v3)
+    eval mstore(v4, v1)
+    v5: u256 = checked_add<u256>(v3, 32)
+    v6: u256 = keccak256(v2, v5)
+    ret v6
+
+fn storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw___u256__u256___f8fb67624e92e2b2(v0: u256) -> StorPtr<(u256, u256)>:
+  bb0:
+    ret v0
+
+fn storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__StorageMap_u256__u256__2___6ef63009f66beaf4(v0: u256) -> StorPtr<StorageMap<u256, u256, 2>>:
+  bb0:
+    ret v0
+
+fn storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__u256__3271ca15373d4483(v0: u256) -> StorPtr<u256>:
+  bb0:
+    ret v0
+
+fn storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__StorageMap_u256__u256__4___173e98e83ba93f89(v0: u256) -> StorPtr<StorageMap<u256, u256, 4>>:
+  bb0:
+    ret v0
+
+fn calldata_hf71d505b6ff5dc81_new() -> CallData:
+  bb0:
+    ret 0
+
+fn soldecoder_i__ha12a03fcb5ba844b_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: CallData, v1: u256) -> SolDecoder<CallData>:
+  bb0:
+    v2: Cursor<CallData> = cursor_i__h140a998c67d6d59c_new__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0)
+    v3: Cursor<CallData> = cursor_i__h140a998c67d6d59c_fork__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v2, v1)
+    v4: SolDecoder<CallData> = alloc mem
+    init mem[v4] { .0 = v3, .1 = v1 }
+    ret v4
+
+fn soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: mut SolDecoder<CallData>) -> u256:
+  bb0:
+    v2: CallData = load mem[&mem[v0].*.0].0
+    v1: u256 = calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v2)
+    v4: u256 = load mem[&mem[v0].*.0].1
+    v5: u256 = checked_add<u256>(v4, 32)
+    v3: u256 = v5
+    v6: u256 = load mem[&mem[v0].*.0].1
+    v7: bool = u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v3, v6)
+    br v7 bb1 bb3
+  bb1:
+    terminate revert(0, 0)
+  bb2:
+    v10: CallData = load mem[&mem[v0].*.0].0
+    v11: u256 = load mem[&mem[v0].*.0].1
+    v9: u256 = calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at(v10, v11)
+    store mem[&mem[v0].*.0].1 = v3
+    ret v9
+  bb3:
+    v8: bool = u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v3, v1)
+    br v8 bb1 bb2
+
+fn soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: SolDecoder<CallData>) -> u256:
+  bb0:
+    v1: u256 = load mem[v0].*.1
+    ret v1
+
+fn soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: SolDecoder<CallData>) -> u256:
+  bb0:
+    v1: u256 = load mem[&mem[v0].*.0].1
+    ret v1
+
+fn soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: mut SolDecoder<CallData>, v1: u256) -> ():
+  bb0:
+    store mem[v0].*.1 = v1
+    ret
+
+fn soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: mut SolDecoder<CallData>, v1: u256) -> ():
+  bb0:
+    store mem[&mem[v0].*.0].1 = v1
+    ret
+
+fn u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98(v0: mut SolDecoder<CallData>) -> u256:
+  bb0:
+    v1: u256 = soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0)
+    ret v1
+
+fn solencoder_h1b9228b90dad6928_new() -> SolEncoder:
+  bb0:
+    v0: SolEncoder = alloc mem
+    init mem[v0] { .0 = 0, .1 = 0, .2 = 0, .3 = 0 }
+    ret v0
+
+fn u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0: u256, v1: u256) -> bool:
+  bb0:
+    v2: bool = __eq_u256(v0, v1)
+    ret v2
+
+fn encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11(v0: u256, v1: mut SolEncoder) -> ():
+  bb0:
+    br false bb1 bb2
+  bb1:
+    v2: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base(v1)
+    v3: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail(v1, 32)
+    v4: u256 = checked_sub<u256>(v3, v2)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word(v1, v4)
+    v5: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos(v1)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base(v1, v3)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v1, v3)
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v0, &mem[place_root(v1)])
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base(v1, v2)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v1, v5)
+    ret
+  bb2:
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v0, &mem[place_root(v1)])
+    ret
+
+fn u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v0: u256, v1: mut SolEncoder) -> ():
+  bb0:
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word(v1, v0)
+    ret
+
+fn sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word(v0: u256, v1: u256) -> ():
+  bb0:
+    eval mstore(v0, v1)
+    ret
+
+fn u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0: u256, v1: u256) -> bool:
+  bb0:
+    v2: bool = __gt_u256(v0, v1)
+    ret v2
+
+fn s_h33f7c3322e562590_intdowncast_hf946d58b157999e1_downcast_unchecked__u256_u32__6e3637cd3e911b35(v0: u256) -> u32:
+  bb0:
+    v1: u256 = u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+    v2: u32 = u32_h20aa0c10687491ad_intword_h9a147c8c32b1323c_from_word(v1)
+    ret v2
+
+fn u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key(v0: u256, v1: u256) -> u256:
+  bb0:
+    eval mstore(v0, v1)
+    ret 32
+
+fn cursor_i__h140a998c67d6d59c_new__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: CallData) -> Cursor<CallData>:
+  bb0:
+    v1: Cursor<CallData> = alloc mem
+    init mem[v1] { .0 = v0, .1 = 0 }
+    ret v1
+
+fn cursor_i__h140a998c67d6d59c_fork__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0: Cursor<CallData>, v1: u256) -> Cursor<CallData>:
+  bb0:
+    v2: CallData = load mem[v0].*.0
+    v3: Cursor<CallData> = alloc mem
+    init mem[v3] { .0 = v2, .1 = v1 }
+    ret v3
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base(v0: SolEncoder) -> u256:
+  bb0:
+    v1: u256 = load mem[v0].*.1
+    ret v1
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail(v0: mut SolEncoder, v1: u256) -> u256:
+  bb0:
+    v2: u256 = alloc(v1)
+    store mem[v0].*.3 = (v2 + v1)
+    ret v2
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word(v0: mut SolEncoder, v1: u256) -> ():
+  bb0:
+    v3: u256 = load mem[v0].*.2
+    v2: u256 = v3
+    eval mstore(v2, v1)
+    store mem[v0].*.2 = (v2 + 32)
+    ret
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos(v0: SolEncoder) -> u256:
+  bb0:
+    v1: u256 = load mem[v0].*.2
+    ret v1
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base(v0: mut SolEncoder, v1: u256) -> ():
+  bb0:
+    store mem[v0].*.1 = v1
+    ret
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v0: mut SolEncoder, v1: u256) -> ():
+  bb0:
+    store mem[v0].*.2 = v1
+    ret
+
+fn u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0: u256) -> u256:
+  bb0:
+    ret v0
+
+fn u32_h20aa0c10687491ad_intword_h9a147c8c32b1323c_from_word(v0: u256) -> u32:
+  bb0:
+    ret v0

@@ -1,4 +1,4 @@
-use core::StorageMap
+use std::evm::StorageMap
 
 fn get_balance(addr: u256) -> u256
     uses (balances: StorageMap<u256, u256>)
@@ -7,7 +7,7 @@ fn get_balance(addr: u256) -> u256
 }
 
 fn set_balance(addr: u256, value: u256)
-    uses (mut balances: StorageMap<u256, u256>)
+    uses (balances: mut StorageMap<u256, u256>)
 {
     balances.set(key: addr, value)
 }

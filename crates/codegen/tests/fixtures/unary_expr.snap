@@ -3,7 +3,107 @@ source: crates/codegen/tests/yul.rs
 expression: output
 input_file: tests/fixtures/unary_expr.fe
 ---
-function unary_expr() -> ret {
-  ret := sub(0, add(1, 2))
+function $unary_expr() -> ret {
+  let v0 := $checked_add_i64(1, 2)
+  let v1 := $checked_neg_i64(v0)
+  ret := v1
+  leave
+}
+function $bool_h947c0c03c59c6f07_eq_he50383edd273619f_eq($self, $other) -> ret {
+  let v0 := eq(iszero(iszero($self)), iszero(iszero($other)))
+  ret := v0
+  leave
+}
+function $bool_h947c0c03c59c6f07_eq_he50383edd273619f_ne($self, $other) -> ret {
+  let v0 := iszero(eq(iszero(iszero($self)), iszero(iszero($other))))
+  ret := v0
+  leave
+}
+function $checked_add_i64($a, $b) -> ret {
+  let v0 := $checked_add_signed_impl__i64__ba3703df82fb4e98($a, $b)
+  ret := v0
+  leave
+}
+function $checked_add_signed_impl__i64__ba3703df82fb4e98($a, $b) -> ret {
+  let v0 := $i64_hba3703df82fb4e98_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+  let v1 := 9223372036854775808
+  let v2 := $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_to_word($a)
+  let v3 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(and(v2, v1), 0)
+  let v4 := v3
+  let v5 := $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_to_word($b)
+  let v6 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(and(v5, v1), 0)
+  let v7 := v6
+  let v8 := $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_to_word(v0)
+  let v9 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(and(v8, v1), 0)
+  let v10 := v9
+  let v11 := $bool_h947c0c03c59c6f07_eq_he50383edd273619f_eq(v4, v7)
+  let v12 := v11
+  if v12 {
+    let v13 := $bool_h947c0c03c59c6f07_eq_he50383edd273619f_ne(v4, v10)
+    let v14 := v13
+    if v14 {
+      revert(0, 0)
+    }
+    ret := v0
+    leave
+  }
+  if iszero(v12) {
+    ret := v0
+    leave
+  }
+}
+function $checked_neg_i64($x) -> ret {
+  let v0 := $checked_neg_signed_impl__i64__ba3703df82fb4e98($x)
+  ret := v0
+  leave
+}
+function $checked_neg_signed_impl__i64__ba3703df82fb4e98($x) -> ret {
+  let v0 := $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_from_word(0)
+  let v1 := $i64_hba3703df82fb4e98_wrappingsub_h6880d1ff91f0a556_wrapping_sub(v0, $x)
+  let v2 := $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_to_word($x)
+  let v3 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v2, 0)
+  let v4 := v3
+  if v4 {
+    let v5 := $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_to_word(v1)
+    let v6 := $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_to_word($x)
+    let v7 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v5, v6)
+    let v8 := v7
+    if v8 {
+      revert(0, 0)
+    }
+    ret := v1
+    leave
+  }
+  if iszero(v4) {
+    ret := v1
+    leave
+  }
+}
+function $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_from_word($word) -> ret {
+  ret := $word
+  leave
+}
+function $i64_hba3703df82fb4e98_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+  ret := $self
+  leave
+}
+function $i64_hba3703df82fb4e98_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+  let v0 := signextend(7, and(add(signextend(7, and($self, 0xffffffffffffffff)), signextend(7, and($other, 0xffffffffffffffff))), 0xffffffffffffffff))
+  ret := v0
+  leave
+}
+function $i64_hba3703df82fb4e98_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+  let v0 := signextend(7, and(sub(signextend(7, and($self, 0xffffffffffffffff)), signextend(7, and($other, 0xffffffffffffffff))), 0xffffffffffffffff))
+  ret := v0
+  leave
+}
+function $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other) -> ret {
+  let v0 := eq($self, $other)
+  ret := v0
+  leave
+}
+function $u256_h3271ca15373d4483_eq_he50383edd273619f_ne($self, $other) -> ret {
+  let v0 := iszero(eq($self, $other))
+  ret := v0
   leave
 }

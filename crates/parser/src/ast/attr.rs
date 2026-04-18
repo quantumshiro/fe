@@ -1,6 +1,6 @@
 use rowan::ast::{AstNode, support};
 
-use super::{Path, ast_node, lit::Lit};
+use super::{Expr, Path, ast_node, lit::Lit};
 use crate::{FeLang, SyntaxKind as SK, SyntaxToken};
 
 ast_node! {
@@ -15,6 +15,14 @@ impl AttrList {
             AttrKind::Normal(attr) => Some(attr),
             AttrKind::DocComment(_) => None,
         })
+    }
+
+    /// Returns only normal attributes with the given simple path name.
+    pub fn normal_attrs_named<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> impl Iterator<Item = NormalAttr> + 'a {
+        self.normal_attrs().filter(move |attr| attr.is_named(name))
     }
 
     /// Returns only doc comment attributes in the attribute list.
@@ -55,6 +63,10 @@ impl NormalAttr {
         support::child(self.syntax())
     }
 
+    pub fn is_named(&self, name: &str) -> bool {
+        self.path().is_some_and(|path| path.text() == name)
+    }
+
     pub fn args(&self) -> Option<AttrArgList> {
         support::child(self.syntax())
     }
@@ -63,6 +75,9 @@ impl NormalAttr {
     /// This is distinct from args() which returns the argument list `(arg1, arg2)`.
     pub fn value(&self) -> Option<AttrArgValueKind> {
         let node = support::child::<AttrArgValue>(self.syntax())?;
+        if let Some(expr) = support::child::<Expr>(node.syntax()) {
+            return Some(expr.into());
+        }
         if let Some(lit) = support::child::<Lit>(node.syntax()) {
             return Some(lit.into());
         }
@@ -91,6 +106,9 @@ impl AttrArg {
 
     pub fn value(&self) -> Option<AttrArgValueKind> {
         let node = support::child::<AttrArgValue>(self.syntax())?;
+        if let Some(expr) = support::child::<Expr>(node.syntax()) {
+            return Some(expr.into());
+        }
         if let Some(lit) = support::child::<Lit>(node.syntax()) {
             return Some(lit.into());
         }
@@ -113,6 +131,7 @@ ast_node! {
 pub enum AttrArgValueKind {
     Ident(SyntaxToken),
     Lit(Lit),
+    Expr(Expr),
 }
 
 ast_node! {
@@ -146,7 +165,7 @@ pub trait AttrListOwner: AstNode<Language = FeLang> {
 mod tests {
     use crate::{
         lexer::Lexer,
-        parser::{Parser, attr::AttrListScope},
+        parser::{Parser, RecoveryMode, attr::AttrListScope},
     };
 
     use wasm_bindgen_test::wasm_bindgen_test;
@@ -155,7 +174,7 @@ mod tests {
 
     fn parse_attr_list(source: &str) -> AttrList {
         let lexer = Lexer::new(source);
-        let mut parser = Parser::new(lexer);
+        let mut parser = Parser::new(lexer, RecoveryMode::Recover);
         parser.parse(AttrListScope::default()).unwrap();
         AttrList::cast(parser.finish_to_node().0).unwrap()
     }
@@ -203,6 +222,9 @@ mod tests {
                                         }
                                         _ => panic!("expected string literal"),
                                     },
+                                    AttrArgValueKind::Expr(_) => {
+                                        panic!("expected string literal, got expr")
+                                    }
                                 }
                             }
                             1 => {
@@ -218,6 +240,9 @@ mod tests {
                                         }
                                         _ => panic!("expected string literal"),
                                     },
+                                    AttrArgValueKind::Expr(_) => {
+                                        panic!("expected string literal, got expr")
+                                    }
                                 }
                             }
                             _ => unreachable!(),
@@ -239,6 +264,7 @@ mod tests {
                             }
                             _ => panic!("expected int literal"),
                         },
+                        AttrArgValueKind::Expr(_) => panic!("expected literal, got expr"),
                         _ => panic!("expected literal"),
                     }
 
@@ -252,6 +278,7 @@ mod tests {
                             }
                             _ => panic!("expected bool literal"),
                         },
+                        AttrArgValueKind::Expr(_) => panic!("expected literal, got expr"),
                         _ => panic!("expected literal"),
                     }
 
@@ -262,6 +289,7 @@ mod tests {
                         AttrArgValueKind::Ident(tok) => {
                             assert_eq!(tok.text(), "Foo")
                         }
+                        AttrArgValueKind::Expr(_) => panic!("expected ident, got expr"),
                         _ => panic!("expected ident"),
                     }
 

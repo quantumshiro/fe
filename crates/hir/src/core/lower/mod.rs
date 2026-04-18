@@ -13,31 +13,81 @@ use self::{item::lower_module_items, scope_builder::ScopeGraphBuilder};
 use crate::{
     HirDb, LowerHirDb,
     hir_def::{
-        ExprId, IdentId, IntegerId, ItemKind, LitKind, ModuleTree, Partial, StringId, TopLevelMod,
-        TrackedItemId, TrackedItemVariant, Use, Visibility, module_tree_impl,
+        AttrListId, ExprId, IdentId, IntegerId, ItemKind, LitKind, ModuleTree, Partial, StringId,
+        TopLevelMod, TrackedItemId, TrackedItemVariant, Use, Visibility, module_tree_impl,
         scope_graph::ScopeGraph,
         use_tree::{UsePathId, UsePathSegment},
     },
     span::HirOrigin,
 };
-pub use item::{SelectorError, SelectorErrorKind};
+pub use arithmetic::{ArithmeticAttrError, ArithmeticAttrErrorKind};
+pub use error::{ErrorDiagnostic, ErrorDiagnosticKind};
+pub use event::{EventError, EventErrorKind};
+pub use item::{InlineAttrError, SelectorError, SelectorErrorKind};
 pub use parse::parse_file_impl;
+pub use payable::{PayableError, PayableErrorKind};
+pub use stmt::LoopUnrollAttrError;
 
 pub(crate) mod parse;
 
+mod arithmetic;
 mod attr;
 mod body;
 mod contract;
+mod error;
+mod event;
 mod expr;
+mod hir_builder;
 mod item;
 mod msg;
 mod params;
 mod pat;
 mod path;
+mod payable;
 mod scope_builder;
 mod stmt;
 mod types;
 mod use_tree;
+
+pub(super) fn lower_visibility(owner: &impl ItemModifierOwner) -> Visibility {
+    if owner.pub_kw().is_none() {
+        return Visibility::Private;
+    }
+    lower_vis_restriction(owner.vis_restriction())
+}
+
+/// Lowers visibility for a record field definition.
+///
+/// `RecordFieldDef` has `pub_kw()` and `vis_restriction()` as inherent methods
+/// (it does not implement `ItemModifierOwner`), so this is a separate helper
+/// from `lower_visibility`.
+pub(super) fn lower_field_visibility(field: &ast::RecordFieldDef) -> Visibility {
+    if field.pub_kw().is_none() {
+        return Visibility::Private;
+    }
+    lower_vis_restriction(field.vis_restriction())
+}
+
+fn lower_vis_restriction(restriction: Option<ast::VisRestriction>) -> Visibility {
+    match restriction {
+        None => Visibility::Public,
+        Some(restriction) => {
+            if restriction.ingot_kw().is_some() {
+                Visibility::PubIngot
+            } else if restriction.super_kw().is_some() {
+                Visibility::PubSuper
+            } else {
+                // pub(in path) — parsed but not yet supported.
+                // Treat as private for safety (deny access rather than allow).
+                Visibility::Private
+            }
+        }
+    }
+}
+
+pub(super) fn lower_is_unsafe(owner: &impl ItemModifierOwner) -> bool {
+    owner.unsafe_kw().is_some()
+}
 
 /// Maps the given file to a top-level module.
 /// This function just maps the file to a top-level module, and doesn't perform
@@ -88,11 +138,30 @@ pub(crate) fn scope_graph_impl<'db>(
     ctxt.insert_synthetic_prelude_use();
 
     if let Some(items) = ast.items() {
+        arithmetic::report_invalid_top_mod_arithmetic_attrs(&mut ctxt, items.inner_attr_list());
+        payable::report_payable_attr_on_unsupported_item(
+            &mut ctxt,
+            items.inner_attr_list(),
+            "module",
+        );
         lower_module_items(&mut ctxt, items);
     }
     ctxt.leave_item_scope(top_mod);
 
     ctxt.build()
+}
+
+#[salsa::tracked]
+pub(crate) fn top_mod_attributes_impl<'db>(
+    db: &'db dyn HirDb,
+    top_mod: TopLevelMod<'db>,
+) -> AttrListId<'db> {
+    let ast = top_mod_ast(db, top_mod);
+    let mut ctxt = FileLowerCtxt::enter_top_mod(db, top_mod);
+    AttrListId::lower_ast_opt(
+        &mut ctxt,
+        ast.items().and_then(|items| items.inner_attr_list()),
+    )
 }
 
 pub(crate) fn top_mod_ast(db: &dyn HirDb, top_mod: TopLevelMod) -> ast::Root {
@@ -103,12 +172,16 @@ pub(crate) fn top_mod_ast(db: &dyn HirDb, top_mod: TopLevelMod) -> ast::Root {
 
 pub(super) struct FileLowerCtxt<'db> {
     builder: ScopeGraphBuilder<'db>,
+    next_impl_idx: u32,
+    next_impl_trait_idx: u32,
 }
 
 impl<'db> FileLowerCtxt<'db> {
     pub(super) fn enter_top_mod(db: &'db dyn HirDb, top_mod: TopLevelMod<'db>) -> Self {
         Self {
             builder: ScopeGraphBuilder::enter_top_mod(db, top_mod),
+            next_impl_idx: 0,
+            next_impl_trait_idx: 0,
         }
     }
 
@@ -128,27 +201,28 @@ impl<'db> FileLowerCtxt<'db> {
         let db = self.db();
         let top_mod = self.top_mod();
         let ingot = top_mod.ingot(db);
-        if ingot.kind(db) == IngotKind::Core {
+        let kind = ingot.kind(db);
+
+        if kind == IngotKind::Core {
             return;
         }
 
+        // Always inject core::prelude::* as the baseline — this is guaranteed
+        // to exist and provides Option, Result, Clone, Copy, etc.
         let core = IdentId::new(db, "core".to_string());
         let prelude = IdentId::new(db, "prelude".to_string());
+        self.insert_synthetic_use(vec![core, prelude]);
 
-        let segs = vec![
-            Partial::Present(UsePathSegment::Ident(core)),
-            Partial::Present(UsePathSegment::Ident(prelude)),
-            Partial::Present(UsePathSegment::Glob),
-        ];
-        let path = Partial::Present(UsePathId::new(db, segs));
-
-        let id = self.joined_id(TrackedItemVariant::Use(path));
-        self.enter_item_scope(id, false);
-
-        let top_mod = self.top_mod();
-        let origin = HirOrigin::synthetic();
-        let use_ = Use::new(db, id, path, None, Visibility::Private, top_mod, origin);
-        self.leave_item_scope(use_);
+        // For non-std ingots, additionally inject std::prelude::* which adds
+        // EVM/ABI items (Evm, Address, Call, Sol, assert, etc.) on top of
+        // core::prelude. If std lacks a prelude module (e.g. a user-defined
+        // package aliased as "std"), the synthetic import fails silently and
+        // we still have core::prelude as fallback.
+        if kind != IngotKind::Std {
+            let std = IdentId::new(db, "std".to_string());
+            let prelude = IdentId::new(db, "prelude".to_string());
+            self.insert_synthetic_use(vec![std, prelude]);
+        }
     }
 
     /// Inserts `use super::*` to re-export parent module items into current scope.
@@ -168,7 +242,45 @@ impl<'db> FileLowerCtxt<'db> {
 
         let top_mod = self.top_mod();
         let origin = HirOrigin::synthetic();
-        let use_ = Use::new(db, id, path, None, Visibility::Private, top_mod, origin);
+        let attrs = AttrListId::new(db, vec![]);
+        let use_ = Use::new(
+            db,
+            id,
+            attrs,
+            path,
+            None,
+            Visibility::Private,
+            top_mod,
+            origin,
+        );
+        self.leave_item_scope(use_);
+    }
+
+    fn insert_synthetic_use(&mut self, segments: Vec<IdentId<'db>>) {
+        let db = self.db();
+        let segs: Vec<Partial<UsePathSegment<'db>>> = segments
+            .into_iter()
+            .map(|ident| Partial::Present(UsePathSegment::Ident(ident)))
+            .chain(std::iter::once(Partial::Present(UsePathSegment::Glob)))
+            .collect();
+        let path = Partial::Present(UsePathId::new(db, segs));
+
+        let id = self.joined_id(TrackedItemVariant::Use(path));
+        self.enter_item_scope(id, false);
+
+        let top_mod = self.top_mod();
+        let origin = HirOrigin::synthetic();
+        let attrs = AttrListId::new(db, vec![]);
+        let use_ = Use::new(
+            db,
+            id,
+            attrs,
+            path,
+            None,
+            Visibility::Private,
+            top_mod,
+            origin,
+        );
         self.leave_item_scope(use_);
     }
 
@@ -182,6 +294,18 @@ impl<'db> FileLowerCtxt<'db> {
 
     pub(super) fn joined_id(&self, id: TrackedItemVariant<'db>) -> TrackedItemId<'db> {
         self.builder.joined_id(id)
+    }
+
+    pub(super) fn next_impl_idx(&mut self) -> u32 {
+        let idx = self.next_impl_idx;
+        self.next_impl_idx += 1;
+        idx
+    }
+
+    pub(super) fn next_impl_trait_idx(&mut self) -> u32 {
+        let idx = self.next_impl_trait_idx;
+        self.next_impl_trait_idx += 1;
+        idx
     }
 
     /// Creates a new scope for an item.

@@ -1,14 +1,18 @@
 use driver::DriverDataBase;
-use hir::analysis::{
-    name_resolution::{PathRes, resolve_path},
-    ty::trait_resolution::PredicateListId,
-};
-use mir::{BasicBlockId, MirFunction, Terminator, layout};
-use rustc_hash::FxHashMap;
+use mir::layout::TargetDataLayout;
+use mir::{BasicBlockId, MirBackend, MirFunction, MirStage, Terminator, ir::MirFunctionOrigin};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::yul::{doc::YulDoc, errors::YulError, state::BlockState};
 
-use super::util::function_name;
+use super::util::{function_name, prefix_yul_name};
+
+/// A data region collected during Yul emission (for data sections).
+#[derive(Debug, Clone)]
+pub(super) struct YulDataRegion {
+    pub label: String,
+    pub bytes: Vec<u8>,
+}
 
 /// Emits Yul for a single MIR function.
 pub(super) struct FunctionEmitter<'db> {
@@ -16,7 +20,14 @@ pub(super) struct FunctionEmitter<'db> {
     pub(super) mir_func: &'db MirFunction<'db>,
     /// Mapping from monomorphized function symbols to code region labels.
     pub(super) code_regions: &'db FxHashMap<String, String>,
+    pub(super) layout: TargetDataLayout,
     ipdom: Vec<Option<BasicBlockId>>,
+    /// Data regions collected during emission.
+    data_region_counter: u32,
+    /// Reuse labels for identical payloads so we don't emit duplicate data sections.
+    data_region_labels: FxHashMap<Vec<u8>, String>,
+    pub(super) const_region_labels: FxHashMap<mir::ir::ConstRegionId, String>,
+    pub(super) data_regions: Vec<YulDataRegion>,
 }
 
 impl<'db> FunctionEmitter<'db> {
@@ -31,93 +42,114 @@ impl<'db> FunctionEmitter<'db> {
         db: &'db DriverDataBase,
         mir_func: &'db MirFunction<'db>,
         code_regions: &'db FxHashMap<String, String>,
+        layout: TargetDataLayout,
     ) -> Result<Self, YulError> {
-        if mir_func.func.body(db).is_none() {
-            return Err(YulError::MissingBody(function_name(db, mir_func.func)));
+        mir_func
+            .body
+            .assert_stage(MirStage::BackendPrepared(MirBackend::EvmYul));
+        if let MirFunctionOrigin::Hir(func) = mir_func.origin
+            && func.body(db).is_none()
+        {
+            return Err(YulError::MissingBody(function_name(db, func)));
         }
         let ipdom = compute_immediate_postdominators(&mir_func.body);
-        Ok(Self {
+        let mut emitter = Self {
             db,
             mir_func,
             code_regions,
+            layout,
             ipdom,
-        })
+            data_region_counter: 0,
+            data_region_labels: FxHashMap::default(),
+            const_region_labels: FxHashMap::default(),
+            data_regions: Vec::new(),
+        };
+
+        // Pre-register all const regions so expressions can load them without mutating self.
+        for (idx, region) in mir_func.body.const_regions.iter().enumerate() {
+            let id = mir::ir::ConstRegionId(idx as u32);
+            let label = emitter.register_data_region(&region.bytes);
+            emitter.const_region_labels.insert(id, label);
+        }
+
+        Ok(emitter)
     }
 
     pub(super) fn ipdom(&self, block: BasicBlockId) -> Option<BasicBlockId> {
         self.ipdom.get(block.index()).copied().flatten()
     }
 
-    /// Produces the final Yul docs for the current MIR function, including any prologue
-    /// needed to seed effect bindings (e.g. storage base pointer for contract entrypoints).
+    /// Registers constant aggregate data and returns a unique label for the data section.
     ///
-    /// Returns the document tree containing a single Yul `function` block or a
-    /// [`YulError`] when lowering fails.
-    pub(super) fn emit_doc(mut self) -> Result<Vec<YulDoc>, YulError> {
-        let func_name = self.mir_func.symbol_name.as_str();
-        let (param_names, mut state, mut prologue) = self.init_function_state()?;
-        let mut body_docs = self.emit_block(self.mir_func.body.entry, &mut state)?;
-        if !prologue.is_empty() {
-            prologue.append(&mut body_docs);
-            body_docs = prologue;
+    /// Labels include the function's symbol name to ensure global uniqueness
+    /// across functions within the same Yul object.
+    pub(super) fn register_data_region(&mut self, bytes: &[u8]) -> String {
+        if let Some(label) = self.data_region_labels.get(bytes) {
+            return label.clone();
         }
+
+        let bytes = bytes.to_vec();
+        let label = format!(
+            "data_{}_{}",
+            self.mir_func.symbol_name, self.data_region_counter
+        );
+        self.data_region_counter += 1;
+        self.data_region_labels.insert(bytes.clone(), label.clone());
+        self.data_regions.push(YulDataRegion {
+            label: label.clone(),
+            bytes,
+        });
+        label
+    }
+
+    /// Produces the final Yul docs for the current MIR function.
+    pub(super) fn emit_doc(mut self) -> Result<(Vec<YulDoc>, Vec<YulDataRegion>), YulError> {
+        let func_name = prefix_yul_name(&self.mir_func.symbol_name);
+        let (param_names, mut state) = self.init_entry_state();
+        let body_docs = self.emit_block(self.mir_func.body.entry, &mut state)?;
         let function_doc = YulDoc::block(
             format!(
                 "{} ",
-                self.format_function_signature(func_name, &param_names)
+                self.format_function_signature(&func_name, &param_names)
             ),
             body_docs,
         );
-        Ok(vec![function_doc])
+        Ok((vec![function_doc], self.data_regions))
     }
 
-    /// Initializes the `BlockState` with parameter bindings, returning Yul parameter names,
-    /// the populated block state, and any prologue statements needed to seed effect bindings
-    /// (contract entrypoints get a synthesized storage pointer; other functions take effects
-    /// as explicit parameters).
-    pub(super) fn init_function_state(
-        &self,
-    ) -> Result<(Vec<String>, BlockState, Vec<YulDoc>), YulError> {
+    /// Initializes the `BlockState` with parameter bindings.
+    ///
+    /// Returns:
+    /// - the Yul function parameter names (in signature order)
+    /// - the initial block state mapping MIR locals to those names
+    fn init_entry_state(&self) -> (Vec<String>, BlockState) {
         let mut state = BlockState::new();
         let mut params_out = Vec::new();
-        for &local in &self.mir_func.body.param_locals {
-            let name = self.mir_func.body.local(local).name.clone();
+        let mut used_names = FxHashSet::default();
+        for (idx, &local) in self.mir_func.body.param_locals.iter().enumerate() {
+            if !self.mir_func.runtime_abi.value_param_visible(idx) {
+                continue;
+            }
+            let raw_name = self.mir_func.body.local(local).name.clone();
+            let name = unique_yul_name(&raw_name, &mut used_names);
             params_out.push(name.clone());
             state.insert_local(local, name);
         }
-        let mut prologue = Vec::new();
-        let is_contract_entry = self.mir_func.contract_function.is_some();
-        if is_contract_entry {
-            let effect_params: Vec<_> = self.mir_func.func.effect_params(self.db).collect();
-            for (effect, &local) in effect_params
-                .iter()
-                .zip(self.mir_func.body.effect_param_locals.iter())
-            {
-                let binding = self.mir_func.body.local(local).name.clone();
-                let temp = state.alloc_local();
-                state.insert_local(local, temp.clone());
-                let slots = self.effect_storage_slots(*effect, &binding)?;
-                if slots != 0 {
-                    return Err(YulError::Unsupported(format!(
-                        "contract entrypoint effect `{binding}` must be zero-sized (instantiate storage pointers manually)"
-                    )));
-                }
-                prologue.push(YulDoc::line(format!("let {temp} := 0")));
+        for (idx, &local) in self.mir_func.body.effect_param_locals.iter().enumerate() {
+            if !self.mir_func.runtime_abi.effect_param_visible(idx) {
+                continue;
             }
-        } else {
-            for &local in &self.mir_func.body.effect_param_locals {
-                let binding = self.mir_func.body.local(local).name.clone();
-                params_out.push(binding.clone());
-                state.insert_local(local, binding);
-            }
+            let raw_name = self.mir_func.body.local(local).name.clone();
+            let binding = unique_yul_name(&raw_name, &mut used_names);
+            params_out.push(binding.clone());
+            state.insert_local(local, binding);
         }
-        Ok((params_out, state, prologue))
+        (params_out, state)
     }
 
     /// Returns true if the Fe function has a return type.
     pub(super) fn returns_value(&self) -> bool {
-        let ret_ty = self.mir_func.func.return_ty(self.db);
-        !layout::is_zero_sized_ty(self.db, ret_ty)
+        self.mir_func.returns_value
     }
 
     /// Formats the Fe function name and parameters into a Yul signature.
@@ -130,48 +162,18 @@ impl<'db> FunctionEmitter<'db> {
             format!("function {func_name}({params_str}){ret_suffix}")
         }
     }
+}
 
-    /// Returns the Yul expression used as the storage base pointer for contract entrypoints.
-    /// Computes the storage slot size of an effect type (for contract entrypoints).
-    ///
-    /// Returns an error if the effect type cannot be resolved or its size cannot be computed.
-    fn effect_storage_slots(
-        &self,
-        effect: hir::core::semantic::EffectParamView<'db>,
-        binding_name: &str,
-    ) -> Result<usize, YulError> {
-        let key_path = effect.key_path(self.db).ok_or_else(|| {
-            YulError::Unsupported(format!(
-                "cannot determine storage size for effect `{binding_name}`: missing type path"
-            ))
-        })?;
-        let scope = effect.owner.scope();
-        let path_res = resolve_path(
-            self.db,
-            key_path,
-            scope,
-            PredicateListId::empty_list(self.db),
-            false,
-        )
-        .map_err(|_| {
-            YulError::Unsupported(format!(
-                "cannot determine storage size for effect `{binding_name}`: failed to resolve type"
-            ))
-        })?;
-        let ty = match path_res {
-            PathRes::Ty(ty) | PathRes::TyAlias(_, ty) => ty,
-            _ => {
-                return Err(YulError::Unsupported(format!(
-                    "cannot determine storage size for effect `{binding_name}`: path does not resolve to a type"
-                )));
-            }
-        };
-        layout::ty_storage_slots(self.db, ty).ok_or_else(|| {
-            YulError::Unsupported(format!(
-                "cannot determine storage size for effect `{binding_name}`: unsupported type"
-            ))
-        })
+fn unique_yul_name(raw_name: &str, used: &mut FxHashSet<String>) -> String {
+    let base = format!("${raw_name}");
+    let mut candidate = base.clone();
+    let mut suffix = 0;
+    while used.contains(&candidate) {
+        suffix += 1;
+        candidate = format!("{base}_{suffix}");
     }
+    used.insert(candidate.clone());
+    candidate
 }
 
 fn compute_immediate_postdominators(body: &mir::MirBody<'_>) -> Vec<Option<BasicBlockId>> {
@@ -216,21 +218,20 @@ fn compute_immediate_postdominators(body: &mir::MirBody<'_>) -> Vec<Option<Basic
         changed = false;
         for b in 0..blocks_len {
             let successors: Vec<usize> = match &body.blocks[b].terminator {
-                Terminator::Goto { target } => vec![target.index()],
+                Terminator::Goto { target, .. } => vec![target.index()],
                 Terminator::Branch {
                     then_bb, else_bb, ..
                 } => vec![then_bb.index(), else_bb.index()],
                 Terminator::Switch {
                     targets, default, ..
                 } => {
-                    let mut out = Vec::with_capacity(targets.len() + 1);
-                    out.extend(targets.iter().map(|t| t.block.index()));
-                    out.push(default.index());
-                    out
+                    let mut s: Vec<_> = targets.iter().map(|t| t.block.index()).collect();
+                    s.push(default.index());
+                    s
                 }
-                Terminator::Return(..)
-                | Terminator::TerminatingCall(_)
-                | Terminator::Unreachable => vec![exit],
+                Terminator::Return { .. }
+                | Terminator::TerminatingCall { .. }
+                | Terminator::Unreachable { .. } => vec![exit],
             };
 
             let mut new_bits = vec![!0u64; words];

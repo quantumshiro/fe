@@ -159,8 +159,18 @@ fn dedup_runtime_helpers<'db>(functions: Vec<MirFunction<'db>>) -> Vec<MirFuncti
 /// Only dedup compiler-owned helpers (core/external ingots) to avoid altering user ABI,
 /// returning `true` when the function qualifies for deduplication.
 fn is_dedup_candidate<'db>(db: &'db dyn HirAnalysisDb, func: &MirFunction<'db>) -> bool {
+    let hir_func = match func.origin {
+        crate::ir::MirFunctionOrigin::Hir(func) => func,
+        crate::ir::MirFunctionOrigin::Synthetic(_) => return false,
+    };
+    if hir_func.name(db).to_opt().is_some_and(|name| {
+        let name = name.data(db);
+        matches!(name.as_str(), "from_raw" | "raw")
+    }) {
+        return false;
+    }
     matches!(
-        func.func.top_mod(db).ingot(db).kind(db),
+        hir_func.top_mod(db).ingot(db).kind(db),
         IngotKind::Core | IngotKind::External
     )
 }
@@ -240,8 +250,10 @@ fn call_edge_targets<'db>(
             }
         }
 
-        if let crate::Terminator::TerminatingCall(crate::ir::TerminatingCall::Call(call)) =
-            &block.terminator
+        if let crate::Terminator::TerminatingCall {
+            call: crate::ir::TerminatingCall::Call(call),
+            ..
+        } = &block.terminator
             && let Some(name) = &call.resolved_name
             && let Some(&idx) = symbol_to_idx.get(name)
         {
@@ -269,8 +281,10 @@ fn rewrite_call_targets<'db>(
                 }
             }
 
-            if let crate::Terminator::TerminatingCall(crate::ir::TerminatingCall::Call(call)) =
-                &mut block.terminator
+            if let crate::Terminator::TerminatingCall {
+                call: crate::ir::TerminatingCall::Call(call),
+                ..
+            } = &mut block.terminator
                 && let Some(alias) = canonical_call_name(&call.resolved_name, aliases)
             {
                 call.resolved_name = Some(alias);

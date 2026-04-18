@@ -1,0 +1,25 @@
+---
+source: crates/mir/tests/lowering_snapshots.rs
+expression: mir_output
+---
+#[inline]
+fn hinted() -> u64:
+  bb0:
+    ret 1
+
+#[inline(always)]
+fn forced() -> u64:
+  bb0:
+    v0: u64 = hinted()
+    ret v0
+
+#[inline(never)]
+fn blocked() -> u64:
+  bb0:
+    v0: u64 = forced()
+    ret v0
+
+fn caller() -> u64:
+  bb0:
+    v0: u64 = blocked()
+    ret v0

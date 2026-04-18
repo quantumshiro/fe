@@ -1,0 +1,153 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_nested_default.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_Outer_0 = enum {
+    #First(i256),
+    #Second(i256),
+};
+type @__fe_obj_Deep_1 = enum {
+    #Wrap(@__fe_obj_Outer_0),
+};
+
+func private %nested_with_defaults(v0.objref<@__fe_obj_Outer_0>) -> i8 {
+    block0:
+        jump block5;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (2.i8 block3) (0.i8 block4);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        jump block2;
+
+    block5:
+        v7.enumtag(@__fe_obj_Outer_0) = enum.get_tag v0;
+        br_table v7 block4 (0.enumtag(@__fe_obj_Outer_0) block6) (1.enumtag(@__fe_obj_Outer_0) block7);
+
+    block6:
+        v11.objref<@__fe_obj_Outer_0> = enum.assert_variant_ref v0 #First;
+        v12.objref<i256> = enum.proj v11 #First 0.i256;
+        v13.i256 = obj.load v12;
+        br_table v13 block4 (0.i256 block1);
+
+    block7:
+        v15.objref<@__fe_obj_Outer_0> = enum.assert_variant_ref v0 #Second;
+        v16.objref<i256> = enum.proj v15 #Second 0.i256;
+        v17.i256 = obj.load v16;
+        br_table v17 block4 (1.i256 block3);
+}
+
+func private %outer_specific_inner_wildcard(v0.objref<@__fe_obj_Outer_0>) -> i8 {
+    block0:
+        jump block5;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (2.i8 block3) (3.i8 block4);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        jump block2;
+
+    block5:
+        v8.enumtag(@__fe_obj_Outer_0) = enum.get_tag v0;
+        br_table v8 block4 (0.enumtag(@__fe_obj_Outer_0) block6);
+
+    block6:
+        v11.objref<@__fe_obj_Outer_0> = enum.assert_variant_ref v0 #First;
+        v12.objref<i256> = enum.proj v11 #First 0.i256;
+        v13.i256 = obj.load v12;
+        br_table v13 block3 (0.i256 block1);
+}
+
+func private %deeply_nested_wildcard(v0.objref<@__fe_obj_Deep_1>) -> i8 {
+    block0:
+        jump block4;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (0.i8 block3);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        v6.enumtag(@__fe_obj_Deep_1) = enum.get_tag v0;
+        br_table v6 block3 (0.enumtag(@__fe_obj_Deep_1) block5);
+
+    block5:
+        v9.objref<@__fe_obj_Deep_1> = enum.assert_variant_ref v0 #Wrap;
+        v10.objref<@__fe_obj_Outer_0> = enum.proj v9 #Wrap 0.i256;
+        v11.enumtag(@__fe_obj_Outer_0) = enum.get_tag v10;
+        br_table v11 block3 (0.enumtag(@__fe_obj_Outer_0) block6);
+
+    block6:
+        v14.objref<@__fe_obj_Deep_1> = enum.assert_variant_ref v0 #Wrap;
+        v15.objref<@__fe_obj_Outer_0> = enum.proj v14 #Wrap 0.i256;
+        v16.objref<@__fe_obj_Outer_0> = enum.assert_variant_ref v15 #First;
+        v17.objref<i256> = enum.proj v16 #First 0.i256;
+        v18.i256 = obj.load v17;
+        br_table v18 block3 (0.i256 block1);
+}
+
+func private %exhaustive_inner_outer_wildcard(v0.objref<@__fe_obj_Outer_0>) -> i8 {
+    block0:
+        jump block6;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (2.i8 block3) (3.i8 block4) (0.i8 block5);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        jump block2;
+
+    block5:
+        jump block2;
+
+    block6:
+        v8.enumtag(@__fe_obj_Outer_0) = enum.get_tag v0;
+        br_table v8 block5 (0.enumtag(@__fe_obj_Outer_0) block7);
+
+    block7:
+        v11.objref<@__fe_obj_Outer_0> = enum.assert_variant_ref v0 #First;
+        v12.objref<i256> = enum.proj v11 #First 0.i256;
+        v13.i256 = obj.load v12;
+        br_table v13 block5 (0.i256 block1) (1.i256 block3) (2.i256 block4);
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i8 = call %nested_with_defaults undef.objref<@__fe_obj_Outer_0>;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

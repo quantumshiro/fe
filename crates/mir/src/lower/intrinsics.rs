@@ -5,37 +5,7 @@ use super::*;
 
 impl<'db, 'a> MirBuilder<'db, 'a> {
     pub(super) fn callable_def_for_call_expr(&self, expr: ExprId) -> Option<CallableDef<'db>> {
-        if let Some(callable) = self.typed_body.callable_expr(expr) {
-            return Some(callable.callable_def);
-        }
-
-        let (callee, _) = match expr.data(self.db, self.body) {
-            Partial::Present(Expr::Call(callee, args)) => (*callee, args),
-            Partial::Present(Expr::MethodCall(..)) => return None,
-            _ => return None,
-        };
-
-        let Partial::Present(Expr::Path(path)) = callee.data(self.db, self.body) else {
-            return None;
-        };
-        let path = path.to_opt()?;
-
-        let func_ty = match resolve_path(
-            self.db,
-            path,
-            self.body.scope(),
-            PredicateListId::empty_list(self.db),
-            true,
-        ) {
-            Ok(PathRes::Func(func_ty)) => func_ty,
-            _ => return None,
-        };
-
-        let (base, _) = func_ty.decompose_ty_app(self.db);
-        let TyData::TyBase(TyBase::Func(callable_def)) = base.data(self.db) else {
-            return None;
-        };
-        Some(*callable_def)
+        Some(self.typed_body.callable_expr(expr)?.callable_def)
     }
 
     /// Attempts to lower a statement-only intrinsic call (`mstore`, `codecopy`, etc.).
@@ -49,6 +19,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         if self.current_block().is_none() {
             return Some(self.ensure_value(expr));
         }
+
         let (op, args) = self.intrinsic_stmt_args(expr)?;
         let value_id = self.ensure_value(expr);
         if matches!(op, IntrinsicOp::ReturnData | IntrinsicOp::Revert) {
@@ -56,13 +27,14 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 args.len() == 2,
                 "terminating intrinsics should have exactly two arguments"
             );
-            self.set_current_terminator(Terminator::TerminatingCall(
-                crate::ir::TerminatingCall::Intrinsic { op, args },
-            ));
+            self.set_current_terminator(Terminator::TerminatingCall {
+                source: crate::ir::SourceInfoId::SYNTHETIC,
+                call: crate::ir::TerminatingCall::Intrinsic { op, args },
+            });
             return Some(value_id);
         }
         self.push_inst_here(MirInst::Assign {
-            stmt: None,
+            source: crate::ir::SourceInfoId::SYNTHETIC,
             dest: None,
             rvalue: crate::ir::Rvalue::Intrinsic { op, args },
         });
@@ -86,7 +58,14 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             return None;
         }
 
-        let (args, _) = self.collect_call_args(expr)?;
+        let (mut args, _) = self.collect_call_args(expr)?;
+        let is_method_call = matches!(
+            expr.data(self.db, self.body),
+            Partial::Present(Expr::MethodCall(..))
+        );
+        if is_method_call && !args.is_empty() {
+            args.remove(0);
+        }
         Some((op, args))
     }
 
@@ -98,10 +77,17 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// # Returns
     /// Matching `IntrinsicOp` if the callable is a core intrinsic.
     pub(super) fn intrinsic_kind(&self, func_def: CallableDef<'db>) -> Option<IntrinsicOp> {
-        if func_def.ingot(self.db).kind(self.db) != IngotKind::Core {
+        match func_def.ingot(self.db).kind(self.db) {
+            IngotKind::Core | IngotKind::Std => {}
+            _ => return None,
+        }
+        let CallableDef::Func(func) = func_def else {
+            return None;
+        };
+        if func.body(self.db).is_some() {
             return None;
         }
-        let name = func_def.name(self.db)?;
+        let name = func.name(self.db).to_opt()?;
         match name.data(self.db).as_str() {
             "mload" => Some(IntrinsicOp::Mload),
             "calldataload" => Some(IntrinsicOp::Calldataload),
@@ -112,6 +98,7 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             "addr_of" => Some(IntrinsicOp::AddrOf),
             "mstore" => Some(IntrinsicOp::Mstore),
             "mstore8" => Some(IntrinsicOp::Mstore8),
+            "alloc" => Some(IntrinsicOp::Alloc),
             "sload" => Some(IntrinsicOp::Sload),
             "sstore" => Some(IntrinsicOp::Sstore),
             "return_data" => Some(IntrinsicOp::ReturnData),
@@ -120,10 +107,119 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             "codesize" => Some(IntrinsicOp::Codesize),
             "code_region_offset" => Some(IntrinsicOp::CodeRegionOffset),
             "code_region_len" => Some(IntrinsicOp::CodeRegionLen),
-            "keccak" => Some(IntrinsicOp::Keccak),
+            "keccak" | "keccak256" => Some(IntrinsicOp::Keccak),
+            "addmod" => Some(IntrinsicOp::Addmod),
+            "mulmod" => Some(IntrinsicOp::Mulmod),
             "caller" => Some(IntrinsicOp::Caller),
-            "stor_at" => Some(IntrinsicOp::StorAt),
-            "at_offset" => Some(IntrinsicOp::StorAt),
+            "callvalue" => Some(IntrinsicOp::Callvalue),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if the callable definition refers to the `__bitcast` intrinsic.
+    ///
+    /// This is the generic bitcast intrinsic `__bitcast<From, To>(value: From) -> To` in core
+    /// that reinterprets bits between primitive integer types without runtime cost.
+    pub(super) fn is_cast_intrinsic(&self, func_def: CallableDef<'db>) -> bool {
+        match func_def.ingot(self.db).kind(self.db) {
+            IngotKind::Core | IngotKind::Std => {}
+            _ => return false,
+        }
+
+        let CallableDef::Func(func) = func_def else {
+            return false;
+        };
+        if func.body(self.db).is_some() {
+            return false;
+        }
+
+        let Some(name) = func_def.name(self.db) else {
+            return false;
+        };
+        name.data(self.db).as_str() == "__bitcast"
+    }
+
+    pub(super) fn checked_intrinsic_kind(
+        &self,
+        func_def: CallableDef<'db>,
+        ty: TyId<'db>,
+    ) -> Option<crate::ir::CheckedIntrinsic<'db>> {
+        match func_def.ingot(self.db).kind(self.db) {
+            IngotKind::Core | IngotKind::Std => {}
+            _ => return None,
+        }
+
+        let CallableDef::Func(func) = func_def else {
+            return None;
+        };
+        if func.body(self.db).is_some() {
+            return None;
+        }
+
+        let name = func_def.name(self.db)?;
+        let inner_ty = ty
+            .as_capability(self.db)
+            .map(|(_, inner)| inner)
+            .unwrap_or(ty);
+        let op = match name.data(self.db).as_str() {
+            "__checked_add" => crate::ir::CheckedArithmeticOp::Add,
+            "__checked_sub" => crate::ir::CheckedArithmeticOp::Sub,
+            "__checked_mul" => crate::ir::CheckedArithmeticOp::Mul,
+            "__checked_div" => crate::ir::CheckedArithmeticOp::Div,
+            "__checked_rem" => crate::ir::CheckedArithmeticOp::Rem,
+            "__checked_neg" => crate::ir::CheckedArithmeticOp::Neg,
+            _ => return None,
+        };
+
+        self.checked_intrinsic_ty_suffix(inner_ty)?;
+
+        Some(crate::ir::CheckedIntrinsic { op, ty: inner_ty })
+    }
+
+    pub(super) fn builtin_terminator_kind(
+        &self,
+        func_def: CallableDef<'db>,
+    ) -> Option<crate::ir::BuiltinTerminatorKind> {
+        match func_def.ingot(self.db).kind(self.db) {
+            IngotKind::Core => {}
+            _ => return None,
+        }
+
+        let CallableDef::Func(func) = func_def else {
+            return None;
+        };
+        if func.body(self.db).is_some() {
+            return None;
+        }
+
+        let name = func_def.name(self.db)?;
+        match name.data(self.db).as_str() {
+            "panic" | "todo" => Some(crate::ir::BuiltinTerminatorKind::Abort),
+            "panic_with_value" => Some(crate::ir::BuiltinTerminatorKind::AbortWithValue),
+            _ => None,
+        }
+    }
+
+    fn checked_intrinsic_ty_suffix(&self, ty: TyId<'db>) -> Option<&'static str> {
+        let base_ty = ty.base_ty(self.db);
+        let TyData::TyBase(TyBase::Prim(prim)) = base_ty.data(self.db) else {
+            return None;
+        };
+        match prim {
+            PrimTy::U8 => Some("u8"),
+            PrimTy::U16 => Some("u16"),
+            PrimTy::U32 => Some("u32"),
+            PrimTy::U64 => Some("u64"),
+            PrimTy::U128 => Some("u128"),
+            PrimTy::U256 => Some("u256"),
+            PrimTy::Usize => Some("usize"),
+            PrimTy::I8 => Some("i8"),
+            PrimTy::I16 => Some("i16"),
+            PrimTy::I32 => Some("i32"),
+            PrimTy::I64 => Some("i64"),
+            PrimTy::I128 => Some("i128"),
+            PrimTy::I256 => Some("i256"),
+            PrimTy::Isize => Some("isize"),
             _ => None,
         }
     }
@@ -134,32 +230,50 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     /// - `expr`: Path expression referencing a function.
     ///
     /// # Returns
-    /// A `CodeRegionRoot` describing the referenced function, or `None` on failure.
-    pub(super) fn code_region_target(&self, expr: ExprId) -> Option<CodeRegionRoot<'db>> {
-        let expr_data = &self.body.exprs(self.db)[expr].borrowed().to_opt()?;
-        let Expr::Path(path) = expr_data else {
-            return None;
-        };
-        let path = path.to_opt()?;
-
-        let func_ty = match resolve_path(
-            self.db,
-            path,
-            self.body.scope(),
-            PredicateListId::empty_list(self.db),
-            true,
-        ) {
-            Ok(PathRes::Func(func_ty)) => func_ty,
-            _ => return None,
-        };
-
-        let (base, args) = func_ty.decompose_ty_app(self.db);
+    /// A `CodeRegionRef` describing the referenced function, or `None` on failure.
+    pub(super) fn code_region_target(&self, expr: ExprId) -> Option<CodeRegionRef<'db>> {
+        let ty = self
+            .typed_body
+            .expr_ty(self.db, expr)
+            .as_capability(self.db)
+            .map(|(_, inner)| inner)
+            .unwrap_or_else(|| self.typed_body.expr_ty(self.db, expr));
+        let (base, args) = ty.decompose_ty_app(self.db);
         let TyData::TyBase(TyBase::Func(CallableDef::Func(func))) = base.data(self.db) else {
             return None;
         };
         let _ = extract_contract_function(self.db, *func)?;
-        Some(CodeRegionRoot {
-            func: *func,
+        let generic_args = args.to_vec();
+        debug_assert!(
+            generic_args
+                .iter()
+                .all(|ty| !matches!(ty.data(self.db), TyData::TyVar(_))),
+            "code_region target generic args should never contain TyVar; this should be canonicalized during typing"
+        );
+        Some(CodeRegionRef {
+            origin: crate::ir::MirFunctionOrigin::Hir(*func),
+            generic_args,
+            symbol: None,
+        })
+    }
+
+    /// Resolves the `code_region` target represented by a function-item type.
+    ///
+    /// This is used when contract code regions are passed through locals/params (e.g. `fn f<F>(x: F)`),
+    /// where the value has no runtime representation but the *type* still uniquely identifies the
+    /// referenced contract entrypoint.
+    pub(super) fn code_region_target_from_ty(&self, ty: TyId<'db>) -> Option<CodeRegionRef<'db>> {
+        let ty = ty
+            .as_capability(self.db)
+            .map(|(_, inner)| inner)
+            .unwrap_or(ty);
+        let (base, args) = ty.decompose_ty_app(self.db);
+        let TyData::TyBase(TyBase::Func(CallableDef::Func(func))) = base.data(self.db) else {
+            return None;
+        };
+        let _ = extract_contract_function(self.db, *func)?;
+        Some(CodeRegionRef {
+            origin: crate::ir::MirFunctionOrigin::Hir(*func),
             generic_args: args.to_vec(),
             symbol: None,
         })

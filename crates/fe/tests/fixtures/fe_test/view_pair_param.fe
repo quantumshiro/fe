@@ -1,0 +1,14 @@
+struct Pair {
+    a: u256,
+    b: u256,
+}
+
+fn first(_ p: Pair) -> u256 {
+    p.a
+}
+
+#[test]
+fn test_view_pair_param() {
+    let pair = Pair { a: 7, b: 9 }
+    assert(first(pair) == 7)
+}

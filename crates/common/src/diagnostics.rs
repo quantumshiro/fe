@@ -30,12 +30,40 @@ impl CompleteDiagnostic {
         }
     }
 
-    pub fn primary_span(&self) -> Span {
-        self.sub_diagnostics
+    pub fn primary_span(&self) -> Option<Span> {
+        let span = self
+            .sub_diagnostics
             .iter()
             .find_map(|sub| sub.is_primary().then(|| sub.span.clone()).flatten())
-            .or_else(|| self.sub_diagnostics.iter().find_map(|sub| sub.span.clone()))
-            .unwrap()
+            .or_else(|| self.sub_diagnostics.iter().find_map(|sub| sub.span.clone()));
+
+        debug_assert!(
+            span.is_some(),
+            "spanless diagnostic ({}): {}",
+            self.error_code,
+            self.message
+        );
+
+        span
+    }
+}
+
+pub fn cmp_complete_diagnostics(
+    lhs: &CompleteDiagnostic,
+    rhs: &CompleteDiagnostic,
+) -> std::cmp::Ordering {
+    match lhs.error_code.cmp(&rhs.error_code) {
+        std::cmp::Ordering::Equal => {
+            let lhs_span = lhs.primary_span();
+            let rhs_span = rhs.primary_span();
+            match (lhs_span, rhs_span) {
+                (Some(lhs_span), Some(rhs_span)) => lhs_span.cmp(&rhs_span),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        }
+        ord => ord,
     }
 }
 
@@ -144,6 +172,13 @@ pub enum Severity {
 pub enum DiagnosticPass {
     Parse,
     MsgLower,
+    EventLower,
+    ErrorLower,
+    ArithmeticAttr,
+    PayableAttr,
+
+    InlineAttr,
+    LoopUnrollAttr,
 
     NameResolution,
 
@@ -154,6 +189,8 @@ pub enum DiagnosticPass {
     MethodDefinition,
     TyCheck,
 
+    Mir,
+
     ExternalAnalysis(ExternalAnalysisKey),
 }
 
@@ -162,6 +199,12 @@ impl DiagnosticPass {
         match self {
             Self::Parse => 1,
             Self::MsgLower => 9,
+            Self::EventLower => 10,
+            Self::ErrorLower => 16,
+            Self::ArithmeticAttr => 12,
+            Self::PayableAttr => 13,
+            Self::InlineAttr => 14,
+            Self::LoopUnrollAttr => 15,
             Self::NameResolution => 2,
             Self::TypeDefinition => 3,
             Self::TraitDefinition => 4,
@@ -169,6 +212,7 @@ impl DiagnosticPass {
             Self::TraitSatisfaction => 6,
             Self::MethodDefinition => 7,
             Self::TyCheck => 8,
+            Self::Mir => 11,
 
             Self::ExternalAnalysis(_) => u16::MAX,
         }

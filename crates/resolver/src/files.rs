@@ -1,12 +1,14 @@
 use camino::Utf8PathBuf;
+use common::paths::{file_url_to_utf8_path, glob_pattern};
 use glob::glob;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fmt, fs};
 use url::Url;
 
 use crate::Resolver;
 
+#[derive(Clone)]
 pub struct FilesResolver {
     pub file_patterns: Vec<String>,
     pub required_files: Vec<RequiredFile>,
@@ -153,30 +155,81 @@ impl FilesResolver {
     }
 }
 
+pub fn read_file_text(path: &Path) -> Result<String, io::Error> {
+    fs::read_to_string(path)
+}
+
+pub fn path_exists(path: &Path) -> bool {
+    fs::metadata(path).is_ok()
+}
+
+pub fn find_fe_toml_paths(root: &Path) -> Result<Vec<PathBuf>, FilesResolutionError> {
+    let pattern = root.join("**").join("fe.toml");
+    let entries = glob(&glob_pattern(&pattern)).map_err(FilesResolutionError::PatternError)?;
+    let mut paths = Vec::new();
+    for entry in entries {
+        match entry {
+            Ok(path) => paths.push(path),
+            Err(error) => return Err(FilesResolutionError::GlobError(error)),
+        }
+    }
+    Ok(paths)
+}
+
+pub fn ancestor_fe_toml_dirs(start: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut current = if start.is_file() {
+        start.parent().map(PathBuf::from)
+    } else {
+        Some(start.to_path_buf())
+    };
+
+    while let Some(dir) = current {
+        if dir.join("fe.toml").is_file() {
+            dirs.push(dir.clone());
+        }
+        current = dir.parent().map(PathBuf::from);
+    }
+
+    dirs
+}
+
 impl Resolver for FilesResolver {
     type Description = Url;
     type Resource = FilesResource;
     type Error = FilesResolutionError;
     type Diagnostic = FilesResolutionDiagnostic;
+    type Event = ();
 
     fn resolve<H>(&mut self, handler: &mut H, url: &Url) -> Result<H::Item, Self::Error>
     where
         H: crate::ResolutionHandler<Self>,
     {
         tracing::info!(target: "resolver", "Starting file resolution for URL: {}", url);
-        handler.on_resolution_start(url);
         let mut files = vec![];
 
-        let ingot_path = Utf8PathBuf::from(url.path());
+        let ingot_path = file_url_to_utf8_path(url)
+            .ok_or_else(|| FilesResolutionError::DirectoryDoesNotExist(url.clone()))?;
         tracing::info!(target: "resolver", "Resolving files in path: {}", ingot_path);
+
+        if ingot_path.exists() && ingot_path.is_file() {
+            let content = fs::read_to_string(ingot_path.as_std_path())
+                .map_err(FilesResolutionError::IoError)?;
+            files.push(File {
+                path: ingot_path,
+                content,
+            });
+            tracing::info!(target: "resolver", "File resolution completed successfully, found {} files", files.len());
+            let resource = FilesResource { files };
+            return Ok(handler.handle_resolution(url, resource));
+        }
 
         // Check if the directory exists
         if !ingot_path.exists() || !ingot_path.is_dir() {
             return Err(FilesResolutionError::DirectoryDoesNotExist(url.clone()));
         }
 
-        // Check for required directories first
-        for required_dir in &self.required_directories {
+        for required_dir in self.required_directories.clone() {
             let required_dir_path = ingot_path.join(&required_dir.path);
             if !required_dir_path.exists() || !required_dir_path.is_dir() {
                 handler.on_resolution_diagnostic(
@@ -188,40 +241,38 @@ impl Resolver for FilesResolver {
             }
         }
 
-        // Check for required files
-        for required_file in &self.required_files {
+        for required_file in self.required_files.clone() {
             let required_path = ingot_path.join(&required_file.path);
             if !required_path.exists() {
                 handler.on_resolution_diagnostic(FilesResolutionDiagnostic::RequiredFileMissing(
                     url.clone(),
                     required_file.path.clone(),
                 ));
-            } else {
-                // If required file exists, load it
-                match fs::read_to_string(&required_path) {
-                    Ok(content) => {
-                        tracing::info!(target: "resolver", "Successfully read required file: {}", required_path);
-                        files.push(File {
-                            path: required_path,
-                            content,
-                        });
-                    }
-                    Err(error) => {
-                        tracing::warn!(target: "resolver", "Failed to read required file {}: {}", required_path, error);
-                        handler.on_resolution_diagnostic(FilesResolutionDiagnostic::FileIoError(
-                            required_path,
-                            error,
-                        ));
-                    }
+                continue;
+            }
+
+            match fs::read_to_string(&required_path) {
+                Ok(content) => {
+                    tracing::info!(target: "resolver", "Successfully read required file: {}", required_path);
+                    files.push(File {
+                        path: required_path,
+                        content,
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!(target: "resolver", "Failed to read required file {}: {}", required_path, error);
+                    handler.on_resolution_diagnostic(FilesResolutionDiagnostic::FileIoError(
+                        required_path,
+                        error,
+                    ));
                 }
             }
         }
 
-        // Process file patterns
-        for pattern in &self.file_patterns {
-            let pattern_path = ingot_path.join(pattern);
-            let entries =
-                glob(pattern_path.as_str()).map_err(FilesResolutionError::PatternError)?;
+        for pattern in self.file_patterns.clone() {
+            let pattern_path = ingot_path.join(&pattern);
+            let entries = glob(&glob_pattern(pattern_path.as_std_path()))
+                .map_err(FilesResolutionError::PatternError)?;
 
             for entry in entries {
                 match entry {
@@ -263,5 +314,55 @@ impl Resolver for FilesResolver {
         tracing::info!(target: "resolver", "File resolution completed successfully, found {} files", files.len());
         let resource = FilesResource { files };
         Ok(handler.handle_resolution(url, resource))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ResolutionHandler, Resolver};
+
+    struct EchoHandler;
+
+    impl ResolutionHandler<FilesResolver> for EchoHandler {
+        type Item = FilesResource;
+
+        fn handle_resolution(&mut self, _description: &Url, resource: FilesResource) -> Self::Item {
+            resource
+        }
+    }
+
+    #[test]
+    fn resolves_directory_urls_created_from_paths() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let source_file = temp.path().join("main.fe");
+        fs::write(&source_file, "fn main() {}\n").expect("write source file");
+
+        let url = Url::from_directory_path(temp.path()).expect("directory url");
+        let mut resolver = FilesResolver::new().with_pattern("*.fe");
+        let mut handler = EchoHandler;
+        let files = resolver
+            .resolve(&mut handler, &url)
+            .expect("resolve directory url");
+
+        assert_eq!(files.files.len(), 1);
+        assert_eq!(files.files[0].path.file_name(), Some("main.fe"));
+    }
+
+    #[test]
+    fn resolves_file_urls_created_from_paths() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let source_file = temp.path().join("entry.fe");
+        fs::write(&source_file, "fn entry() {}\n").expect("write source file");
+
+        let url = Url::from_file_path(&source_file).expect("file url");
+        let mut resolver = FilesResolver::new();
+        let mut handler = EchoHandler;
+        let files = resolver
+            .resolve(&mut handler, &url)
+            .expect("resolve file url");
+
+        assert_eq!(files.files.len(), 1);
+        assert_eq!(files.files[0].path.file_name(), Some("entry.fe"));
     }
 }

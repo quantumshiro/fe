@@ -3,8 +3,8 @@ source: crates/codegen/tests/yul.rs
 expression: output
 input_file: tests/fixtures/keccak_intrinsic.fe
 ---
-function hash(ptr, len) -> ret {
-  let v0 := keccak256(ptr, len)
+function $hash__Evm_hef0af3106e109414__3af54274b2985741($ptr, $len) -> ret {
+  let v0 := keccak256($ptr, $len)
   ret := v0
   leave
 }

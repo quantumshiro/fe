@@ -1,0 +1,100 @@
+---
+source: crates/parser/tests/syntax_node.rs
+expression: node
+input_file: test_files/syntax_node/items/contract_doc_comment_init_recv.fe
+---
+Root@0..192
+  ItemList@0..191
+    Item@0..191
+      Contract@0..191
+        ContractKw@0..8 "contract"
+        WhiteSpace@8..9 " "
+        Ident@9..12 "Foo"
+        WhiteSpace@12..13 " "
+        LBrace@13..14 "{"
+        Newline@14..15 "\n"
+        WhiteSpace@15..19 "    "
+        ContractFields@19..25
+          RecordFieldDef@19..25
+            Ident@19..20 "x"
+            Colon@20..21 ":"
+            WhiteSpace@21..22 " "
+            PathType@22..25
+              Path@22..25
+                PathSegment@22..25
+                  Ident@22..25 "i32"
+        Newline@25..27 "\n\n"
+        WhiteSpace@27..31 "    "
+        ContractInit@31..74
+          AttrList@31..61
+            DocCommentAttr@31..60
+              DocComment@31..60 "/// Initializes the c ..."
+            Newline@60..61 "\n"
+          WhiteSpace@61..65 "    "
+          Ident@65..69 "init"
+          FuncParamList@69..71
+            LParen@69..70 "("
+            RParen@70..71 ")"
+          WhiteSpace@71..72 " "
+          BlockExpr@72..74
+            LBrace@72..73 "{"
+            RBrace@73..74 "}"
+        Newline@74..76 "\n\n"
+        WhiteSpace@76..80 "    "
+        ContractRecv@80..189
+          AttrList@80..108
+            DocCommentAttr@80..107
+              DocComment@80..107 "/// Handles Erc20 mes ..."
+            Newline@107..108 "\n"
+          WhiteSpace@108..112 "    "
+          Ident@112..116 "recv"
+          WhiteSpace@116..117 " "
+          Path@117..122
+            PathSegment@117..122
+              Ident@117..122 "Erc20"
+          WhiteSpace@122..123 " "
+          RecvArmList@123..189
+            LBrace@123..124 "{"
+            Newline@124..125 "\n"
+            WhiteSpace@125..133 "        "
+            RecvArm@133..183
+              RecordPat@133..149
+                Path@133..140
+                  PathSegment@133..140
+                    Ident@133..140 "Balance"
+                WhiteSpace@140..141 " "
+                RecordPatFieldList@141..149
+                  LBrace@141..142 "{"
+                  WhiteSpace@142..143 " "
+                  RecordPatField@143..147
+                    PathPat@143..147
+                      Path@143..147
+                        PathSegment@143..147
+                          Ident@143..147 "addr"
+                  WhiteSpace@147..148 " "
+                  RBrace@148..149 "}"
+              WhiteSpace@149..150 " "
+              Arrow@150..152 "->"
+              WhiteSpace@152..153 " "
+              PathType@153..157
+                Path@153..157
+                  PathSegment@153..157
+                    Ident@153..157 "u256"
+              WhiteSpace@157..158 " "
+              BlockExpr@158..183
+                LBrace@158..159 "{"
+                Newline@159..160 "\n"
+                WhiteSpace@160..172 "            "
+                ExprStmt@172..173
+                  LitExpr@172..173
+                    Lit@172..173
+                      Int@172..173 "0"
+                Newline@173..174 "\n"
+                WhiteSpace@174..182 "        "
+                RBrace@182..183 "}"
+            Newline@183..184 "\n"
+            WhiteSpace@184..188 "    "
+            RBrace@188..189 "}"
+        Newline@189..190 "\n"
+        RBrace@190..191 "}"
+  Newline@191..192 "\n"

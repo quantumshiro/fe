@@ -1,0 +1,25 @@
+use core::functional::Fn
+use core::result::Result::{self, Ok}
+
+struct Wrap {
+    val: u256,
+}
+
+struct ToWrap {}
+impl Fn<u256, Wrap> for ToWrap {
+    fn call(self, _ x: own u256) -> Wrap {
+        Wrap { val: x }
+    }
+}
+
+struct StillNeedsU256 {}
+impl Fn<u256, u256> for StillNeedsU256 {
+    fn call(self, _ x: own u256) -> u256 {
+        x
+    }
+}
+
+fn pipeline() -> u256 {
+    let r: Result<bool, u256> = Ok(42)
+    r.map(ToWrap{}).map(StillNeedsU256{}).unwrap()
+}

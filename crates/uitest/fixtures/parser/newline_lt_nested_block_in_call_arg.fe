@@ -1,0 +1,11 @@
+fn id(x: i32) -> i32 {
+    x
+}
+
+fn f(x: i32, y: i32) {
+    let _a = id({
+        let _z = x
+            < y
+        x
+    })
+}

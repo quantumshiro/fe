@@ -1,0 +1,29 @@
+---
+source: crates/uitest/tests/ty_check.rs
+assertion_line: 27
+expression: diags
+input_file: fixtures/ty_check/payable_unknown_attr_on_init_recv.fe
+---
+error[13-0004]: unknown attribute `#[payble]` on init block (only `#[payable]` is allowed)
+  ┌─ payable_unknown_attr_on_init_recv.fe:6:5
+  │
+6 │     #[payble]
+  │     ^^^^^^^^^ remove this attribute or use `#[payable]`
+
+error[13-0004]: unknown attribute `#[bar]` on recv block
+   ┌─ payable_unknown_attr_on_init_recv.fe:11:5
+   │
+11 │     #[bar]
+   │     ^^^^^^ remove this attribute; `recv` blocks do not support normal attributes
+
+error[13-0004]: unknown attribute `#[foo]` on recv arm (only `#[payable]` is allowed)
+   ┌─ payable_unknown_attr_on_init_recv.fe:13:9
+   │
+13 │         #[foo]
+   │         ^^^^^^ remove this attribute or use `#[payable]`
+
+error[8-0012]: undefined variable
+  ┌─ payable_unknown_attr_on_init_recv.fe:8:9
+  │
+8 │         store.value = 0
+  │         ^^^^^ undefined variable `store`

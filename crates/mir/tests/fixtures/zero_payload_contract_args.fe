@@ -1,0 +1,16 @@
+msg ZeroMsg {
+    #[selector = 0]
+    Ping -> u256,
+}
+
+pub contract ZeroPayloadContractArgs {
+    init(dummy: ()) {
+        let kept = dummy
+    }
+
+    recv ZeroMsg {
+        Ping -> u256 {
+            7
+        }
+    }
+}

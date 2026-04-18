@@ -1,0 +1,5 @@
+#[event]
+#[error]
+struct Confused {
+    code: u256,
+}

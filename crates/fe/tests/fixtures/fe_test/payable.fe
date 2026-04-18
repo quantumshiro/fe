@@ -1,0 +1,144 @@
+use std::evm::{Evm, Ctx, Address}
+use std::abi::sol
+
+pub contract PayableBox uses (ctx: Ctx) {
+    #[payable]
+    init() {}
+
+    recv PayableMsg {
+        #[payable]
+        Fund {} {}
+
+        GetBalance {} -> u256
+            uses (ctx)
+        {
+            ctx.selfbalance()
+        }
+    }
+}
+
+pub contract NonPayableBox {
+    init() {}
+
+    recv NonPayableMsg {
+        Ping {} -> u256 {
+            1
+        }
+    }
+}
+
+pub contract NoInitBox {
+    recv NoInitMsg {
+        Ping {} -> u256 {
+            7
+        }
+    }
+}
+
+msg PayableMsg {
+    #[selector = sol("fund()")]
+    Fund,
+
+    #[selector = sol("getBalance()")]
+    GetBalance -> u256,
+}
+
+msg NonPayableMsg {
+    #[selector = sol("ping()")]
+    Ping -> u256,
+}
+
+msg NoInitMsg {
+    #[selector = sol("ping()")]
+    Ping -> u256,
+}
+
+// Test: non-payable recv arm works with zero value
+#[test]
+fn test_non_payable_zero_value() uses (evm: mut Evm) {
+    let addr = evm.create2<NonPayableBox>(value: 0, args: (), salt: 0)
+    assert(addr.inner != 0)
+
+    let result: u256 = evm.call(addr: addr, gas: 100000, value: 0, message: NonPayableMsg::Ping {})
+    assert(result == 1)
+}
+
+// Test: non-payable recv arm reverts when ETH is sent
+#[test(should_revert, balance = 1000000000)]
+fn test_non_payable_rejects_value() uses (evm: mut Evm) {
+    let addr = evm.create2<NonPayableBox>(value: 0, args: (), salt: 0)
+    assert(addr.inner != 0)
+
+    // This should revert because Ping is not #[payable]
+    evm.call(addr: addr, gas: 100000, value: 1, message: NonPayableMsg::Ping {})
+}
+
+// Test: payable recv arm works with zero value
+#[test]
+fn test_payable_zero_value() uses (evm: mut Evm) {
+    let addr = evm.create2<PayableBox>(value: 0, args: (), salt: 0)
+    assert(addr.inner != 0)
+
+    // Fund is #[payable], should work with zero value too
+    evm.call(addr: addr, gas: 100000, value: 0, message: PayableMsg::Fund {})
+}
+
+// Test: payable init creates contract successfully
+#[test]
+fn test_payable_init() uses (evm: mut Evm) {
+    let addr = evm.create2<PayableBox>(value: 0, args: (), salt: 0)
+    assert(addr.inner != 0)
+}
+
+// Test: non-payable init reverts when ETH is sent during deployment
+#[test(should_revert, balance = 1000000000)]
+fn test_non_payable_init_rejects_value() uses (evm: mut Evm) {
+    // NonPayableBox init is not #[payable], deploying with value should revert
+    evm.create2<NonPayableBox>(value: 1, args: (), salt: 0)
+}
+
+// Test: contract without init deploys with zero value
+#[test]
+fn test_no_init_zero_value() uses (evm: mut Evm) {
+    let addr = evm.create2<NoInitBox>(value: 0, args: (), salt: 0)
+    assert(addr.inner != 0)
+
+    let result: u256 = evm.call(addr: addr, gas: 100000, value: 0, message: NoInitMsg::Ping {})
+    assert(result == 7)
+}
+
+// Test: contract without init rejects ETH during deployment
+#[test(should_revert, balance = 1000000000)]
+fn test_no_init_rejects_value() uses (evm: mut Evm) {
+    evm.create2<NoInitBox>(value: 1, args: (), salt: 0)
+}
+
+// Test: payable recv arm accepts non-zero ETH
+#[test(balance = 1000000000)]
+fn test_payable_accepts_value() uses (evm: mut Evm) {
+    let addr = evm.create2<PayableBox>(value: 0, args: (), salt: 0)
+    assert(addr.inner != 0)
+
+    // Fund is #[payable], should succeed with non-zero value
+    evm.call(addr: addr, gas: 100000, value: 1, message: PayableMsg::Fund {})
+}
+
+// Test: payable init accepts ETH at deployment
+#[test(balance = 1000000000)]
+fn test_payable_init_accepts_value() uses (evm: mut Evm) {
+    let addr = evm.create2<PayableBox>(value: 1, args: (), salt: 0)
+    assert(addr.inner != 0)
+}
+
+// Test: selfbalance reflects ETH sent to contract
+#[test(balance = 1000000000)]
+fn test_selfbalance() uses (evm: mut Evm) {
+    let addr = evm.create2<PayableBox>(value: 0, args: (), salt: 0)
+
+    // Fund the contract with 500 wei
+    evm.call(addr: addr, gas: 100000, value: 500, message: PayableMsg::Fund {})
+
+    // Query the balance via ctx.selfbalance()
+    let balance: u256 = evm.call(addr: addr, gas: 100000, value: 0, message: PayableMsg::GetBalance {})
+    assert(balance == 500)
+}

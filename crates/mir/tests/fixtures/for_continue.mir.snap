@@ -1,0 +1,60 @@
+---
+source: crates/mir/tests/lowering_snapshots.rs
+expression: mir_output
+---
+fn for_continue() -> usize:
+  bb0:
+    v0: usize = 0
+    v1: usize = 0
+    v2: usize = range_known_const_s__usize___known_const_e__usize___hc7c7abc3858dd85e_seq_ha637d2df505bccf2_len__0_4__f9605efabd18106c()
+    jmp bb1
+  bb1:
+    br (v1 < v2) bb2 bb4
+  bb2:
+    v3: usize = range_known_const_s__usize___known_const_e__usize___hc7c7abc3858dd85e_seq_ha637d2df505bccf2_get__0_4__f9605efabd18106c(v1)
+    v4: usize = v3
+    v5: bool = usize_ha12462c6d36e68b0_eq_he50383edd273619f_eq(v4, 2)
+    br v5 bb5 bb6
+  bb3:
+    v1 = (v1 + 1)
+    jmp bb1
+  bb4:
+    ret v0
+  bb5:
+    jmp bb3
+  bb6:
+    v6: usize = checked_add<usize>(v0, 1)
+    v0 = v6
+    jmp bb3
+
+fn range_known_const_s__usize___known_const_e__usize___hc7c7abc3858dd85e_seq_ha637d2df505bccf2_len__0_4__f9605efabd18106c(v0: Range<Known<0>, Known<4>>) -> usize:
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    v1: usize = 0
+    v2: bool = usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_lt(4, 0)
+    br v2 bb1 bb2
+  bb1:
+    v1 = 0
+    jmp bb3
+  bb2:
+    v3: usize = checked_sub<usize>(4, 0)
+    v1 = v3
+    jmp bb3
+  bb3:
+    ret v1
+
+fn range_known_const_s__usize___known_const_e__usize___hc7c7abc3858dd85e_seq_ha637d2df505bccf2_get__0_4__f9605efabd18106c(v0: Range<Known<0>, Known<4>>, v1: usize) -> usize:
+  ; runtime_abi values=[v1: usize] effects=[]
+  bb0:
+    v2: usize = checked_add<usize>(0, v1)
+    ret v2
+
+fn usize_ha12462c6d36e68b0_eq_he50383edd273619f_eq(v0: usize, v1: usize) -> bool:
+  bb0:
+    v2: bool = __eq_usize(v0, v1)
+    ret v2
+
+fn usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_lt(v0: usize, v1: usize) -> bool:
+  bb0:
+    v2: bool = __lt_usize(v0, v1)
+    ret v2

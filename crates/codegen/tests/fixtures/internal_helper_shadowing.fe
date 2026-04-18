@@ -1,0 +1,17 @@
+use core::ops::SaturatingAdd
+
+pub fn checked_add_u64(a: u64, b: u64) -> u64 {
+    77
+}
+
+pub fn saturating_add_u64(a: u64, b: u64) -> u64 {
+    88
+}
+
+pub fn call_user_helpers(a: u64, b: u64) -> (u64, u64) {
+    (checked_add_u64(a, b), saturating_add_u64(a, b))
+}
+
+pub fn call_internal_helpers(a: u64, b: u64) -> (u64, u64) {
+    (a + b, a.saturating_add(b))
+}

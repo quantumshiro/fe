@@ -1,0 +1,7 @@
+struct Foo { v: u8 }
+
+fn consume(_f: ref Foo) {}
+
+pub fn borrow_operand_not_place() {
+    consume(ref )
+}

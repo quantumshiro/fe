@@ -8,9 +8,9 @@ use rustc_hash::FxHashSet;
 use salsa::Update;
 
 use super::{
-    AssocTyDecl, AttrListId, Body, Const, Contract, Enum, EnumVariant, ExprId, FieldDef,
-    FieldParent, Func, FuncParam, FuncParamName, GenericParam, IdentId, Impl, ImplTrait, ItemKind,
-    Mod, Struct, TopLevelMod, Trait, TypeAlias, Use, VariantDef, VariantKind, Visibility,
+    AssocConstDecl, AssocTyDecl, AttrListId, Body, Const, Contract, Enum, EnumVariant, ExprId,
+    FieldDef, FieldParent, Func, FuncParam, GenericParam, IdentId, Impl, ImplTrait, ItemKind, Mod,
+    Struct, TopLevelMod, Trait, TypeAlias, Use, VariantDef, VariantKind, Visibility,
     scope_graph_viz::ScopeGraphFormatter,
 };
 use crate::{
@@ -174,13 +174,15 @@ impl<'db> ScopeId<'db> {
         match self {
             ScopeId::Item(item) => item.attrs(db),
             ScopeId::Field(..) => {
-                let def: &FieldDef = self.resolve_to(db).unwrap();
+                let def: &FieldDef = self.resolve_to(db)?;
                 Some(def.attributes)
             }
             ScopeId::Variant(..) => {
-                let def: &VariantDef = self.resolve_to(db).unwrap();
+                let def: &VariantDef = self.resolve_to(db)?;
                 Some(def.attributes)
             }
+            ScopeId::TraitType(t, idx) => t.types(db).get(idx as usize).map(|d| d.attributes),
+            ScopeId::TraitConst(t, idx) => t.consts(db).get(idx as usize).map(|d| d.attributes),
             _ => None,
         }
     }
@@ -233,7 +235,7 @@ impl<'db> ScopeId<'db> {
 
     /// Returns the `Scope` data for this scope.
     pub fn data(self, db: &'db dyn HirDb) -> &'db Scope<'db> {
-        self.top_mod(db).scope_graph(db).scope_data(&self)
+        self.scope_graph(db).scope_data(&self)
     }
 
     /// Returns the parent scope of this scope.
@@ -328,24 +330,20 @@ impl<'db> ScopeId<'db> {
     }
 
     pub fn name(self, db: &'db dyn HirDb) -> Option<IdentId<'db>> {
-        match self.data(db).id {
+        match self {
             ScopeId::Item(item) => item.name(db),
 
-            ScopeId::Variant(..) => self.resolve_to::<&VariantDef>(db).unwrap().name.to_opt(),
+            ScopeId::Variant(..) => self.resolve_to::<&VariantDef>(db)?.name.to_opt(),
 
-            ScopeId::Field(..) => self.resolve_to::<&FieldDef>(db).unwrap().name.to_opt(),
+            ScopeId::Field(..) => self.resolve_to::<&FieldDef>(db)?.name.to_opt(),
 
             ScopeId::FuncParam(..) => {
-                let param: &FuncParam = self.resolve_to(db).unwrap();
-                if let Some(FuncParamName::Ident(ident)) = param.label {
-                    Some(ident)
-                } else {
-                    param.name()
-                }
+                let param: &FuncParam = self.resolve_to(db)?;
+                param.name()
             }
 
             ScopeId::GenericParam(..) => {
-                let param: &GenericParam = self.resolve_to(db).unwrap();
+                let param: &GenericParam = self.resolve_to(db)?;
                 param.name().to_opt()
             }
 
@@ -357,7 +355,7 @@ impl<'db> ScopeId<'db> {
     }
 
     pub fn name_span(self, db: &'db dyn HirDb) -> Option<DynLazySpan<'db>> {
-        match self.data(db).id {
+        match self {
             ScopeId::Item(item) => item.name_span(),
 
             ScopeId::Variant(v) => Some(v.span().name().into()),
@@ -366,26 +364,25 @@ impl<'db> ScopeId<'db> {
 
             ScopeId::FuncParam(parent, idx) => {
                 let func: Func = parent.try_into().unwrap();
-                let param = &func.params_list(db).to_opt()?.data(db)[idx as usize];
                 let param_span = func.span().params().param(idx as usize);
-                if let Some(FuncParamName::Ident(_)) = param.label {
-                    Some(param_span.label().into())
-                } else {
-                    Some(param_span.name().into())
-                }
+                Some(param_span.name().into())
             }
 
             ScopeId::GenericParam(parent, idx) => {
-                let parent = GenericParamOwner::from_item_opt(parent).unwrap();
-
-                Some(parent.params_span().param(idx as usize).into())
+                let parent_owner = GenericParamOwner::from_item_opt(parent)?;
+                let param_span = parent_owner.params_span().param(idx as usize);
+                let param = parent_owner.param_view(db, idx as usize);
+                match param.param {
+                    GenericParam::Type(_) => Some(param_span.into_type_param().name().into()),
+                    GenericParam::Const(_) => Some(param_span.into_const_param().name().into()),
+                }
             }
 
             ScopeId::TraitType(t, idx) => {
-                Some(t.span().item_list().assoc_type(idx as usize).into())
+                Some(t.span().item_list().assoc_type(idx as usize).name().into())
             }
             ScopeId::TraitConst(t, idx) => {
-                Some(t.span().item_list().assoc_const(idx as usize).into())
+                Some(t.span().item_list().assoc_const(idx as usize).name().into())
             }
 
             ScopeId::Block(..) => None,
@@ -677,7 +674,7 @@ impl<'db> FromScope<'db> for &'db FieldDef<'db> {
 
         match parent {
             FieldParent::Struct(s) => Some(&s.fields(db).data(db)[idx]),
-            FieldParent::Contract(c) => Some(&c.fields(db).data(db)[idx]),
+            FieldParent::Contract(c) => Some(&c.hir_fields(db).data(db)[idx]),
             FieldParent::Variant(v) => match v.kind(db) {
                 VariantKind::Record(fields) => Some(&fields.data(db)[idx]),
                 _ => unreachable!(),
@@ -728,6 +725,15 @@ impl<'db> FromScope<'db> for &'db AssocTyDecl<'db> {
     }
 }
 
+impl<'db> FromScope<'db> for &'db AssocConstDecl<'db> {
+    fn from_scope(scope: ScopeId<'db>, db: &'db dyn HirDb) -> Option<Self> {
+        let ScopeId::TraitConst(t, idx) = scope else {
+            return None;
+        };
+        Some(&t.consts(db)[idx as usize])
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -762,7 +768,7 @@ mod tests {
         let scope_graph = db.parse_source(file);
         let items: Vec<_> = scope_graph
             .items_dfs(&db)
-            .filter(|item| !matches!(item, ItemKind::Use(use_) if use_.is_prelude_use(&db)))
+            .filter(|item| !matches!(item, ItemKind::Use(use_) if use_.is_synthetic_use(&db)))
             .collect();
         assert_eq!(items.len(), 8);
 
@@ -770,9 +776,15 @@ mod tests {
             match i {
                 0 => assert!(matches!(item, ItemKind::TopMod(_))),
                 1 => assert!(matches!(item, ItemKind::Mod(_))),
-                2 => assert!(matches!(item, ItemKind::Func(_))),
+                2 => match item {
+                    ItemKind::Func(func) => assert!(!func.is_extern(&db)),
+                    other => panic!("expected func at index {i}, got {other:?}"),
+                },
                 3 => assert!(matches!(item, ItemKind::Body(_))),
-                4 => assert!(matches!(item, ItemKind::Func(_))),
+                4 => match item {
+                    ItemKind::Func(func) => assert!(func.is_extern(&db)),
+                    other => panic!("expected func at index {i}, got {other:?}"),
+                },
                 5 => assert!(matches!(item, ItemKind::Enum(_))),
                 6 => assert!(matches!(item, ItemKind::Mod(_))),
                 7 => assert!(matches!(item, ItemKind::Struct(_))),
@@ -796,7 +808,9 @@ mod tests {
         let root = scope_graph.top_mod.scope();
         let enum_ = scope_graph
             .children(root)
-            .find(|scope| !matches!(scope.item(), ItemKind::Use(use_) if use_.is_prelude_use(&db)))
+            .find(
+                |scope| !matches!(scope.item(), ItemKind::Use(use_) if use_.is_synthetic_use(&db)),
+            )
             .unwrap();
         assert!(matches!(enum_.item(), ItemKind::Enum(_)));
 
@@ -829,7 +843,7 @@ mod tests {
             .unwrap();
         assert!(matches!(msg_mod.item(), ItemKind::Mod(_)));
 
-        // Skip the Use item (prelude) and find the struct
+        // Skip the Use item (implicit import) and find the struct
         let variant_struct = scope_graph
             .children(msg_mod)
             .find(|scope| matches!(scope.item(), ItemKind::Struct(_)))

@@ -1,10 +1,12 @@
-use parser::ast::{self, prelude::*};
+use parser::ast::{self, WhereClauseOwner as _, prelude::*};
+use salsa::Accumulator as _;
 
-use super::FileLowerCtxt;
+use super::{FileLowerCtxt, attr::named_attr_specs};
 use crate::{
     hir_def::{
-        AttrListId, Body, EffectParamListId, FuncParamListId, GenericParamListId, IdentId, PathId,
-        TraitRefId, TupleTypeId, TypeBound, TypeId, WhereClauseId, item::*,
+        AttrListId, Body, EffectParamListId, FuncParamListId, GenericParamListId, IdentId,
+        InlineAttrErrorKind, KeywordAttrArgSpec, KeywordAttrSpec, PathId, TraitRefId, TupleTypeId,
+        TypeBound, TypeId, WhereClauseId, item::*, parse_inline_attr_specs,
     },
     lower::msg::lower_msg_as_mod,
     span::HirOrigin,
@@ -40,6 +42,15 @@ pub enum SelectorErrorKind {
     },
 }
 
+#[salsa::accumulator]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InlineAttrError {
+    pub kind: InlineAttrErrorKind,
+    pub file: common::file::File,
+    pub primary_range: parser::TextRange,
+    pub func_name: Option<String>,
+}
+
 pub(crate) fn lower_module_items(ctxt: &mut FileLowerCtxt<'_>, items: ast::ItemList) {
     for item in items {
         ItemKind::lower_ast(ctxt, item);
@@ -54,45 +65,259 @@ impl<'db> ItemKind<'db> {
 
         match kind {
             ast::ItemKind::Mod(mod_) => {
+                super::arithmetic::report_invalid_mod_arithmetic_attrs(ctxt, mod_.attr_list());
+                super::event::report_event_attr_on_non_struct_item(ctxt, mod_.attr_list(), "mod");
+                super::error::report_error_attr_on_non_struct_item(ctxt, mod_.attr_list(), "mod");
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    mod_.attr_list(),
+                    "mod",
+                );
                 Mod::lower_ast(ctxt, mod_);
             }
             ast::ItemKind::Func(fn_) => {
+                super::arithmetic::report_invalid_function_arithmetic_attrs(ctxt, &fn_);
+                super::event::report_event_attr_on_non_struct_item(ctxt, fn_.attr_list(), "fn");
+                super::error::report_error_attr_on_non_struct_item(ctxt, fn_.attr_list(), "fn");
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    fn_.attr_list(),
+                    "fn",
+                );
                 Func::lower_ast(ctxt, fn_);
             }
             ast::ItemKind::Struct(struct_) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    struct_.attr_list(),
+                    "struct",
+                );
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    struct_.attr_list(),
+                    "struct",
+                );
                 Struct::lower_ast(ctxt, struct_);
             }
             ast::ItemKind::Contract(contract) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    contract.attr_list(),
+                    "contract",
+                );
+                super::event::report_event_attr_on_non_struct_item(
+                    ctxt,
+                    contract.attr_list(),
+                    "contract",
+                );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    contract.attr_list(),
+                    "contract",
+                );
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    contract.attr_list(),
+                    "contract",
+                );
                 Contract::lower_ast(ctxt, contract);
             }
             ast::ItemKind::Enum(enum_) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    enum_.attr_list(),
+                    "enum",
+                );
+                super::event::report_event_attr_on_non_struct_item(ctxt, enum_.attr_list(), "enum");
+                super::error::report_error_attr_on_non_struct_item(ctxt, enum_.attr_list(), "enum");
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    enum_.attr_list(),
+                    "enum",
+                );
                 Enum::lower_ast(ctxt, enum_);
             }
             ast::ItemKind::Msg(msg) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    msg.attr_list(),
+                    "msg",
+                );
+                super::event::report_event_attr_on_non_struct_item(ctxt, msg.attr_list(), "msg");
+                super::error::report_error_attr_on_non_struct_item(ctxt, msg.attr_list(), "msg");
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    msg.attr_list(),
+                    "msg",
+                );
                 lower_msg_as_mod(ctxt, msg);
             }
             ast::ItemKind::TypeAlias(alias) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    alias.attr_list(),
+                    "type alias",
+                );
+                super::event::report_event_attr_on_non_struct_item(
+                    ctxt,
+                    alias.attr_list(),
+                    "type alias",
+                );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    alias.attr_list(),
+                    "type alias",
+                );
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    alias.attr_list(),
+                    "type alias",
+                );
                 TypeAlias::lower_ast(ctxt, alias);
             }
             ast::ItemKind::Impl(impl_) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    impl_.attr_list(),
+                    "impl",
+                );
+                super::event::report_event_attr_on_non_struct_item(ctxt, impl_.attr_list(), "impl");
+                super::error::report_error_attr_on_non_struct_item(ctxt, impl_.attr_list(), "impl");
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    impl_.attr_list(),
+                    "impl",
+                );
                 Impl::lower_ast(ctxt, impl_);
             }
             ast::ItemKind::Trait(trait_) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    trait_.attr_list(),
+                    "trait",
+                );
+                super::event::report_event_attr_on_non_struct_item(
+                    ctxt,
+                    trait_.attr_list(),
+                    "trait",
+                );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    trait_.attr_list(),
+                    "trait",
+                );
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    trait_.attr_list(),
+                    "trait",
+                );
                 Trait::lower_ast(ctxt, trait_);
             }
             ast::ItemKind::ImplTrait(impl_trait) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    impl_trait.attr_list(),
+                    "impl trait",
+                );
+                super::event::report_event_attr_on_non_struct_item(
+                    ctxt,
+                    impl_trait.attr_list(),
+                    "impl trait",
+                );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    impl_trait.attr_list(),
+                    "impl trait",
+                );
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    impl_trait.attr_list(),
+                    "impl trait",
+                );
                 ImplTrait::lower_ast(ctxt, impl_trait);
             }
             ast::ItemKind::Const(const_) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    const_.attr_list(),
+                    "const",
+                );
+                super::event::report_event_attr_on_non_struct_item(
+                    ctxt,
+                    const_.attr_list(),
+                    "const",
+                );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    const_.attr_list(),
+                    "const",
+                );
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    const_.attr_list(),
+                    "const",
+                );
                 Const::lower_ast(ctxt, const_);
             }
             ast::ItemKind::Use(use_) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    use_.attr_list(),
+                    "use",
+                );
+                super::event::report_event_attr_on_non_struct_item(ctxt, use_.attr_list(), "use");
+                super::error::report_error_attr_on_non_struct_item(ctxt, use_.attr_list(), "use");
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    use_.attr_list(),
+                    "use",
+                );
                 Use::lower_ast(ctxt, use_);
             }
             ast::ItemKind::Extern(extern_) => {
+                super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                    ctxt,
+                    extern_.attr_list(),
+                    "extern",
+                );
+                super::event::report_event_attr_on_non_struct_item(
+                    ctxt,
+                    extern_.attr_list(),
+                    "extern",
+                );
+                super::error::report_error_attr_on_non_struct_item(
+                    ctxt,
+                    extern_.attr_list(),
+                    "extern",
+                );
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    extern_.attr_list(),
+                    "extern",
+                );
                 if let Some(extern_block) = extern_.extern_block() {
                     for fn_ in extern_block {
-                        Func::lower_ast(ctxt, fn_);
+                        super::arithmetic::report_arithmetic_attr_on_unsupported_item(
+                            ctxt,
+                            fn_.attr_list(),
+                            "extern fn",
+                        );
+                        super::event::report_event_attr_on_non_struct_item(
+                            ctxt,
+                            fn_.attr_list(),
+                            "extern fn",
+                        );
+                        super::error::report_error_attr_on_non_struct_item(
+                            ctxt,
+                            fn_.attr_list(),
+                            "extern fn",
+                        );
+                        super::payable::report_payable_attr_on_unsupported_item(
+                            ctxt,
+                            fn_.attr_list(),
+                            "extern fn",
+                        );
+                        Func::lower_ast_extern(ctxt, fn_);
                     }
                 }
             }
@@ -108,8 +333,21 @@ impl<'db> Mod<'db> {
 
         ctxt.insert_synthetic_prelude_use();
 
-        let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
-        let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
+        super::arithmetic::report_invalid_mod_arithmetic_attrs(
+            ctxt,
+            ast.items().and_then(|items| items.inner_attr_list()),
+        );
+        super::payable::report_payable_attr_on_unsupported_item(
+            ctxt,
+            ast.items().and_then(|items| items.inner_attr_list()),
+            "module",
+        );
+        let attributes = AttrListId::lower_ast_merged(
+            ctxt,
+            ast.attr_list(),
+            ast.items().and_then(|items| items.inner_attr_list()),
+        );
+        let vis = super::lower_visibility(&ast);
         if let Some(items) = ast.items() {
             lower_module_items(ctxt, items);
         }
@@ -122,11 +360,20 @@ impl<'db> Mod<'db> {
 
 impl<'db> Func<'db> {
     pub(super) fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Func) -> Self {
+        Self::lower_ast_impl(ctxt, ast, false)
+    }
+
+    pub(super) fn lower_ast_extern(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Func) -> Self {
+        Self::lower_ast_impl(ctxt, ast, true)
+    }
+
+    fn lower_ast_impl(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Func, is_extern: bool) -> Self {
         let sig = ast.sig();
         let name = IdentId::lower_token_partial(ctxt, sig.name());
         let id = ctxt.joined_id(TrackedItemVariant::Func(name));
         ctxt.enter_item_scope(id, false);
 
+        validate_inline_attr(ctxt, &ast);
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let generic_params = GenericParamListId::lower_ast_opt(ctxt, sig.generic_params());
         let where_clause = WhereClauseId::lower_ast_opt(ctxt, sig.where_clause());
@@ -136,11 +383,15 @@ impl<'db> Func<'db> {
             .into();
         let ret_ty = sig.ret_ty().map(|ty| TypeId::lower_ast(ctxt, ty));
         let effects = lower_uses_clause_opt(ctxt, ast.sig().uses_clause());
-        let modifier = ItemModifier::lower_ast(ast.modifier());
+        let vis = super::lower_visibility(&ast);
+        let is_unsafe = super::lower_is_unsafe(&ast);
+        let is_const = ast.const_kw().is_some();
+        let modifiers = FuncModifiers::new(vis, is_unsafe, is_const, is_extern);
         let body = ast
             .body()
             .map(|body| Body::lower_ast(ctxt, ast::Expr::cast(body.syntax().clone()).unwrap()));
         let origin = HirOrigin::raw(&ast);
+        let top_mod = ctxt.top_mod();
 
         let fn_ = Self::new(
             ctxt.db(),
@@ -152,23 +403,88 @@ impl<'db> Func<'db> {
             params,
             effects,
             ret_ty,
-            modifier,
+            modifiers,
             body,
-            ctxt.top_mod(),
+            top_mod,
             origin,
         );
         ctxt.leave_item_scope(fn_)
     }
 }
 
+fn validate_inline_attr<'db>(ctxt: &mut FileLowerCtxt<'db>, func: &ast::Func) {
+    let db = ctxt.db();
+    let file = ctxt.top_mod().file(db);
+    let func_name = func.sig().name().map(|name| name.text().to_string());
+    let inline_attrs = named_attr_specs(func.attr_list(), "inline")
+        .into_iter()
+        .map(|attr| {
+            let spec = KeywordAttrSpec {
+                has_value: attr.value.is_some(),
+                has_args: attr.has_args,
+                args: attr
+                    .args
+                    .into_iter()
+                    .map(|arg| KeywordAttrArgSpec {
+                        key: arg.key,
+                        has_value: arg.value.is_some(),
+                    })
+                    .collect(),
+            };
+            (spec, attr.range)
+        })
+        .collect::<Vec<_>>();
+
+    let Err(err) = parse_inline_attr_specs(inline_attrs.iter().map(|(spec, _)| spec.clone()))
+    else {
+        return;
+    };
+
+    if let Some((_, range)) = inline_attrs.get(err.attr_index) {
+        lower_inline_attr_error(db, file, *range, func_name, err.kind);
+    }
+}
+
+fn lower_inline_attr_error(
+    db: &dyn crate::HirDb,
+    file: common::file::File,
+    primary_range: parser::TextRange,
+    func_name: Option<String>,
+    kind: InlineAttrErrorKind,
+) {
+    InlineAttrError {
+        kind,
+        file,
+        primary_range,
+        func_name,
+    }
+    .accumulate(db);
+}
+
 impl<'db> Struct<'db> {
     pub(super) fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Struct) -> Self {
+        let is_event_struct = super::event::is_event_struct(&ast);
+        let is_error_struct = super::error::is_error_struct(&ast);
+
+        if is_event_struct && is_error_struct {
+            super::error::report_event_error_attr_conflict(ctxt, &ast);
+        }
+        if is_event_struct {
+            return super::event::lower_event_struct(ctxt, ast);
+        }
+        if is_error_struct {
+            super::event::report_indexed_attrs_outside_event_struct(ctxt, &ast);
+            return super::error::lower_error_struct(ctxt, ast);
+        }
+
+        super::event::report_indexed_attrs_outside_event_struct(ctxt, &ast);
+
         let name = IdentId::lower_token_partial(ctxt, ast.name());
         let id = ctxt.joined_id(TrackedItemVariant::Struct(name));
         ctxt.enter_item_scope(id, false);
 
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
-        let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
+        let vis = super::lower_visibility(&ast);
         let generic_params = GenericParamListId::lower_ast_opt(ctxt, ast.generic_params());
         let where_clause = WhereClauseId::lower_ast_opt(ctxt, ast.where_clause());
         let fields = FieldDefListId::lower_ast_opt(ctxt, ast.fields());
@@ -232,7 +548,7 @@ impl<'db> Enum<'db> {
         ctxt.enter_item_scope(id, false);
 
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
-        let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
+        let vis = super::lower_visibility(&ast);
         let generic_params = GenericParamListId::lower_ast_opt(ctxt, ast.generic_params());
         let where_clause = WhereClauseId::lower_ast_opt(ctxt, ast.where_clause());
         let variants = VariantDefListId::lower_ast_opt(ctxt, ast.variants());
@@ -261,7 +577,7 @@ impl<'db> TypeAlias<'db> {
         ctxt.enter_item_scope(id, false);
 
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
-        let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
+        let vis = super::lower_visibility(&ast);
         let generic_params = GenericParamListId::lower_ast_opt(ctxt, ast.generic_params());
         let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
         let origin = HirOrigin::raw(&ast);
@@ -283,17 +599,24 @@ impl<'db> TypeAlias<'db> {
 
 impl<'db> Impl<'db> {
     pub(super) fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::Impl) -> Self {
-        let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
-        let id = ctxt.joined_id(TrackedItemVariant::Impl(ty));
+        let idx = ctxt.next_impl_idx();
+        let id = ctxt.joined_id(TrackedItemVariant::Impl(idx));
         ctxt.enter_item_scope(id, false);
 
-        let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
+        // Lower generic params first so they are in scope for type and where-clause lowering.
         let generic_params = GenericParamListId::lower_ast_opt(ctxt, ast.generic_params());
+        let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let where_clause = WhereClauseId::lower_ast_opt(ctxt, ast.where_clause());
+        let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
         let origin = HirOrigin::raw(&ast);
 
         if let Some(item_list) = ast.item_list() {
             for impl_item in item_list {
+                super::payable::report_payable_attr_on_unsupported_item(
+                    ctxt,
+                    impl_item.attr_list(),
+                    "fn",
+                );
                 Func::lower_ast(ctxt, impl_item);
             }
         }
@@ -319,7 +642,7 @@ impl<'db> Trait<'db> {
         ctxt.enter_item_scope(id, false);
 
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
-        let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
+        let vis = super::lower_visibility(&ast);
         let generic_params = GenericParamListId::lower_ast_opt(ctxt, ast.generic_params());
         let where_clause = WhereClauseId::lower_ast_opt(ctxt, ast.where_clause());
         let super_traits = if let Some(super_traits) = ast.super_trait_list() {
@@ -339,10 +662,27 @@ impl<'db> Trait<'db> {
             for impl_item in item_list {
                 match impl_item.kind() {
                     ast::TraitItemKind::Func(func) => {
+                        super::payable::report_payable_attr_on_unsupported_item(
+                            ctxt,
+                            func.attr_list(),
+                            "fn",
+                        );
                         Func::lower_ast(ctxt, func);
                     }
-                    ast::TraitItemKind::Type(t) => types.push(AssocTyDecl::lower_ast(ctxt, t)),
+                    ast::TraitItemKind::Type(t) => {
+                        super::payable::report_payable_attr_on_unsupported_item(
+                            ctxt,
+                            t.attr_list(),
+                            "type",
+                        );
+                        types.push(AssocTyDecl::lower_ast(ctxt, t));
+                    }
                     ast::TraitItemKind::Const(c) => {
+                        super::payable::report_payable_attr_on_unsupported_item(
+                            ctxt,
+                            c.attr_list(),
+                            "const",
+                        );
                         consts.push(AssocConstDecl::lower_ast(ctxt, c));
                     }
                 };
@@ -370,6 +710,7 @@ impl<'db> Trait<'db> {
 
 impl<'db> AssocTyDecl<'db> {
     pub(super) fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::TraitTypeItem) -> Self {
+        let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let name = IdentId::lower_token_partial(ctxt, ast.name());
         let bounds = ast
             .bounds()
@@ -384,6 +725,7 @@ impl<'db> AssocTyDecl<'db> {
         let default = TypeId::lower_ast_partial(ctxt, ast.ty()).to_opt();
 
         AssocTyDecl {
+            attributes,
             name,
             bounds,
             default,
@@ -393,14 +735,16 @@ impl<'db> AssocTyDecl<'db> {
 
 impl<'db> ImplTrait<'db> {
     pub(super) fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::ImplTrait) -> Self {
-        let trait_ref = TraitRefId::lower_ast_partial(ctxt, ast.trait_ref());
-        let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
-        let id = ctxt.joined_id(TrackedItemVariant::ImplTrait(trait_ref, ty));
+        let idx = ctxt.next_impl_trait_idx();
+        let id = ctxt.joined_id(TrackedItemVariant::ImplTrait(idx));
         ctxt.enter_item_scope(id, false);
 
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
+        // Lower generic params first so they are in scope for trait-ref/type and where-clause lowering.
         let generic_params = GenericParamListId::lower_ast_opt(ctxt, ast.generic_params());
         let where_clause = WhereClauseId::lower_ast_opt(ctxt, ast.where_clause());
+        let trait_ref = TraitRefId::lower_ast_partial(ctxt, ast.trait_ref());
+        let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
         let origin = HirOrigin::raw(&ast);
 
         let mut types = vec![];
@@ -409,10 +753,27 @@ impl<'db> ImplTrait<'db> {
             for impl_item in item_list {
                 match impl_item.kind() {
                     ast::TraitItemKind::Func(func) => {
+                        super::payable::report_payable_attr_on_unsupported_item(
+                            ctxt,
+                            func.attr_list(),
+                            "fn",
+                        );
                         Func::lower_ast(ctxt, func);
                     }
-                    ast::TraitItemKind::Type(t) => types.push(AssocTyDef::lower_ast(ctxt, t)),
+                    ast::TraitItemKind::Type(t) => {
+                        super::payable::report_payable_attr_on_unsupported_item(
+                            ctxt,
+                            t.attr_list(),
+                            "type",
+                        );
+                        types.push(AssocTyDef::lower_ast(ctxt, t));
+                    }
                     ast::TraitItemKind::Const(c) => {
+                        super::payable::report_payable_attr_on_unsupported_item(
+                            ctxt,
+                            c.attr_list(),
+                            "const",
+                        );
                         consts.push(AssocConstDef::lower_ast(ctxt, c));
                     }
                 };
@@ -438,7 +799,9 @@ impl<'db> ImplTrait<'db> {
 
 impl<'db> AssocTyDef<'db> {
     fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::TraitTypeItem) -> Self {
+        let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         AssocTyDef {
+            attributes,
             name: IdentId::lower_token_partial(ctxt, ast.name()),
             type_ref: TypeId::lower_ast_partial(ctxt, ast.ty()),
         }
@@ -447,20 +810,28 @@ impl<'db> AssocTyDef<'db> {
 
 impl<'db> AssocConstDecl<'db> {
     fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::TraitConstItem) -> Self {
+        let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let name = IdentId::lower_token_partial(ctxt, ast.name());
         let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
         let default = ast
             .value()
             .map(|expr| crate::hir_def::Partial::Present(Body::lower_ast(ctxt, expr)));
-        AssocConstDecl { name, ty, default }
+        AssocConstDecl {
+            attributes,
+            name,
+            ty,
+            default,
+        }
     }
 }
 
 impl<'db> AssocConstDef<'db> {
     fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::TraitConstItem) -> Self {
+        let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let value = ast.value().map(|expr| Body::lower_ast(ctxt, expr)).into();
 
         AssocConstDef {
+            attributes,
             name: IdentId::lower_token_partial(ctxt, ast.name()),
             ty: TypeId::lower_ast_partial(ctxt, ast.ty()),
             value,
@@ -477,7 +848,7 @@ impl<'db> Const<'db> {
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let ty = TypeId::lower_ast_partial(ctxt, ast.ty());
         let body = ast.value().map(|ast| Body::lower_ast(ctxt, ast)).into();
-        let vis = ItemModifier::lower_ast(ast.modifier()).to_visibility();
+        let vis = super::lower_visibility(&ast);
         let origin = HirOrigin::raw(&ast);
 
         let const_ = Self::new(
@@ -492,21 +863,6 @@ impl<'db> Const<'db> {
             origin,
         );
         ctxt.leave_item_scope(const_)
-    }
-}
-
-impl ItemModifier {
-    pub(super) fn lower_ast(ast: Option<ast::ItemModifier>) -> Self {
-        let Some(ast) = ast else {
-            return Self::None;
-        };
-
-        match (ast.pub_kw().is_some(), ast.unsafe_kw().is_some()) {
-            (true, true) => Self::PubAndUnsafe,
-            (true, false) => Self::Pub,
-            (false, true) => Self::Unsafe,
-            (false, false) => Self::None,
-        }
     }
 }
 
@@ -527,14 +883,11 @@ impl<'db> FieldDefListId<'db> {
 
 impl<'db> FieldDef<'db> {
     pub(super) fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::RecordFieldDef) -> Self {
+        super::payable::report_payable_attr_on_unsupported_item(ctxt, ast.attr_list(), "field");
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let name = IdentId::lower_token_partial(ctxt, ast.name());
         let type_ref = TypeId::lower_ast_partial(ctxt, ast.ty());
-        let vis = if ast.pub_kw().is_some() {
-            Visibility::Public
-        } else {
-            Visibility::Private
-        };
+        let vis = super::lower_field_visibility(&ast);
 
         Self::new(attributes, name, type_ref, vis)
     }
@@ -557,6 +910,7 @@ impl<'db> VariantDefListId<'db> {
 
 impl<'db> VariantDef<'db> {
     fn lower_ast(ctxt: &mut FileLowerCtxt<'db>, ast: ast::VariantDef) -> Self {
+        super::payable::report_payable_attr_on_unsupported_item(ctxt, ast.attr_list(), "variant");
         let attributes = AttrListId::lower_ast_opt(ctxt, ast.attr_list());
         let name = IdentId::lower_token_partial(ctxt, ast.name());
         let kind = match ast.kind() {

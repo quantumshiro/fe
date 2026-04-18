@@ -6,7 +6,7 @@ use hir::analysis::ty::{
         Case, DecisionTree, LeafNode, Projection, ProjectionPath, SwitchNode, build_decision_tree,
     },
     pattern_analysis::PatternMatrix,
-    simplified_pattern::ConstructorKind,
+    pattern_ir::{BindingRef, ConstructorKind, PatternAnalysisStatus, ValidatedPatId},
     ty_def::InvalidCause,
 };
 
@@ -23,68 +23,216 @@ struct MatchLoweringCtx<'db> {
     wildcard_arm_block: Option<BasicBlockId>,
 }
 
+enum MirPatternRoot {
+    Ready(ValidatedPatId),
+    Invalid,
+    Unsupported(&'static str),
+}
+
 impl<'db, 'a> MirBuilder<'db, 'a> {
-    /// Resolves an enum variant path within a scope.
-    ///
-    /// # Parameters
-    /// - `path`: Path to resolve.
-    /// - `scope`: Scope to use for resolution.
-    ///
-    /// # Returns
-    /// Resolved variant metadata or `None` on failure.
-    pub(super) fn resolve_enum_variant(
-        &self,
-        path: PathId<'db>,
-        scope: ScopeId<'db>,
-    ) -> Option<ResolvedVariant<'db>> {
-        let res = resolve_path(
-            self.db,
-            path,
-            scope,
-            PredicateListId::empty_list(self.db),
-            false,
-        )
-        .ok()?;
-        match res {
-            PathRes::EnumVariant(variant) => Some(variant),
-            _ => None,
-        }
-    }
-
-    /// Returns `true` if the pattern is a wildcard (`_`).
-    ///
-    /// # Parameters
-    /// - `pat`: Pattern id to inspect.
-    ///
-    /// # Returns
-    /// `true` when the pattern is a wildcard.
-    pub(super) fn is_wildcard_pat(&self, pat: PatId) -> bool {
-        matches!(
-            pat.data(self.db, self.body),
-            Partial::Present(Pat::WildCard)
-        )
-    }
-
-    fn pat_id_for_binding_name(&self, pat: PatId, name: &str) -> Option<PatId> {
-        let Partial::Present(pat_data) = pat.data(self.db, self.body) else {
-            return None;
-        };
-        match pat_data {
-            Pat::Path(path, _) => {
-                let ident = path.to_opt()?.as_ident(self.db)?;
-                (ident.data(self.db) == name).then_some(pat)
+    fn mir_pattern_root(&self, pat: PatId) -> MirPatternRoot {
+        match self.typed_body.pattern_status(pat) {
+            PatternAnalysisStatus::Ready(root) => {
+                match self.typed_body.pattern_store().mir_unsupported_reason(root) {
+                    Some(reason) => MirPatternRoot::Unsupported(reason),
+                    None => MirPatternRoot::Ready(root),
+                }
             }
-            Pat::Tuple(pats) | Pat::PathTuple(_, pats) => pats
-                .iter()
-                .find_map(|inner| self.pat_id_for_binding_name(*inner, name)),
-            Pat::Record(_, fields) => fields
-                .iter()
-                .find_map(|field| self.pat_id_for_binding_name(field.pat, name)),
-            Pat::Or(lhs, rhs) => self
-                .pat_id_for_binding_name(*lhs, name)
-                .or_else(|| self.pat_id_for_binding_name(*rhs, name)),
-            Pat::WildCard | Pat::Rest | Pat::Lit(_) => None,
+            PatternAnalysisStatus::Invalid => MirPatternRoot::Invalid,
+            PatternAnalysisStatus::Unsupported => MirPatternRoot::Unsupported(
+                "pattern semantics are valid but unsupported for MIR lowering",
+            ),
         }
+    }
+
+    fn defer_unsupported_pattern(&mut self, pat: PatId, context: &'static str, reason: &str) {
+        if self.deferred_error.is_some() {
+            return;
+        }
+        let func_name = self
+            .hir_func
+            .map(|func| func.pretty_print_signature(self.db))
+            .unwrap_or_else(|| "<body owner>".to_owned());
+        self.deferred_error = Some(MirLowerError::Unsupported {
+            func_name,
+            message: format!("unsupported {context} pattern `{pat:?}`: {reason}"),
+        });
+    }
+
+    fn pattern_is_irrefutable(&self, pat: PatId) -> bool {
+        let MirPatternRoot::Ready(root) = self.mir_pattern_root(pat) else {
+            return false;
+        };
+        self.typed_body
+            .pattern_store()
+            .is_irrefutable(self.db, root)
+    }
+
+    /// Lowers a `let` condition (`let pat = scrutinee`) into decision-tree
+    /// branching.
+    ///
+    /// On success, control transfers to `true_block` and all bindings from
+    /// `pat` are materialized. On failure, control transfers to `false_block`.
+    pub(super) fn lower_let_condition_branch(
+        &mut self,
+        pat: PatId,
+        scrutinee: ExprId,
+        true_block: BasicBlockId,
+        false_block: BasicBlockId,
+    ) {
+        let Some(block) = self.current_block() else {
+            return;
+        };
+
+        self.move_to_block(block);
+        let scrutinee_value = self.lower_expr(scrutinee);
+        let Some(scrut_block) = self.current_block() else {
+            return;
+        };
+
+        let scrutinee_expr_ty = self.typed_body.expr_ty(self.db, scrutinee);
+        let (scrutinee_value, scrutinee_ty) =
+            if let Some((_, inner_ty)) = scrutinee_expr_ty.as_capability(self.db) {
+                let inner_repr = self.value_repr_for_ty(inner_ty, AddressSpaceKind::Memory);
+                let scrutinee_value = if inner_repr.address_space().is_none() {
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::TransparentCast {
+                            value: scrutinee_value,
+                        },
+                        inner_repr,
+                    )
+                } else if self.value_supports_direct_deref(scrutinee_value) {
+                    let space = self.value_address_space(scrutinee_value);
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::TransparentCast {
+                            value: scrutinee_value,
+                        },
+                        self.value_repr_for_ty(inner_ty, space),
+                    )
+                } else if let Some(place) =
+                    self.place_from_derefable_value(scrutinee_value, scrutinee_expr_ty)
+                {
+                    let space = self.place_address_space(&place);
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::PlaceRef(place),
+                        self.value_repr_for_ty(inner_ty, space),
+                    )
+                } else {
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::TransparentCast {
+                            value: scrutinee_value,
+                        },
+                        inner_repr,
+                    )
+                };
+                (scrutinee_value, inner_ty)
+            } else {
+                (scrutinee_value, scrutinee_expr_ty)
+            };
+
+        let root = match self.mir_pattern_root(pat) {
+            MirPatternRoot::Ready(root) => root,
+            MirPatternRoot::Invalid => {
+                self.move_to_block(scrut_block);
+                self.goto(false_block);
+                return;
+            }
+            MirPatternRoot::Unsupported(reason) => {
+                self.defer_unsupported_pattern(pat, "let-condition", reason);
+                self.move_to_block(scrut_block);
+                self.goto(false_block);
+                return;
+            }
+        };
+
+        let mut matrix = PatternMatrix::from_roots(self.typed_body.pattern_store(), &[root]);
+        matrix.push_wildcard_row(scrutinee_ty);
+        let tree = build_decision_tree(self.db, &matrix);
+        let leaf_bindings = self.collect_leaf_bindings(&tree);
+        let consume_place = if scrutinee_expr_ty.as_capability(self.db).is_none()
+            && leaf_bindings.values().any(|bindings| !bindings.is_empty())
+        {
+            self.place_for_borrow_expr(scrutinee)
+        } else {
+            None
+        };
+        let needs_false_prelude = consume_place.is_some();
+
+        let tree_false_block = if needs_false_prelude {
+            self.alloc_block()
+        } else {
+            false_block
+        };
+
+        if let Some(bindings) = leaf_bindings.get(&0) {
+            self.move_to_block(true_block);
+            for (binding_ref, path) in bindings {
+                let binding_pat = binding_ref.representative_pat;
+                let binding =
+                    self.typed_body
+                        .pat_binding(binding_pat)
+                        .unwrap_or(LocalBinding::Local {
+                            pat: binding_pat,
+                            is_mut: false,
+                        });
+                let Some(local) = self.local_for_binding(binding) else {
+                    continue;
+                };
+                let binding_ty = self.typed_body.pat_ty(self.db, binding_pat);
+                let binding_mode = self
+                    .typed_body
+                    .pat_binding_mode(binding_pat)
+                    .unwrap_or(PatBindingMode::ByValue);
+                let (_place, value_id) = self.lower_projection_path_for_binding(
+                    path,
+                    scrutinee_value,
+                    scrutinee_ty,
+                    binding_ty,
+                    binding_mode,
+                );
+                let carries_space = self
+                    .value_repr_for_ty(binding_ty, AddressSpaceKind::Memory)
+                    .address_space()
+                    .is_some()
+                    || binding_ty.as_capability(self.db).is_some();
+                if carries_space
+                    && let Some(space) = crate::ir::try_value_address_space_in(
+                        &self.builder.body.values,
+                        &self.builder.body.locals,
+                        value_id,
+                    )
+                {
+                    self.set_pat_address_space(binding_pat, space);
+                }
+                self.assign(None, Some(local), crate::ir::Rvalue::Value(value_id));
+            }
+        }
+        if let Some(place) = consume_place.clone() {
+            self.move_to_block(true_block);
+            self.emit_scrutinee_move_bind(scrutinee, scrutinee_expr_ty, place);
+        }
+
+        if needs_false_prelude {
+            self.move_to_block(tree_false_block);
+            if let Some(place) = consume_place {
+                self.emit_scrutinee_move_bind(scrutinee, scrutinee_expr_ty, place);
+            }
+            self.goto(false_block);
+        }
+
+        let ctx = MatchLoweringCtx {
+            scrutinee_value,
+            scrutinee_ty,
+            wildcard_arm_block: Some(tree_false_block),
+        };
+        let tree_entry = self.lower_decision_tree(&tree, &[true_block, tree_false_block], &ctx);
+
+        self.move_to_block(scrut_block);
+        self.goto(tree_entry);
     }
 
     /// Lowers a match expression using decision trees for optimized codegen.
@@ -118,54 +266,88 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         };
 
         // Build pattern matrix from match arms
-        let scrutinee_ty = self.typed_body.expr_ty(self.db, scrutinee);
-        let Some(body) = self.typed_body.body() else {
+        let scrutinee_expr_ty = self.typed_body.expr_ty(self.db, scrutinee);
+        let (scrutinee_value, scrutinee_ty) =
+            if let Some((_, inner_ty)) = scrutinee_expr_ty.as_capability(self.db) {
+                let inner_repr = self.value_repr_for_ty(inner_ty, AddressSpaceKind::Memory);
+                let scrutinee_value = if inner_repr.address_space().is_none() {
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::TransparentCast {
+                            value: scrutinee_value,
+                        },
+                        inner_repr,
+                    )
+                } else if self.value_supports_direct_deref(scrutinee_value) {
+                    let space = self.value_address_space(scrutinee_value);
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::TransparentCast {
+                            value: scrutinee_value,
+                        },
+                        self.value_repr_for_ty(inner_ty, space),
+                    )
+                } else if let Some(place) =
+                    self.place_from_derefable_value(scrutinee_value, scrutinee_expr_ty)
+                {
+                    let space = self.place_address_space(&place);
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::PlaceRef(place),
+                        self.value_repr_for_ty(inner_ty, space),
+                    )
+                } else {
+                    self.alloc_value(
+                        inner_ty,
+                        ValueOrigin::TransparentCast {
+                            value: scrutinee_value,
+                        },
+                        inner_repr,
+                    )
+                };
+                (scrutinee_value, inner_ty)
+            } else {
+                (scrutinee_value, scrutinee_expr_ty)
+            };
+        let Some(_body) = self.typed_body.body() else {
             // No body available - this shouldn't happen for valid code.
             self.move_to_block(scrut_block);
-            self.set_current_terminator(Terminator::Unreachable);
+            self.set_current_terminator(Terminator::Unreachable {
+                source: crate::ir::SourceInfoId::SYNTHETIC,
+            });
             return value;
         };
-        let scope = body.scope();
-
-        let patterns: Vec<Pat> = arms
-            .iter()
-            .filter_map(|arm| {
-                if let Partial::Present(pat) = arm.pat.data(self.db, self.body) {
-                    Some(pat.clone())
-                } else {
-                    None
+        let mut roots = Vec::with_capacity(arms.len());
+        for arm in arms {
+            match self.mir_pattern_root(arm.pat) {
+                MirPatternRoot::Ready(root) => roots.push(root),
+                MirPatternRoot::Invalid => {
+                    debug_assert!(false, "MIR lowering: match arm pattern IR is unavailable");
+                    self.move_to_block(scrut_block);
+                    self.set_current_terminator(Terminator::Unreachable {
+                        source: crate::ir::SourceInfoId::SYNTHETIC,
+                    });
+                    return value;
                 }
-            })
-            .collect();
-
-        if patterns.len() != arms.len() {
-            // Some patterns couldn't be resolved. This indicates:
-            // 1. Malformed AST from parsing errors, or
-            // 2. Upstream type/name resolution errors that should have emitted diagnostics
-            //
-            // For valid programs, all patterns will be Present. Absent patterns mean the
-            // HIR layer already reported errors, so we produce Unreachable MIR rather than
-            // attempting to lower patterns we can't understand. This prevents cascading
-            // errors from incomplete pattern information.
-            debug_assert!(
-                false,
-                "MIR lowering: {} of {} match arm patterns are Absent - \
-                 upstream errors should have been reported",
-                arms.len() - patterns.len(),
-                arms.len()
-            );
-            self.move_to_block(scrut_block);
-            self.set_current_terminator(Terminator::Unreachable);
-            return value;
+                MirPatternRoot::Unsupported(reason) => {
+                    self.defer_unsupported_pattern(arm.pat, "match arm", reason);
+                    self.move_to_block(scrut_block);
+                    self.set_current_terminator(Terminator::Unreachable {
+                        source: crate::ir::SourceInfoId::SYNTHETIC,
+                    });
+                    return value;
+                }
+            }
         }
 
-        let matrix =
-            PatternMatrix::from_hir_patterns(self.db, &patterns, self.body, scope, scrutinee_ty);
+        let matrix = PatternMatrix::from_roots(self.typed_body.pattern_store(), &roots);
 
         // Build decision tree from pattern matrix
         let tree = build_decision_tree(self.db, &matrix);
 
         let leaf_bindings = self.collect_leaf_bindings(&tree);
+        let consume_scrutinee = scrutinee_expr_ty.as_capability(self.db).is_none()
+            && leaf_bindings.values().any(|bindings| !bindings.is_empty());
 
         let result_local = produces_value.then(|| {
             let local = self.alloc_temp_local(match_ty, true, "match");
@@ -184,16 +366,14 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             let arm_entry = self.alloc_block();
             self.move_to_block(arm_entry);
 
-            if wildcard_arm_block.is_none() && self.is_wildcard_pat(arm.pat) {
+            if wildcard_arm_block.is_none() && self.pattern_is_irrefutable(arm.pat) {
                 wildcard_arm_block = Some(arm_entry);
             }
 
             let arm_idx = arm_blocks.len();
             if let Some(bindings) = leaf_bindings.get(&arm_idx) {
-                for (name, path) in bindings {
-                    let Some(binding_pat) = self.pat_id_for_binding_name(arm.pat, name) else {
-                        continue;
-                    };
+                for (binding_ref, path) in bindings {
+                    let binding_pat = binding_ref.representative_pat;
                     let binding =
                         self.typed_body
                             .pat_binding(binding_pat)
@@ -204,13 +384,33 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     let Some(local) = self.local_for_binding(binding) else {
                         continue;
                     };
-                    let (_place, value_id) =
-                        self.lower_projection_path_for_binding(path, scrutinee_value, scrutinee_ty);
-                    self.push_inst_here(MirInst::Assign {
-                        stmt: None,
-                        dest: Some(local),
-                        rvalue: crate::ir::Rvalue::Value(value_id),
-                    });
+                    let binding_ty = self.typed_body.pat_ty(self.db, binding_pat);
+                    let binding_mode = self
+                        .typed_body
+                        .pat_binding_mode(binding_pat)
+                        .unwrap_or(PatBindingMode::ByValue);
+                    let (_place, value_id) = self.lower_projection_path_for_binding(
+                        path,
+                        scrutinee_value,
+                        scrutinee_ty,
+                        binding_ty,
+                        binding_mode,
+                    );
+                    let carries_space = self
+                        .value_repr_for_ty(binding_ty, AddressSpaceKind::Memory)
+                        .address_space()
+                        .is_some()
+                        || binding_ty.as_capability(self.db).is_some();
+                    if carries_space
+                        && let Some(space) = crate::ir::try_value_address_space_in(
+                            &self.builder.body.values,
+                            &self.builder.body.locals,
+                            value_id,
+                        )
+                    {
+                        self.set_pat_address_space(binding_pat, space);
+                    }
+                    self.assign(None, Some(local), crate::ir::Rvalue::Value(value_id));
                 }
             }
 
@@ -227,11 +427,11 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                 };
                 self.move_to_block(end_block);
                 if let Some(result_local) = result_local {
-                    self.push_inst_here(MirInst::Assign {
-                        stmt: None,
-                        dest: Some(result_local),
-                        rvalue: crate::ir::Rvalue::Value(arm_value),
-                    });
+                    self.assign(
+                        None,
+                        Some(result_local),
+                        crate::ir::Rvalue::Value(arm_value),
+                    );
                 }
                 self.goto(merge);
             }
@@ -248,18 +448,38 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // Set scrut_block to jump to the tree entry
         self.move_to_block(scrut_block);
         if let Some(result_local) = result_local {
-            self.push_inst_here(MirInst::Assign {
-                stmt: None,
-                dest: Some(result_local),
-                rvalue: crate::ir::Rvalue::ZeroInit,
-            });
+            self.assign(None, Some(result_local), crate::ir::Rvalue::ZeroInit);
         }
         self.goto(tree_entry);
 
         if let Some(merge) = merge_block {
             self.move_to_block(merge);
+            if consume_scrutinee && let Some(place) = self.place_for_borrow_expr(scrutinee) {
+                self.emit_scrutinee_move_bind(scrutinee, scrutinee_expr_ty, place);
+            }
         }
         value
+    }
+
+    fn emit_scrutinee_move_bind(
+        &mut self,
+        scrutinee: ExprId,
+        scrutinee_ty: TyId<'db>,
+        place: Place<'db>,
+    ) {
+        let moved = self.alloc_value(
+            scrutinee_ty,
+            ValueOrigin::MoveOut {
+                place: place.clone(),
+            },
+            self.value_repr_for_ty(scrutinee_ty, self.place_address_space(&place)),
+        );
+        let source = self.source_for_expr(scrutinee);
+        self.builder.body.values[moved.index()].source = source;
+        self.push_inst_here(MirInst::BindValue {
+            source,
+            value: moved,
+        });
     }
 
     /// Recursively lowers a decision tree to MIR basic blocks.
@@ -370,7 +590,12 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // having codegen rediscover it.
         let default = default_block.or(ctx.wildcard_arm_block).unwrap_or_else(|| {
             let unreachable = self.alloc_block();
-            self.set_terminator(unreachable, Terminator::Unreachable);
+            self.set_terminator(
+                unreachable,
+                Terminator::Unreachable {
+                    source: crate::ir::SourceInfoId::SYNTHETIC,
+                },
+            );
             unreachable
         });
 
@@ -378,6 +603,55 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         self.switch(test_value, targets, default);
 
         test_block
+    }
+
+    fn try_lower_non_ref_scrutinee_projection_as_transparent_cast(
+        &mut self,
+        context: &'static str,
+        scrutinee_value: ValueId,
+        scrutinee_ty: TyId<'db>,
+        path: &ProjectionPath<'db>,
+        result_ty: TyId<'db>,
+    ) -> Option<ValueId> {
+        let scrutinee_repr = self.builder.body.value(scrutinee_value).repr;
+        if matches!(scrutinee_repr, ValueRepr::Ref(_)) {
+            return None;
+        }
+
+        // Non-`Ref` scrutinee (word/opaque pointer): only transparent-newtype peeling is valid.
+        //
+        // For nested newtypes (`A { inner: B { inner: u256 } }`), the decision-tree projection
+        // path can contain multiple `Field(0)` steps. These are all representation-preserving
+        // casts that must not be lowered as place/projection loads.
+        let Some(current_ty) =
+            crate::repr::peel_transparent_field0_projection_path(self.db, scrutinee_ty, path)
+        else {
+            panic!(
+                "{context} requires `Ref` scrutinee (ty={}, repr={:?}, path_len={})",
+                scrutinee_ty.pretty_print(self.db),
+                scrutinee_repr,
+                path.len()
+            );
+        };
+
+        debug_assert_eq!(
+            current_ty,
+            result_ty,
+            "transparent-newtype projection produced unexpected type (got={}, expected={})",
+            current_ty.pretty_print(self.db),
+            result_ty.pretty_print(self.db),
+        );
+
+        let space = scrutinee_repr
+            .address_space()
+            .unwrap_or(AddressSpaceKind::Memory);
+        Some(self.alloc_value(
+            result_ty,
+            ValueOrigin::TransparentCast {
+                value: scrutinee_value,
+            },
+            self.value_repr_for_ty(result_ty, space),
+        ))
     }
 
     /// Extracts a value from the scrutinee based on a projection path.
@@ -395,10 +669,9 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             ty: TyId<'db>,
             local: LocalId,
         ) -> ValueId {
-            builder.builder.body.alloc_value(ValueData {
-                ty,
-                origin: ValueOrigin::Local(local),
-            })
+            let space = builder.builder.body.local(local).address_space;
+            let repr = builder.value_repr_for_ty(ty, space);
+            builder.alloc_value(ty, ValueOrigin::Local(local), repr)
         }
 
         fn emit_load_to_temp<'db>(
@@ -407,11 +680,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
             place: Place<'db>,
         ) -> ValueId {
             let dest = builder.alloc_temp_local(ty, false, "load");
-            builder.push_inst_here(MirInst::Assign {
-                stmt: None,
-                dest: Some(dest),
-                rvalue: crate::ir::Rvalue::Load { place },
-            });
+            builder.set_local_address_space(dest, builder.place_address_space(&place));
+            builder.assign(None, Some(dest), crate::ir::Rvalue::Load { place });
             alloc_local_value(builder, ty, dest)
         }
 
@@ -428,51 +698,51 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         // Empty path means access the scrutinee directly
         // But we still need to extract discriminant for enums
         if path.is_empty() {
-            if !is_enum_type(self.db, scrutinee_ty) {
+            if !is_enum_type(self.db, scrutinee_ty) || !self.is_by_ref_ty(scrutinee_ty) {
                 return scrutinee_value;
             }
-            let addr_space = self.value_address_space(scrutinee_value);
             let place = Place::new(
                 scrutinee_value,
                 MirProjectionPath::from_projection(MirProjection::Discriminant),
-                addr_space,
             );
             return emit_load_to_temp(self, self.u256_ty(), place);
         }
 
         // Compute the result type of the projection
         let result_ty = self.compute_projection_result_type(scrutinee_ty, path);
+        if let Some(value) = self.try_lower_non_ref_scrutinee_projection_as_transparent_cast(
+            "match projection path",
+            scrutinee_value,
+            scrutinee_ty,
+            path,
+            result_ty,
+        ) {
+            return value;
+        }
         let addr_space = self.value_address_space(scrutinee_value);
-        let is_aggregate = result_ty.field_count(self.db) > 0
-            || result_ty.is_array(self.db)
-            || result_ty
-                .adt_ref(self.db)
-                .is_some_and(|adt| matches!(adt, AdtRef::Enum(_)));
 
         // Build Place with the full projection path
         let place = Place::new(
             scrutinee_value,
             self.mir_projection_from_decision_path(path),
-            addr_space,
         );
 
-        // Use PlaceRef for aggregates (returns pointer), explicit load for scalars.
-        let current_value = if is_aggregate {
-            let value_id = self.builder.body.alloc_value(ValueData {
-                ty: result_ty,
-                origin: ValueOrigin::PlaceRef(place),
-            });
-            self.value_address_space.insert(value_id, addr_space);
-            value_id
+        // Use PlaceRef for by-ref values (pointer), explicit load for word-like values.
+        let current_value = if self.is_by_ref_ty(result_ty) {
+            self.alloc_value(
+                result_ty,
+                ValueOrigin::PlaceRef(place),
+                ValueRepr::Ref(addr_space),
+            )
         } else {
             emit_load_to_temp(self, result_ty, place)
         };
 
         // For enums, extract the discriminant for switching
-        if is_enum_type(self.db, result_ty) {
+        if is_enum_type(self.db, result_ty) && self.is_by_ref_ty(result_ty) {
             let mut discr_path = self.mir_projection_from_decision_path(path);
             discr_path.push(MirProjection::Discriminant);
-            let place = Place::new(scrutinee_value, discr_path, addr_space);
+            let place = Place::new(scrutinee_value, discr_path);
             return emit_load_to_temp(self, self.u256_ty(), place);
         }
 
@@ -502,59 +772,84 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
         path: &ProjectionPath<'db>,
         scrutinee_value: ValueId,
         scrutinee_ty: TyId<'db>,
+        binding_ty: TyId<'db>,
+        binding_mode: PatBindingMode,
     ) -> (ValueId, ValueId) {
         fn alloc_local_value<'db>(
             builder: &mut MirBuilder<'db, '_>,
             ty: TyId<'db>,
             local: LocalId,
         ) -> ValueId {
-            builder.builder.body.alloc_value(ValueData {
-                ty,
-                origin: ValueOrigin::Local(local),
-            })
+            let space = builder.builder.body.local(local).address_space;
+            let repr = builder.value_repr_for_ty(ty, space);
+            builder.alloc_value(ty, ValueOrigin::Local(local), repr)
         }
 
         // Empty path means we bind to the scrutinee itself
         if path.is_empty() {
+            if matches!(binding_mode, PatBindingMode::ByBorrow) {
+                let place = Place::new(scrutinee_value, MirProjectionPath::new());
+                let space = if binding_ty.as_capability(self.db).is_some() {
+                    self.capability_binding_space_from_container(scrutinee_value)
+                } else {
+                    self.value_address_space_or_memory_fallback(scrutinee_value)
+                };
+                let repr = self.value_repr_for_ty(binding_ty, space);
+                let handle = self.alloc_value(binding_ty, ValueOrigin::PlaceRef(place), repr);
+                return (handle, handle);
+            }
             return (scrutinee_value, scrutinee_value);
         }
 
         // Compute the final type by walking the projection path
-        let final_ty = self.compute_projection_result_type(scrutinee_ty, path);
-        let is_aggregate = final_ty.field_count(self.db) > 0
-            || final_ty.is_array(self.db)
-            || final_ty
-                .adt_ref(self.db)
-                .is_some_and(|adt| matches!(adt, AdtRef::Enum(_)));
+        let projected_ty = self.compute_projection_result_type(scrutinee_ty, path);
+        let is_borrow = matches!(binding_mode, PatBindingMode::ByBorrow);
+        let is_by_ref = self.is_by_ref_ty(binding_ty);
 
-        // Track address space for the result
-        let addr_space = self.value_address_space(scrutinee_value);
-
+        if !is_borrow
+            && let Some(cast) = self.try_lower_non_ref_scrutinee_projection_as_transparent_cast(
+                "match binding projection path",
+                scrutinee_value,
+                scrutinee_ty,
+                path,
+                projected_ty,
+            )
+        {
+            return (cast, cast);
+        }
         // Create the Place
         let place = Place::new(
             scrutinee_value,
             self.mir_projection_from_decision_path(path),
-            addr_space,
+        );
+        let addr_space =
+            if !place.projection.is_empty() || binding_ty.as_capability(self.db).is_some() {
+                self.place_address_space(&place)
+            } else {
+                self.value_address_space(scrutinee_value)
+            };
+
+        let place_ref_id = self.alloc_value(
+            binding_ty,
+            ValueOrigin::PlaceRef(place.clone()),
+            if is_borrow {
+                self.value_repr_for_ty(binding_ty, addr_space)
+            } else {
+                ValueRepr::Ref(addr_space)
+            },
         );
 
-        let place_ref_id = self.builder.body.alloc_value(ValueData {
-            ty: final_ty,
-            origin: ValueOrigin::PlaceRef(place.clone()),
-        });
-        self.value_address_space.insert(place_ref_id, addr_space);
-
-        // Use PlaceRef for aggregates (pointer only), explicit load for scalars.
-        // When aggregate, re-use the place ref as the "value".
-        let value_id = if is_aggregate {
+        // Use PlaceRef for by-ref values (pointer only), explicit load for word-like values.
+        // When by-ref, re-use the place ref as the "value".
+        let value_id = if is_borrow || is_by_ref {
             place_ref_id
         } else {
-            let dest = self.alloc_temp_local(final_ty, false, "load");
-            self.push_inst_here(MirInst::Assign {
-                stmt: None,
-                dest: Some(dest),
-                rvalue: crate::ir::Rvalue::Load { place },
-            });
-            alloc_local_value(self, final_ty, dest)
+            let dest = self.alloc_temp_local(binding_ty, false, "load");
+            if binding_ty.as_capability(self.db).is_some() {
+                self.set_local_address_space(dest, addr_space);
+            }
+            self.assign(None, Some(dest), crate::ir::Rvalue::Load { place });
+            alloc_local_value(self, binding_ty, dest)
         };
 
         (place_ref_id, value_id)
@@ -613,7 +908,15 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
                     }
                 }
                 Projection::Deref => {
-                    return TyId::invalid(self.db, InvalidCause::Other);
+                    if let Some((_, inner)) = current_ty.as_capability(self.db) {
+                        current_ty = inner;
+                    } else if let Some(inner) =
+                        crate::repr::effect_provider_target_ty(self.db, &self.core, current_ty)
+                    {
+                        current_ty = inner;
+                    } else {
+                        return TyId::invalid(self.db, InvalidCause::Other);
+                    }
                 }
             }
         }
@@ -659,8 +962,8 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     fn collect_leaf_bindings(
         &self,
         tree: &DecisionTree<'db>,
-    ) -> FxHashMap<usize, Vec<(String, ProjectionPath<'db>)>> {
-        let mut bindings_by_arm: FxHashMap<usize, Vec<(String, ProjectionPath<'db>)>> =
+    ) -> FxHashMap<usize, Vec<(BindingRef<'db>, ProjectionPath<'db>)>> {
+        let mut bindings_by_arm: FxHashMap<usize, Vec<(BindingRef<'db>, ProjectionPath<'db>)>> =
             FxHashMap::default();
         self.collect_leaf_bindings_recursive(tree, &mut bindings_by_arm);
         bindings_by_arm
@@ -669,20 +972,16 @@ impl<'db, 'a> MirBuilder<'db, 'a> {
     fn collect_leaf_bindings_recursive(
         &self,
         tree: &DecisionTree<'db>,
-        bindings_by_arm: &mut FxHashMap<usize, Vec<(String, ProjectionPath<'db>)>>,
+        bindings_by_arm: &mut FxHashMap<usize, Vec<(BindingRef<'db>, ProjectionPath<'db>)>>,
     ) {
         match tree {
             DecisionTree::Leaf(leaf) => {
                 let arm_bindings = bindings_by_arm.entry(leaf.arm_index).or_default();
-                for ((ident_id, _binding_idx), path) in &leaf.bindings {
-                    let name = ident_id.data(self.db).to_string();
-                    // Deduplicate by name. The binding_idx in the key distinguishes
-                    // different binding sites in the decision tree, but within a single
-                    // arm all occurrences of a variable name should resolve to the same
-                    // binding. Taking the first occurrence is correct because all paths
-                    // to this leaf will produce the same binding for that name.
-                    if !arm_bindings.iter().any(|(n, _)| n == &name) {
-                        arm_bindings.push((name, path.clone()));
+                for (binding_ref, path) in &leaf.bindings {
+                    if !arm_bindings.iter().any(|(existing, _)| {
+                        existing.representative_pat == binding_ref.representative_pat
+                    }) {
+                        arm_bindings.push((*binding_ref, path.clone()));
                     }
                 }
             }

@@ -6,13 +6,13 @@ use salsa::Update;
 use super::{
     binder::Binder,
     canonical::Canonical,
-    ty_def::{TyBase, TyId},
+    ty_def::{TyBase, TyId, strip_derived_adt_layout_args},
     unify::UnificationTable,
 };
 use crate::analysis::{HirAnalysisDb, ty::ty_def::TyData};
 use crate::hir_def::CallableDef;
 
-#[salsa::tracked(return_ref)]
+#[salsa::tracked(return_ref, cycle_fn=collect_methods_cycle_recover, cycle_initial=collect_methods_cycle_initial)]
 pub(crate) fn collect_methods<'db>(
     db: &'db dyn HirAnalysisDb,
     ingot: Ingot<'db>,
@@ -22,6 +22,22 @@ pub(crate) fn collect_methods<'db>(
     let impls = ingot.all_impls(db);
     collector.collect_impls(impls);
     collector.finalize()
+}
+
+fn collect_methods_cycle_initial<'db>(
+    _db: &'db dyn HirAnalysisDb,
+    _ingot: Ingot<'db>,
+) -> MethodTable<'db> {
+    MethodTable::new()
+}
+
+fn collect_methods_cycle_recover<'db>(
+    _db: &'db dyn HirAnalysisDb,
+    _value: &MethodTable<'db>,
+    _count: u32,
+    _ingot: Ingot<'db>,
+) -> salsa::CycleRecoveryAction<MethodTable<'db>> {
+    salsa::CycleRecoveryAction::Iterate
 }
 
 #[salsa::tracked(return_ref)]
@@ -111,11 +127,13 @@ impl<'db> MethodBucket<'db> {
         name: IdentId<'db>,
     ) -> Vec<CallableDef<'db>> {
         let mut methods = vec![];
+        let ty = strip_derived_adt_layout_args(table.db, ty);
         for (&cand_ty, funcs) in self.methods.iter() {
             let snapshot = table.snapshot();
 
             let ty = table.instantiate_to_term(ty);
             let cand_ty = table.instantiate_with_fresh_vars(cand_ty);
+            let cand_ty = strip_derived_adt_layout_args(table.db, cand_ty);
             let cand_ty = table.instantiate_to_term(cand_ty);
 
             if table.unify(cand_ty, ty).is_ok()
@@ -132,27 +150,22 @@ impl<'db> MethodBucket<'db> {
 
 struct MethodCollector<'db> {
     db: &'db dyn HirAnalysisDb,
-    ingot: Ingot<'db>,
     method_table: MethodTable<'db>,
 }
 
 impl<'db> MethodCollector<'db> {
-    fn new(db: &'db dyn HirAnalysisDb, ingot: Ingot<'db>) -> Self {
+    fn new(db: &'db dyn HirAnalysisDb, _ingot: Ingot<'db>) -> Self {
         Self {
             db,
-            ingot,
             method_table: MethodTable::new(),
         }
     }
 
     fn collect_impls(&mut self, impls: &[Impl<'db>]) {
         for &impl_ in impls {
-            // Use the semantic item method to obtain the implementor type.
-            let ty = impl_.ty(self.db);
-
-            if ty.has_invalid(self.db) | !ty.is_inherent_impl_allowed(self.db, self.ingot) {
+            let Some(ty) = impl_.admissible_inherent_impl_ty(self.db) else {
                 continue;
-            }
+            };
 
             for func in impl_.funcs(self.db) {
                 let Some(func) = func.as_callable(self.db) else {
@@ -170,7 +183,11 @@ impl<'db> MethodCollector<'db> {
 
     fn insert(&mut self, ty: TyId<'db>, func: CallableDef<'db>) {
         let ty = if let Some(receiver) = func.receiver_ty(self.db) {
-            receiver.instantiate_identity()
+            let receiver_ty = receiver.instantiate_identity();
+            receiver_ty
+                .as_capability(self.db)
+                .map(|(_, inner)| inner)
+                .unwrap_or(receiver_ty)
         } else {
             ty
         };

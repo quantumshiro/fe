@@ -1,4 +1,4 @@
-fn lt_ten(value: u64) -> bool {
+fn lt_ten(_ value: u64) -> bool {
     value < 10
 }
 

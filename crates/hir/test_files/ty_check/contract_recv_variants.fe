@@ -22,9 +22,36 @@ mod TokenMsg {
         pub amount: u64,
     }
 
+    impl core::abi::AbiSize for Transfer {
+        const ENCODED_SIZE: u256 = 64
+        const IS_DYNAMIC: bool = false
+        const NEEDS_PARENT_WRAPPER: bool = false
+    }
+
+    impl core::abi::Encode<std::abi::Sol> for Transfer {
+        const DIRECT_ENCODE: bool = false
+
+        fn encode<E: core::abi::AbiEncoder<std::abi::Sol>>(own self, _ e: mut E) {
+            let Self { to, amount } = self
+            to.encode(e)
+            amount.encode(e)
+        }
+
+        fn encode_to_ptr(own self, _ ptr: u256) {
+            core::panic()
+        }
+    }
+
+    impl core::abi::Decode<std::abi::Sol> for Transfer {
+        fn decode<D: core::abi::AbiDecoder<std::abi::Sol>>(_ d: mut D) -> Self {
+            let to = u64::decode(d)
+            let amount = u64::decode(d)
+            Self { to, amount }
+        }
+    }
+
     impl core::message::MsgVariant<std::abi::Sol> for Transfer {
         const SELECTOR: u32 = 0x10
-        type Args = (u64, u64)
         type Return = bool
     }
 
@@ -32,9 +59,34 @@ mod TokenMsg {
         pub addr: u64,
     }
 
+    impl core::abi::AbiSize for Balance {
+        const ENCODED_SIZE: u256 = 32
+        const IS_DYNAMIC: bool = false
+        const NEEDS_PARENT_WRAPPER: bool = false
+    }
+
+    impl core::abi::Encode<std::abi::Sol> for Balance {
+        const DIRECT_ENCODE: bool = false
+
+        fn encode<E: core::abi::AbiEncoder<std::abi::Sol>>(own self, _ e: mut E) {
+            let Self { addr } = self
+            addr.encode(e)
+        }
+
+        fn encode_to_ptr(own self, _ ptr: u256) {
+            core::panic()
+        }
+    }
+
+    impl core::abi::Decode<std::abi::Sol> for Balance {
+        fn decode<D: core::abi::AbiDecoder<std::abi::Sol>>(_ d: mut D) -> Self {
+            let addr = u64::decode(d)
+            Self { addr }
+        }
+    }
+
     impl core::message::MsgVariant<std::abi::Sol> for Balance {
         const SELECTOR: u32 = 0x11
-        type Args = (u64,)
         type Return = u64
     }
 }
@@ -46,9 +98,34 @@ struct CustomQuery {
     pub key: u64,
 }
 
+impl core::abi::AbiSize for CustomQuery {
+    const ENCODED_SIZE: u256 = 32
+    const IS_DYNAMIC: bool = false
+    const NEEDS_PARENT_WRAPPER: bool = false
+}
+
+impl core::abi::Encode<std::abi::Sol> for CustomQuery {
+    const DIRECT_ENCODE: bool = false
+
+    fn encode<E: core::abi::AbiEncoder<std::abi::Sol>>(own self, _ e: mut E) {
+        let Self { key } = self
+        key.encode(e)
+    }
+
+    fn encode_to_ptr(own self, _ ptr: u256) {
+        core::panic()
+    }
+}
+
+impl core::abi::Decode<std::abi::Sol> for CustomQuery {
+    fn decode<D: core::abi::AbiDecoder<std::abi::Sol>>(_ d: mut D) -> Self {
+        let key = u64::decode(d)
+        Self { key }
+    }
+}
+
 impl core::message::MsgVariant<std::abi::Sol> for CustomQuery {
     const SELECTOR: u32 = 0x20
-    type Args = (u64,)
     type Return = u64
 }
 

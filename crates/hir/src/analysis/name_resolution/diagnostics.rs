@@ -51,6 +51,8 @@ pub enum PathResDiag<'db> {
         trait_insts: ThinVec<TraitInstId<'db>>,
     },
 
+    InfiniteBoundRecursion(DynLazySpan<'db>, String),
+
     /// The name is found, but it can't be used as a middle segment of a path.
     InvalidPathSegment {
         span: DynLazySpan<'db>,
@@ -87,6 +89,10 @@ pub enum PathResDiag<'db> {
         ident: IdentId<'db>,
         expected: Option<TyId<'db>>,
         given: Option<TyId<'db>>,
+    },
+    TraitConstHoleArg {
+        span: DynLazySpan<'db>,
+        ident: IdentId<'db>,
     },
 
     // Method selection related diagnostics
@@ -128,10 +134,12 @@ impl<'db> PathResDiag<'db> {
             Self::ArgNumMismatch { span, .. } => span.top_mod(db).unwrap(),
             Self::ArgKindMismatch { span, .. } => span.top_mod(db).unwrap(),
             Self::ArgTypeMismatch { span, .. } => span.top_mod(db).unwrap(),
+            Self::TraitConstHoleArg { span, .. } => span.top_mod(db).unwrap(),
             Self::TypeMustBeKnown(span) => span.top_mod(db).unwrap(),
             Self::AmbiguousInherentMethod { primary, .. } => primary.top_mod(db).unwrap(),
             Self::AmbiguousTrait { primary, .. } => primary.top_mod(db).unwrap(),
             Self::AmbiguousAssociatedConst { primary, .. } => primary.top_mod(db).unwrap(),
+            Self::InfiniteBoundRecursion(span, _) => span.top_mod(db).unwrap(),
             Self::InvisibleAmbiguousTrait { primary, .. } => primary.top_mod(db).unwrap(),
         }
     }
@@ -146,12 +154,12 @@ impl<'db> PathResDiag<'db> {
             .into_iter()
             .filter_map(|name| {
                 let span = name.kind.name_span(db)?;
-                let from_prelude = name
+                let from_implicit = name
                     .derivation
                     .use_stmt()
-                    .map(|use_| use_.is_prelude_use(db))
+                    .map(|use_| use_.is_synthetic_use(db))
                     .unwrap_or(false);
-                Some((span, from_prelude))
+                Some((span, from_implicit))
             })
             .collect();
         Self::Ambiguous(span, ident, cands)
@@ -173,10 +181,12 @@ impl<'db> PathResDiag<'db> {
             Self::ArgNumMismatch { .. } => 11,
             Self::ArgKindMismatch { .. } => 12,
             Self::ArgTypeMismatch { .. } => 13,
+            Self::TraitConstHoleArg { .. } => 19,
             Self::TypeMustBeKnown(..) => 14,
             Self::AmbiguousInherentMethod { .. } => 15,
             Self::AmbiguousTrait { .. } => 16,
             Self::InvisibleAmbiguousTrait { .. } => 17,
+            Self::InfiniteBoundRecursion(..) => 20,
         }
     }
 }

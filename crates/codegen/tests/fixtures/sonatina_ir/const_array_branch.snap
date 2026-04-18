@@ -1,0 +1,53 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/const_array_branch.fe
+---
+target = "evm-ethereum-osaka"
+
+global private const [i8; 32] $__fe_const_data_0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+
+func private %const_array_branch(v0.i1) -> i256 {
+    block0:
+        br v0 block1 block2;
+
+    block1:
+        v2.i256 = sym_addr $__fe_const_data_0;
+        v3.*[i256; 1] = int_to_ptr v2 *[i256; 1];
+        v4.*i256 = gep v3 0.i256 0.i256;
+        v5.i256 = ptr_to_int v4 i256;
+        v7.*i256 = alloca i256;
+        v8.i256 = ptr_to_int v7 i256;
+        evm_code_copy v8 v5 32.i256;
+        v9.i256 = mload v8 i256;
+        jump block3;
+
+    block2:
+        v10.i256 = sym_addr $__fe_const_data_0;
+        v11.*[i256; 1] = int_to_ptr v10 *[i256; 1];
+        v12.*i256 = gep v11 0.i256 0.i256;
+        v13.i256 = ptr_to_int v12 i256;
+        v14.*i256 = alloca i256;
+        v15.i256 = ptr_to_int v14 i256;
+        evm_code_copy v15 v13 32.i256;
+        v16.i256 = mload v15 i256;
+        jump block3;
+
+    block3:
+        v17.i256 = phi (v9 block1) (v16 block2);
+        return v17;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v2.i256 = call %const_array_branch 0.i1;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+        data $__fe_const_data_0;
+    }
+}

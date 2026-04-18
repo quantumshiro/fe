@@ -1,6 +1,24 @@
-use crate::core::hir_def::{Body, Const, Expr, IntegerId, LitKind, Partial};
+use num_bigint::{BigInt, BigUint, Sign};
+use num_traits::{One, Zero};
 
+use crate::core::hir_def::{
+    BinOp, Body, Const, EnumVariant, Expr, Func, GenericArgListId, GenericParamOwner, IdentId,
+    IntegerId, LitKind, Partial, PathId, Stmt, TypeAlias as HirTypeAlias, TypeId as HirTypeId,
+};
+use salsa::Update;
+
+use super::const_expr::{ConstExpr, ConstExprId, pretty_print_un_op};
 use super::{
+    assoc_const::AssocConstUse,
+    ctfe::{CtfeConfig, CtfeInterpreter, instantiate_typed_body},
+    diagnostics::{BodyDiag, FuncBodyDiag},
+    fold::{TyFoldable, TyFolder},
+    trait_def::TraitInstId,
+    trait_resolution::{
+        TraitSolveCx,
+        constraint::{collect_constraints, collect_func_decl_constraints},
+    },
+    ty_check::{TypedBody, check_anon_const_body, check_const_body},
     ty_def::{InvalidCause, TyId, TyParam, TyVar},
     unify::UnificationTable,
 };
@@ -8,8 +26,486 @@ use crate::analysis::{
     HirAnalysisDb,
     name_resolution::{PathRes, resolve_path},
     ty::trait_resolution::PredicateListId,
-    ty::ty_def::{Kind, TyBase, TyData, TyVarSort},
+    ty::ty_def::{Kind, PrimTy, TyBase, TyData, TyVarSort},
 };
+use crate::hir_def::ItemKind;
+use common::indexmap::IndexMap;
+use rustc_hash::FxHashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub enum LayoutHoleArgSite<'db> {
+    Path(PathId<'db>),
+    GenericArgList(GenericArgListId<'db>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub enum CallableInputLayoutHoleOrigin {
+    Receiver,
+    ValueParam(usize),
+    Effect(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HoleId<'db> {
+    Structural(StructuralHoleId<'db>),
+    Bound(BoundHoleId<'db>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BoundHoleId<'db> {
+    Opaque,
+    CallableInput {
+        func: Func<'db>,
+        origin: CallableInputLayoutHoleOrigin,
+        ordinal: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub enum StructuralHoleOrigin<'db> {
+    ExplicitWildcard {
+        site: LayoutHoleArgSite<'db>,
+        arg_idx: usize,
+    },
+    DefaultHoleParam {
+        owner: GenericParamOwner<'db>,
+        param_idx: usize,
+    },
+    EffectKeyExistential {
+        path: PathId<'db>,
+        arg_idx: usize,
+        owner: GenericParamOwner<'db>,
+        param_idx: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub enum LocalFrameSite<'db> {
+    HirType(HirTypeId<'db>),
+    TypeComponent { ty: HirTypeId<'db>, slot: usize },
+    RootPath(PathId<'db>),
+    GenericArgList(GenericArgListId<'db>),
+    AliasTemplate(HirTypeAlias<'db>),
+}
+
+#[salsa::interned]
+#[derive(Debug)]
+pub struct LocalFrameId<'db> {
+    pub parent: Option<LocalFrameId<'db>>,
+    pub site: LocalFrameSite<'db>,
+}
+
+impl<'db> LocalFrameId<'db> {
+    pub(crate) fn root_hir_ty(db: &'db dyn HirAnalysisDb, hir_ty: HirTypeId<'db>) -> Self {
+        Self::new(db, None, LocalFrameSite::HirType(hir_ty))
+    }
+
+    pub(crate) fn child_type_component(
+        self,
+        db: &'db dyn HirAnalysisDb,
+        ty: HirTypeId<'db>,
+        slot: usize,
+    ) -> Self {
+        Self::new(db, Some(self), LocalFrameSite::TypeComponent { ty, slot })
+    }
+
+    pub(crate) fn root_path(db: &'db dyn HirAnalysisDb, path: PathId<'db>) -> Self {
+        Self::new(db, None, LocalFrameSite::RootPath(path))
+    }
+
+    pub(crate) fn root_generic_arg_list(
+        db: &'db dyn HirAnalysisDb,
+        args: GenericArgListId<'db>,
+    ) -> Self {
+        Self::new(db, None, LocalFrameSite::GenericArgList(args))
+    }
+
+    pub(crate) fn prepend_parent(self, db: &'db dyn HirAnalysisDb, parent: Self) -> Self {
+        let rebased_parent = self
+            .parent(db)
+            .map(|current| current.prepend_parent(db, parent));
+        Self::new(db, rebased_parent.or(Some(parent)), self.site(db))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub enum AppFrameSite<'db> {
+    CallableInput {
+        func: Func<'db>,
+        origin: CallableInputLayoutHoleOrigin,
+    },
+    TypeComponent {
+        ty: HirTypeId<'db>,
+        slot: usize,
+    },
+    RootPath(PathId<'db>),
+    GenericArgList(GenericArgListId<'db>),
+}
+
+#[salsa::interned]
+#[derive(Debug)]
+pub struct AppFrameId<'db> {
+    pub parent: Option<AppFrameId<'db>>,
+    pub site: AppFrameSite<'db>,
+}
+
+impl<'db> AppFrameId<'db> {
+    pub(crate) fn root_callable_input(
+        db: &'db dyn HirAnalysisDb,
+        func: Func<'db>,
+        origin: CallableInputLayoutHoleOrigin,
+    ) -> Self {
+        Self::new(db, None, AppFrameSite::CallableInput { func, origin })
+    }
+
+    pub(crate) fn child_type_component(
+        self,
+        db: &'db dyn HirAnalysisDb,
+        ty: HirTypeId<'db>,
+        slot: usize,
+    ) -> Self {
+        Self::new(db, Some(self), AppFrameSite::TypeComponent { ty, slot })
+    }
+
+    pub(crate) fn root_path(db: &'db dyn HirAnalysisDb, path: PathId<'db>) -> Self {
+        Self::new(db, None, AppFrameSite::RootPath(path))
+    }
+
+    pub(crate) fn root_generic_arg_list(
+        db: &'db dyn HirAnalysisDb,
+        args: GenericArgListId<'db>,
+    ) -> Self {
+        Self::new(db, None, AppFrameSite::GenericArgList(args))
+    }
+
+    pub(crate) fn prepend_parent(self, db: &'db dyn HirAnalysisDb, parent: Self) -> Self {
+        let rebased_parent = self
+            .parent(db)
+            .map(|current| current.prepend_parent(db, parent));
+        Self::new(db, rebased_parent.or(Some(parent)), self.site(db))
+    }
+}
+
+#[salsa::interned]
+#[derive(Debug)]
+pub struct StructuralHoleId<'db> {
+    pub expected_ty: TyId<'db>,
+    pub origin: StructuralHoleOrigin<'db>,
+    pub local_frame: LocalFrameId<'db>,
+    pub app_frame: Option<AppFrameId<'db>>,
+}
+
+impl<'db> StructuralHoleId<'db> {
+    pub(crate) fn prepend_local_parent(
+        self,
+        db: &'db dyn HirAnalysisDb,
+        parent: LocalFrameId<'db>,
+    ) -> Self {
+        Self::new(
+            db,
+            self.expected_ty(db),
+            self.origin(db),
+            self.local_frame(db).prepend_parent(db, parent),
+            self.app_frame(db),
+        )
+    }
+
+    pub(crate) fn rebase_app_under(
+        self,
+        db: &'db dyn HirAnalysisDb,
+        parent: AppFrameId<'db>,
+    ) -> Self {
+        let app_frame = self
+            .app_frame(db)
+            .map(|frame| frame.prepend_parent(db, parent))
+            .or(Some(parent));
+        Self::new(
+            db,
+            self.expected_ty(db),
+            self.origin(db),
+            self.local_frame(db),
+            app_frame,
+        )
+    }
+}
+
+impl<'db> HoleId<'db> {
+    pub(crate) fn bound_callable(
+        func: Func<'db>,
+        origin: CallableInputLayoutHoleOrigin,
+        ordinal: usize,
+    ) -> Self {
+        Self::Bound(BoundHoleId::CallableInput {
+            func,
+            origin,
+            ordinal,
+        })
+    }
+
+    pub(crate) fn bound_opaque() -> Self {
+        Self::Bound(BoundHoleId::Opaque)
+    }
+
+    pub(crate) fn structural(
+        db: &'db dyn HirAnalysisDb,
+        expected_ty: TyId<'db>,
+        origin: StructuralHoleOrigin<'db>,
+        local_frame: LocalFrameId<'db>,
+    ) -> Self {
+        Self::Structural(StructuralHoleId::new(
+            db,
+            expected_ty,
+            origin,
+            local_frame,
+            None,
+        ))
+    }
+
+    pub(crate) fn structural_with_app(
+        db: &'db dyn HirAnalysisDb,
+        expected_ty: TyId<'db>,
+        origin: StructuralHoleOrigin<'db>,
+        local_frame: LocalFrameId<'db>,
+        app_frame: Option<AppFrameId<'db>>,
+    ) -> Self {
+        Self::Structural(StructuralHoleId::new(
+            db,
+            expected_ty,
+            origin,
+            local_frame,
+            app_frame,
+        ))
+    }
+}
+
+fn pretty_print_const_arg<'db>(db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> String {
+    match ty.data(db) {
+        TyData::ConstTy(const_ty) if matches!(const_ty.data(db), ConstTyData::TyParam(param, _) if param.is_normal()) =>
+        {
+            let ConstTyData::TyParam(param, _) = const_ty.data(db) else {
+                unreachable!()
+            };
+            param.name.data(db).to_string()
+        }
+        _ => ty.pretty_print(db).to_string(),
+    }
+}
+
+fn generic_const_param_display_map<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    generic_args: &[TyId<'db>],
+) -> FxHashMap<IdentId<'db>, String> {
+    let Some(owner) = body
+        .scope()
+        .parent_item(db)
+        .and_then(GenericParamOwner::from_item_opt)
+    else {
+        return FxHashMap::default();
+    };
+
+    super::ty_lower::collect_generic_params(db, owner)
+        .params(db)
+        .iter()
+        .copied()
+        .enumerate()
+        .filter_map(|(idx, param_ty)| {
+            let TyData::ConstTy(const_ty) = param_ty.data(db) else {
+                return None;
+            };
+            let ConstTyData::TyParam(param, _) = const_ty.data(db) else {
+                return None;
+            };
+            generic_args
+                .get(idx)
+                .map(|arg| (param.name, pretty_print_const_arg(db, *arg)))
+        })
+        .collect()
+}
+
+fn pretty_print_const_body_expr<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    expr_id: crate::hir_def::ExprId,
+    generic_param_display: &FxHashMap<IdentId<'db>, String>,
+) -> Option<String> {
+    ConstBodyExprPrinter {
+        db,
+        body,
+        generic_param_display,
+    }
+    .pretty_print(expr_id)
+}
+
+struct ConstBodyExprPrinter<'a, 'db> {
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    generic_param_display: &'a FxHashMap<IdentId<'db>, String>,
+}
+
+impl<'a, 'db> ConstBodyExprPrinter<'a, 'db> {
+    fn pretty_print(&self, expr_id: crate::hir_def::ExprId) -> Option<String> {
+        let Partial::Present(expr) = expr_id.data(self.db, self.body) else {
+            return None;
+        };
+
+        match expr {
+            Expr::Lit(lit) => Some(lit.pretty_print(self.db)),
+            Expr::Path(path) if path.is_present() => Some(self.pretty_print_path(path.unwrap())),
+            Expr::Call(callee, args) => {
+                let callee = self.pretty_print(*callee)?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.pretty_print(arg.expr))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!("{callee}({})", args.join(", ")))
+            }
+            Expr::Bin(lhs, rhs, op) if !matches!(op, BinOp::Index) => {
+                let lhs = self.pretty_print(*lhs)?;
+                let rhs = self.pretty_print(*rhs)?;
+                Some(format!("({lhs} {} {rhs})", op.pretty_print()))
+            }
+            Expr::Un(expr, op) => Some(pretty_print_un_op(*op, self.pretty_print(*expr)?)),
+            Expr::Cast(expr, to) => Some(format!(
+                "({} as {})",
+                self.pretty_print(*expr)?,
+                to.to_opt()?.pretty_print(self.db)
+            )),
+            Expr::Block(stmts) if stmts.len() == 1 => match stmts[0].data(self.db, self.body) {
+                Partial::Present(Stmt::Expr(tail_expr)) => self.pretty_print(*tail_expr),
+                Partial::Present(_) | Partial::Absent => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn pretty_print_path(&self, path: PathId<'db>) -> String {
+        if path.parent(self.db).is_none()
+            && let Some(ident) = path.as_ident(self.db)
+            && let Some(replacement) = self.generic_param_display.get(&ident)
+        {
+            replacement.clone()
+        } else {
+            path.pretty_print(self.db)
+        }
+    }
+}
+
+pub(crate) fn normalize_const_tys_for_comparison<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ty: TyId<'db>,
+) -> TyId<'db> {
+    struct ComparisonConstFolder;
+
+    impl<'db> TyFolder<'db> for ComparisonConstFolder {
+        fn fold_ty(&mut self, db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> TyId<'db> {
+            let TyData::ConstTy(const_ty) = ty.data(db) else {
+                return ty.super_fold_with(db, self);
+            };
+            let ConstTyData::UnEvaluated {
+                ty: Some(expected_ty),
+                ..
+            } = const_ty.data(db)
+            else {
+                return ty.super_fold_with(db, self);
+            };
+
+            let normalized = const_ty.evaluate(db, Some(*expected_ty));
+            if normalized.ty(db).invalid_cause(db).is_none()
+                && matches!(
+                    normalized.data(db),
+                    ConstTyData::Evaluated(..) | ConstTyData::Abstract(..)
+                )
+            {
+                TyId::const_ty(db, normalized)
+            } else {
+                ty.super_fold_with(db, self)
+            }
+        }
+    }
+
+    ty.fold_with(db, &mut ComparisonConstFolder)
+}
+
+pub(crate) struct ValidatedUnEvaluatedConst<'db> {
+    pub const_ty: ConstTyId<'db>,
+    pub expected_ty: TyId<'db>,
+    pub typed_body: TypedBody<'db>,
+}
+
+pub(crate) fn retype_hole_const_ty<'db>(
+    db: &'db dyn HirAnalysisDb,
+    const_ty: ConstTyId<'db>,
+    expected_ty: TyId<'db>,
+) -> Option<ConstTyId<'db>> {
+    matches!(const_ty.data(db), ConstTyData::Hole(..)).then(|| const_ty.with_ty(db, expected_ty))
+}
+
+pub(crate) fn validate_unevaluated_const_ty<'db>(
+    db: &'db dyn HirAnalysisDb,
+    const_ty: ConstTyId<'db>,
+    expected_ty: Option<TyId<'db>>,
+) -> Result<ValidatedUnEvaluatedConst<'db>, InvalidCause<'db>> {
+    let ConstTyData::UnEvaluated {
+        body,
+        ty: const_ty_ty,
+        const_def,
+        generic_args,
+        ..
+    } = const_ty.data(db)
+    else {
+        return Err(InvalidCause::Other);
+    };
+
+    let Some(expected_ty) = expected_ty.or(*const_ty_ty) else {
+        return Err(InvalidCause::InvalidConstTyExpr { body: *body });
+    };
+    let check_ty = if generic_args.is_empty() {
+        expected_ty
+    } else {
+        const_ty_ty.unwrap_or(expected_ty)
+    };
+    let const_ty = const_ty.with_ty(db, expected_ty);
+
+    let (diags, typed_body) = match const_def {
+        Some(const_def) => {
+            let result = check_const_body(db, *const_def);
+            (result.0.clone(), result.1.clone())
+        }
+        None => {
+            let result = check_anon_const_body(db, *body, check_ty);
+            (result.0.clone(), result.1.clone())
+        }
+    };
+
+    if let Some((expected, given)) = diags.iter().find_map(|diag| match diag {
+        FuncBodyDiag::Body(BodyDiag::TypeMismatch {
+            expected, given, ..
+        }) => Some((*expected, *given)),
+        _ => None,
+    }) {
+        if matches!(body.scope().parent_item(db), Some(ItemKind::ImplTrait(_))) {
+            return Err(InvalidCause::Other);
+        }
+        return Err(InvalidCause::ConstTyMismatch { expected, given });
+    }
+
+    if !diags.is_empty() {
+        return Err(InvalidCause::InvalidConstTyExpr { body: *body });
+    }
+
+    check_const_ty(
+        db,
+        check_ty,
+        Some(expected_ty),
+        &mut UnificationTable::new(db),
+    )?;
+    Ok(ValidatedUnEvaluatedConst {
+        const_ty,
+        expected_ty,
+        typed_body,
+    })
+}
 
 #[salsa::interned]
 #[derive(Debug)]
@@ -18,18 +514,43 @@ pub struct ConstTyId<'db> {
     pub data: ConstTyData<'db>,
 }
 
-#[salsa::tracked]
+#[salsa::tracked(cycle_initial=evaluate_const_ty_cycle_initial, cycle_fn=evaluate_const_ty_cycle_recover)]
 pub(crate) fn evaluate_const_ty<'db>(
     db: &'db dyn HirAnalysisDb,
     const_ty: ConstTyId<'db>,
     expected_ty: Option<TyId<'db>>,
 ) -> ConstTyId<'db> {
-    let (body, const_ty_ty, _const_def) = match const_ty.data(db) {
+    if let Some(expected_ty) = expected_ty
+        && let Some(retyped) = retype_hole_const_ty(db, const_ty, expected_ty)
+    {
+        return retyped;
+    }
+    if matches!(const_ty.data(db), ConstTyData::Hole(..)) {
+        return const_ty;
+    }
+
+    if let ConstTyData::Abstract(expr, ty) = const_ty.data(db)
+        && let ConstExpr::TraitConst(assoc) = expr.data(db)
+        && let Some(resolved) = const_ty_from_assoc_const_use(db, *assoc)
+    {
+        let evaluated = resolved.evaluate(db, expected_ty.or(Some(*ty)));
+        if matches!(
+            evaluated.ty(db).invalid_cause(db),
+            Some(InvalidCause::ConstEvalUnsupported { .. })
+        ) && expected_ty.is_some()
+        {
+            return const_ty;
+        }
+        return evaluated;
+    }
+
+    let (body, const_ty_ty, generic_args) = match const_ty.data(db) {
         ConstTyData::UnEvaluated {
             body,
             ty,
-            const_def,
-        } => (*body, *ty, *const_def),
+            generic_args,
+            ..
+        } => (*body, *ty, generic_args.clone()),
         _ => {
             let const_ty_ty = const_ty.ty(db);
             return match check_const_ty(
@@ -48,6 +569,11 @@ pub(crate) fn evaluate_const_ty<'db>(
     };
 
     let expected_ty = expected_ty.or(const_ty_ty);
+    let check_ty = if generic_args.is_empty() {
+        expected_ty
+    } else {
+        const_ty_ty.or(expected_ty)
+    };
 
     let Partial::Present(expr) = body.expr(db).data(db, body) else {
         let data = ConstTyData::Evaluated(
@@ -59,7 +585,349 @@ pub(crate) fn evaluate_const_ty<'db>(
 
     let expr = expr.clone();
 
-    if let Expr::Path(path) = &expr {
+    #[derive(Clone, Copy, Debug)]
+    struct CheckedIntTy {
+        bits: u16,
+        signed: bool,
+    }
+
+    fn checked_int_ty_from_ty<'db>(
+        db: &'db dyn HirAnalysisDb,
+        expected: Option<TyId<'db>>,
+    ) -> Option<CheckedIntTy> {
+        let expected = expected?;
+        let base_ty = expected.base_ty(db);
+        let TyData::TyBase(TyBase::Prim(prim)) = base_ty.data(db) else {
+            return None;
+        };
+        Some(match prim {
+            // unsigned
+            PrimTy::U8 => CheckedIntTy {
+                bits: 8,
+                signed: false,
+            },
+            PrimTy::U16 => CheckedIntTy {
+                bits: 16,
+                signed: false,
+            },
+            PrimTy::U32 => CheckedIntTy {
+                bits: 32,
+                signed: false,
+            },
+            PrimTy::U64 => CheckedIntTy {
+                bits: 64,
+                signed: false,
+            },
+            PrimTy::U128 => CheckedIntTy {
+                bits: 128,
+                signed: false,
+            },
+            PrimTy::U256 | PrimTy::Usize => CheckedIntTy {
+                bits: 256,
+                signed: false,
+            },
+            // signed
+            PrimTy::I8 => CheckedIntTy {
+                bits: 8,
+                signed: true,
+            },
+            PrimTy::I16 => CheckedIntTy {
+                bits: 16,
+                signed: true,
+            },
+            PrimTy::I32 => CheckedIntTy {
+                bits: 32,
+                signed: true,
+            },
+            PrimTy::I64 => CheckedIntTy {
+                bits: 64,
+                signed: true,
+            },
+            PrimTy::I128 => CheckedIntTy {
+                bits: 128,
+                signed: true,
+            },
+            PrimTy::I256 | PrimTy::Isize => CheckedIntTy {
+                bits: 256,
+                signed: true,
+            },
+            _ => return None,
+        })
+    }
+
+    fn u256_modulus() -> BigUint {
+        BigUint::one() << 256usize
+    }
+
+    fn signed_bounds(ty: CheckedIntTy) -> (BigInt, BigInt) {
+        debug_assert!(ty.signed);
+        let half = BigInt::one() << ((ty.bits - 1) as usize);
+        let min = -half.clone();
+        let max = half - BigInt::one();
+        (min, max)
+    }
+
+    fn unsigned_max(ty: CheckedIntTy) -> BigInt {
+        debug_assert!(!ty.signed);
+        (BigInt::one() << (ty.bits as usize)) - BigInt::one()
+    }
+
+    fn in_range(value: &BigInt, ty: CheckedIntTy) -> bool {
+        if ty.signed {
+            let (min, max) = signed_bounds(ty);
+            value >= &min && value <= &max
+        } else {
+            value >= &BigInt::zero() && value <= &unsigned_max(ty)
+        }
+    }
+
+    fn bigint_to_u256_word(value: &BigInt) -> Option<BigUint> {
+        let modulus = u256_modulus();
+        match value.sign() {
+            Sign::Minus => {
+                let abs = value.magnitude();
+                if abs > &modulus {
+                    return None;
+                }
+                if abs.is_zero() {
+                    Some(BigUint::zero())
+                } else {
+                    Some(&modulus - abs)
+                }
+            }
+            _ => value.to_biguint().and_then(|v| (v < modulus).then_some(v)),
+        }
+    }
+
+    fn u256_word_to_bigint(word: &BigUint, ty: CheckedIntTy) -> BigInt {
+        if !ty.signed {
+            return BigInt::from(word.clone());
+        }
+
+        let bits = ty.bits as usize;
+        let mask = if bits == 256 {
+            (BigUint::one() << 256usize) - BigUint::one()
+        } else {
+            (BigUint::one() << (ty.bits as usize)) - BigUint::one()
+        };
+        let value_bits = word & mask;
+        let sign_bit = BigUint::one() << ((ty.bits - 1) as usize);
+        if (value_bits.clone() & sign_bit).is_zero() {
+            BigInt::from(value_bits)
+        } else {
+            BigInt::from(value_bits) - (BigInt::one() << (ty.bits as usize))
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum ConstIntError {
+        Overflow,
+        DivisionByZero,
+        NegativeExponent,
+        /// The expression is not a pure integer expression (e.g. contains
+        /// function calls). Fall through to CTFE instead of reporting an error.
+        NotIntExpr,
+    }
+
+    fn eval_int_expr<'db>(
+        db: &'db dyn HirAnalysisDb,
+        body: Body<'db>,
+        expr: &Expr<'db>,
+        expected: Option<CheckedIntTy>,
+        generic_args: &[TyId<'db>],
+    ) -> Result<BigInt, ConstIntError> {
+        match expr {
+            Expr::Block(stmts) => {
+                let [stmt] = stmts.as_slice() else {
+                    return Err(ConstIntError::NotIntExpr);
+                };
+                let Partial::Present(stmt) = stmt.data(db, body) else {
+                    return Err(ConstIntError::NotIntExpr);
+                };
+                let Stmt::Expr(expr_id) = stmt else {
+                    return Err(ConstIntError::NotIntExpr);
+                };
+                let Partial::Present(inner) = expr_id.data(db, body) else {
+                    return Err(ConstIntError::NotIntExpr);
+                };
+                eval_int_expr(db, body, inner, expected, generic_args)
+            }
+
+            Expr::Lit(LitKind::Int(i)) => Ok(BigInt::from(i.data(db).clone())),
+
+            Expr::Un(inner, op) => {
+                let Partial::Present(inner) = inner.data(db, body) else {
+                    return Err(ConstIntError::Overflow);
+                };
+                let value = eval_int_expr(db, body, inner, expected, generic_args)?;
+                match op {
+                    crate::core::hir_def::expr::UnOp::Minus => {
+                        let Some(expected) = expected else {
+                            return Err(ConstIntError::Overflow);
+                        };
+                        let neg = -value;
+                        if !in_range(&neg, expected) {
+                            return Err(ConstIntError::Overflow);
+                        }
+                        Ok(neg)
+                    }
+                    crate::core::hir_def::expr::UnOp::Plus => Ok(value),
+                    _ => Err(ConstIntError::NotIntExpr),
+                }
+            }
+
+            Expr::Bin(lhs_id, rhs_id, op) => {
+                let Partial::Present(lhs) = lhs_id.data(db, body) else {
+                    return Err(ConstIntError::Overflow);
+                };
+                let Partial::Present(rhs) = rhs_id.data(db, body) else {
+                    return Err(ConstIntError::Overflow);
+                };
+                let expected = expected.unwrap_or(CheckedIntTy {
+                    bits: 256,
+                    signed: false,
+                });
+
+                let lhs = eval_int_expr(db, body, lhs, Some(expected), generic_args)?;
+                let rhs = eval_int_expr(db, body, rhs, Some(expected), generic_args)?;
+
+                match op {
+                    crate::core::hir_def::expr::BinOp::Arith(op) => match op {
+                        crate::core::hir_def::expr::ArithBinOp::Add => {
+                            let result = lhs + rhs;
+                            if !in_range(&result, expected) {
+                                Err(ConstIntError::Overflow)
+                            } else {
+                                Ok(result)
+                            }
+                        }
+                        crate::core::hir_def::expr::ArithBinOp::Sub => {
+                            let result = lhs - rhs;
+                            if !in_range(&result, expected) {
+                                Err(ConstIntError::Overflow)
+                            } else {
+                                Ok(result)
+                            }
+                        }
+                        crate::core::hir_def::expr::ArithBinOp::Mul => {
+                            let result = lhs * rhs;
+                            if !in_range(&result, expected) {
+                                Err(ConstIntError::Overflow)
+                            } else {
+                                Ok(result)
+                            }
+                        }
+                        crate::core::hir_def::expr::ArithBinOp::Div => {
+                            if rhs.is_zero() {
+                                return Err(ConstIntError::DivisionByZero);
+                            }
+                            if expected.signed {
+                                let (min, _) = signed_bounds(expected);
+                                if lhs == min && rhs == -BigInt::one() {
+                                    return Err(ConstIntError::Overflow);
+                                }
+                            }
+                            let result = lhs / rhs;
+                            if !in_range(&result, expected) {
+                                Err(ConstIntError::Overflow)
+                            } else {
+                                Ok(result)
+                            }
+                        }
+                        crate::core::hir_def::expr::ArithBinOp::Rem => {
+                            if rhs.is_zero() {
+                                return Err(ConstIntError::DivisionByZero);
+                            }
+                            let result = lhs % rhs;
+                            if !in_range(&result, expected) {
+                                Err(ConstIntError::Overflow)
+                            } else {
+                                Ok(result)
+                            }
+                        }
+                        crate::core::hir_def::expr::ArithBinOp::Pow => {
+                            if rhs.sign() == Sign::Minus {
+                                return Err(ConstIntError::NegativeExponent);
+                            }
+                            let Some(exp) = rhs.to_biguint() else {
+                                return Err(ConstIntError::NegativeExponent);
+                            };
+                            let mut acc = BigInt::one();
+                            let mut base = lhs;
+                            let mut exp = exp;
+                            while !exp.is_zero() {
+                                if (&exp & BigUint::one()) == BigUint::one() {
+                                    acc *= base.clone();
+                                    if !in_range(&acc, expected) {
+                                        return Err(ConstIntError::Overflow);
+                                    }
+                                }
+                                exp >>= 1usize;
+                                if exp.is_zero() {
+                                    break;
+                                }
+                                base = base.clone() * base;
+                                if !in_range(&base, expected) {
+                                    return Err(ConstIntError::Overflow);
+                                }
+                            }
+                            Ok(acc)
+                        }
+                        _ => Err(ConstIntError::NotIntExpr),
+                    },
+                    _ => Err(ConstIntError::NotIntExpr),
+                }
+            }
+
+            Expr::Path(path) => {
+                if !generic_args.is_empty() {
+                    return Err(ConstIntError::NotIntExpr);
+                }
+                let Some(path) = path.to_opt() else {
+                    return Err(ConstIntError::NotIntExpr);
+                };
+                let assumptions = assumptions_for_body(db, body);
+                let resolved = resolve_path(db, path, body.scope(), assumptions, true)
+                    .map_err(|_| ConstIntError::NotIntExpr)?;
+
+                let const_ty = match resolved {
+                    PathRes::Const(const_def, declared_ty) => {
+                        let body = const_def
+                            .body(db)
+                            .to_opt()
+                            .ok_or(ConstIntError::NotIntExpr)?;
+                        ConstTyId::from_body(db, body, Some(declared_ty), Some(const_def))
+                    }
+                    PathRes::TraitConst(_recv_ty, inst, name) => {
+                        let solve_cx =
+                            TraitSolveCx::new(db, body.scope()).with_assumptions(assumptions);
+                        const_ty_from_trait_const(db, solve_cx, inst, name)
+                            .ok_or(ConstIntError::NotIntExpr)?
+                    }
+                    _ => return Err(ConstIntError::NotIntExpr),
+                };
+
+                let evaluated = const_ty.evaluate(db, None);
+                match evaluated.data(db) {
+                    ConstTyData::Evaluated(EvaluatedConstTy::LitInt(i), _) => {
+                        let word = i.data(db);
+                        let expected_for_interpretation = expected.unwrap_or(CheckedIntTy {
+                            bits: 256,
+                            signed: false,
+                        });
+                        Ok(u256_word_to_bigint(word, expected_for_interpretation))
+                    }
+                    _ => Err(ConstIntError::NotIntExpr),
+                }
+            }
+
+            _ => Err(ConstIntError::NotIntExpr),
+        }
+    }
+
+    if generic_args.is_empty()
+        && let Expr::Path(path) = &expr
+    {
         let Some(path) = path.to_opt() else {
             return ConstTyId::new(
                 db,
@@ -70,11 +938,19 @@ pub(crate) fn evaluate_const_ty<'db>(
             );
         };
 
-        let assumptions = PredicateListId::empty_list(db);
+        let assumptions = assumptions_for_body(db, body);
         if let Ok(resolved_path) = resolve_path(db, path, body.scope(), assumptions, true) {
             match resolved_path {
                 PathRes::Ty(ty) | PathRes::TyAlias(_, ty) => {
                     if let TyData::ConstTy(const_ty) = ty.data(db) {
+                        if !generic_args.is_empty()
+                            && let ConstTyData::TyParam(param, _) = const_ty.data(db)
+                            && let Some(arg) = generic_args.get(param.idx).copied()
+                            && let TyData::ConstTy(arg_const) = arg.data(db)
+                        {
+                            let expected = expected_ty.or(Some(arg_const.ty(db)));
+                            return arg_const.evaluate(db, expected);
+                        }
                         return const_ty.evaluate(db, expected_ty);
                     }
                 }
@@ -84,6 +960,55 @@ pub(crate) fn evaluate_const_ty<'db>(
                         let expected = expected_ty.or(Some(ty));
                         return const_ty.evaluate(db, expected);
                     }
+                }
+                PathRes::TraitConst(recv_ty, inst, name) => {
+                    let mut args = inst.args(db).clone();
+                    if let Some(self_arg) = args.first_mut() {
+                        *self_arg = recv_ty;
+                    }
+                    let inst = TraitInstId::new(
+                        db,
+                        inst.def(db),
+                        args,
+                        inst.assoc_type_bindings(db).clone(),
+                    );
+
+                    let mk_abstract = |expected_ty: TyId<'db>| {
+                        let expr = ConstExprId::new(
+                            db,
+                            ConstExpr::TraitConst(AssocConstUse::new(
+                                body.scope(),
+                                assumptions,
+                                inst,
+                                name,
+                            )),
+                        );
+                        ConstTyId::new(db, ConstTyData::Abstract(expr, expected_ty))
+                    };
+
+                    let solve_cx =
+                        TraitSolveCx::new(db, body.scope()).with_assumptions(assumptions);
+                    if let Some(const_ty) = const_ty_from_trait_const(db, solve_cx, inst, name) {
+                        let evaluated = const_ty.evaluate(db, expected_ty);
+                        if matches!(
+                            evaluated.ty(db).invalid_cause(db),
+                            Some(InvalidCause::ConstEvalUnsupported { .. })
+                        ) && let Some(expected_ty) = expected_ty
+                        {
+                            return mk_abstract(expected_ty);
+                        }
+                        return evaluated;
+                    }
+
+                    if let Some(expected_ty) = expected_ty {
+                        return mk_abstract(expected_ty);
+                    }
+                }
+                PathRes::EnumVariant(variant) if variant.ty.is_unit_variant_only_enum(db) => {
+                    let evaluated = EvaluatedConstTy::EnumVariant(variant.variant);
+                    let const_ty =
+                        ConstTyId::new(db, ConstTyData::Evaluated(evaluated, variant.ty));
+                    return const_ty.evaluate(db, expected_ty);
                 }
                 _ => {}
             }
@@ -106,45 +1031,197 @@ pub(crate) fn evaluate_const_ty<'db>(
         );
     }
 
-    let mut table = UnificationTable::new(db);
-    let (resolved, ty) = match expr {
-        Expr::Lit(LitKind::Bool(b)) => (
-            EvaluatedConstTy::LitBool(b),
-            TyId::new(db, TyData::TyBase(TyBase::bool())),
-        ),
+    // Try BigInt-based evaluation for integer arithmetic expressions (checked arithmetic).
+    if matches!(
+        expr,
+        Expr::Block(..) | Expr::Un(..) | Expr::Bin(..) | Expr::Lit(LitKind::Int(..))
+    ) {
+        let expected_int_ty = expected_ty.and_then(|ty| checked_int_ty_from_ty(db, Some(ty)));
+        match eval_int_expr(db, body, &expr, expected_int_ty, &generic_args) {
+            Ok(value) => {
+                if let Some(word) = bigint_to_u256_word(&value) {
+                    let mut table = UnificationTable::new(db);
+                    let resolved = EvaluatedConstTy::LitInt(IntegerId::new(db, word));
+                    let ty = table.new_var(TyVarSort::Integral, &Kind::Star);
+                    let data = match check_const_ty(db, ty, expected_ty, &mut table) {
+                        Ok(ty) => ConstTyData::Evaluated(resolved, ty),
+                        Err(err) => ConstTyData::Evaluated(resolved, TyId::invalid(db, err)),
+                    };
+                    return ConstTyId::new(db, data);
+                }
+            }
+            Err(ConstIntError::NotIntExpr) => {
+                // Expression contains constructs we can't evaluate with BigInt
+                // (e.g. function calls). Fall through to CTFE.
+            }
+            Err(_) => {
+                // Genuine arithmetic error (overflow, division by zero, etc.).
+                // For Block/Un/Bin, report error. For plain int literals, fall through to CTFE.
+                if matches!(expr, Expr::Block(..) | Expr::Un(..) | Expr::Bin(..)) {
+                    return ConstTyId::new(
+                        db,
+                        ConstTyData::Evaluated(
+                            EvaluatedConstTy::Invalid,
+                            TyId::invalid(db, InvalidCause::InvalidConstTyExpr { body }),
+                        ),
+                    );
+                }
+            }
+        }
+    }
 
-        Expr::Lit(LitKind::Int(i)) => (
-            EvaluatedConstTy::LitInt(i),
-            table.new_var(TyVarSort::Integral, &Kind::Star),
-        ),
-
-        _ => {
-            return ConstTyId::new(
+    if check_ty.is_none() {
+        return ConstTyId::invalid(db, InvalidCause::InvalidConstTyExpr { body });
+    }
+    let validated = match validate_unevaluated_const_ty(db, const_ty, expected_ty) {
+        Ok(validated) => validated,
+        Err(InvalidCause::InvalidConstTyExpr { body }) => {
+            return ConstTyId::invalid(
                 db,
-                ConstTyData::Evaluated(
-                    EvaluatedConstTy::Invalid,
-                    TyId::invalid(db, InvalidCause::InvalidConstTyExpr { body }),
-                ),
+                InvalidCause::ConstEvalUnsupported {
+                    body,
+                    expr: body.expr(db),
+                },
             );
         }
+        Err(cause) => return ConstTyId::invalid(db, cause),
     };
 
-    let data = match check_const_ty(db, ty, expected_ty, &mut table) {
-        Ok(ty) => ConstTyData::Evaluated(resolved, ty),
-        Err(err) => ConstTyData::Evaluated(resolved, TyId::invalid(db, err)),
+    let mut interp = CtfeInterpreter::new(db, CtfeConfig::default());
+    let typed_body = if generic_args.is_empty() {
+        validated.typed_body
+    } else {
+        instantiate_typed_body(db, validated.typed_body.clone(), &generic_args)
     };
+    let evaluated = interp
+        .eval_expr_in_body(body, typed_body, generic_args, body.expr(db))
+        .unwrap_or_else(|cause| ConstTyId::invalid(db, cause));
 
-    ConstTyId::new(db, data)
+    let mut table = UnificationTable::new(db);
+    match check_const_ty(
+        db,
+        evaluated.ty(db),
+        Some(validated.expected_ty),
+        &mut table,
+    ) {
+        Ok(ty) => evaluated.swap_ty(db, ty),
+        Err(cause) => evaluated.swap_ty(db, TyId::invalid(db, cause)),
+    }
+}
+
+pub(crate) fn assumptions_for_body<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+) -> PredicateListId<'db> {
+    let containing_func = match body.scope().parent_item(db) {
+        Some(ItemKind::Func(func)) => Some(func),
+        Some(ItemKind::Body(parent)) => parent.containing_func(db),
+        _ => None,
+    };
+    if let Some(func) = containing_func {
+        let mut preds = collect_func_decl_constraints(db, func.into(), true).instantiate_identity();
+        if let Some(ItemKind::Trait(trait_)) = func.scope().parent_item(db) {
+            let self_pred =
+                TraitInstId::new(db, trait_, trait_.params(db).to_vec(), IndexMap::new());
+            let mut merged = preds.list(db).to_vec();
+            merged.push(self_pred);
+            preds = PredicateListId::new(db, merged);
+        }
+        return preds.extend_all_bounds(db);
+    }
+
+    let mut enclosing = body.scope();
+    let mut parent_item = enclosing.parent_item(db);
+    while let Some(ItemKind::Body(parent)) = parent_item {
+        enclosing = parent.scope();
+        parent_item = enclosing.parent_item(db);
+    }
+
+    match parent_item {
+        Some(ItemKind::Trait(trait_)) => {
+            let self_pred =
+                TraitInstId::new(db, trait_, trait_.params(db).to_vec(), IndexMap::new());
+            PredicateListId::new(db, vec![self_pred]).extend_all_bounds(db)
+        }
+        Some(ItemKind::ImplTrait(impl_trait)) => collect_constraints(db, impl_trait.into())
+            .instantiate_identity()
+            .extend_all_bounds(db),
+        Some(ItemKind::Impl(impl_)) => collect_constraints(db, impl_.into())
+            .instantiate_identity()
+            .extend_all_bounds(db),
+        _ => PredicateListId::empty_list(db),
+    }
+}
+
+fn evaluate_const_ty_cycle_initial<'db>(
+    _db: &'db dyn HirAnalysisDb,
+    const_ty: ConstTyId<'db>,
+    _expected_ty: Option<TyId<'db>>,
+) -> ConstTyId<'db> {
+    const_ty
+}
+
+fn evaluate_const_ty_cycle_recover<'db>(
+    _db: &'db dyn HirAnalysisDb,
+    _value: &ConstTyId<'db>,
+    _count: u32,
+    _const_ty: ConstTyId<'db>,
+    _expected_ty: Option<TyId<'db>>,
+) -> salsa::CycleRecoveryAction<ConstTyId<'db>> {
+    salsa::CycleRecoveryAction::Iterate
+}
+
+pub(crate) fn const_ty_from_assoc_const_use<'db>(
+    db: &'db dyn HirAnalysisDb,
+    assoc: AssocConstUse<'db>,
+) -> Option<ConstTyId<'db>> {
+    const_ty_from_trait_const(db, assoc.solve_cx(db), assoc.inst(), assoc.name())
+}
+
+pub(super) fn const_ty_from_trait_const<'db>(
+    db: &'db dyn HirAnalysisDb,
+    solve_cx: TraitSolveCx<'db>,
+    inst: TraitInstId<'db>,
+    name: IdentId<'db>,
+) -> Option<ConstTyId<'db>> {
+    let trait_ = inst.def(db);
+    let (body, generic_args) =
+        crate::analysis::ty::trait_def::assoc_const_body_and_impl_args_for_trait_inst(
+            db, solve_cx, inst, name,
+        )
+        .or_else(|| {
+            trait_
+                .const_(db, name)
+                .and_then(|c| c.default_body(db))
+                .map(|body| (body, inst.args(db).clone()))
+        })?;
+
+    let declared_ty = trait_
+        .const_(db, name)
+        .and_then(|v| v.ty_binder(db))
+        .map(|b| b.instantiate(db, inst.args(db)));
+
+    Some(ConstTyId::from_body_with_generic_args(
+        db,
+        body,
+        declared_ty,
+        None,
+        generic_args,
+    ))
 }
 
 // FIXME: When we add type inference, we need to use the inference engine to
 // check the type of the expression instead of this function.
-fn check_const_ty<'db>(
+pub(crate) fn check_const_ty<'db>(
     db: &'db dyn HirAnalysisDb,
     const_ty_ty: TyId<'db>,
     expected_ty: Option<TyId<'db>>,
     table: &mut UnificationTable<'db>,
 ) -> Result<TyId<'db>, InvalidCause<'db>> {
+    if let Some(cause) = const_ty_ty.invalid_cause(db) {
+        return Err(cause);
+    }
+
     if const_ty_ty.has_invalid(db) {
         return Err(InvalidCause::Other);
     }
@@ -169,7 +1246,9 @@ impl<'db> ConstTyId<'db> {
         match self.data(db) {
             ConstTyData::TyVar(_, ty) => *ty,
             ConstTyData::TyParam(_, ty) => *ty,
+            ConstTyData::Hole(ty, _) => *ty,
             ConstTyData::Evaluated(_, ty) => *ty,
+            ConstTyData::Abstract(_, ty) => *ty,
             ConstTyData::UnEvaluated { ty, .. } => {
                 ty.unwrap_or_else(|| TyId::invalid(db, InvalidCause::Other))
             }
@@ -182,9 +1261,15 @@ impl<'db> ConstTyId<'db> {
             ConstTyData::TyParam(param, ty) => {
                 format!("const {}: {}", param.pretty_print(db), ty.pretty_print(db))
             }
+            ConstTyData::Hole(..) => "_".to_string(),
             ConstTyData::Evaluated(resolved, _) => resolved.pretty_print(db),
+            ConstTyData::Abstract(expr, _) => expr.pretty_print(db),
             ConstTyData::UnEvaluated {
-                body, const_def, ..
+                body,
+                ty,
+                const_def,
+                generic_args,
+                ..
             } => {
                 if let Some(const_def) = const_def
                     && let Some(name) = const_def.name(db).to_opt()
@@ -193,19 +1278,21 @@ impl<'db> ConstTyId<'db> {
                 }
 
                 let expr = body.expr(db);
-                let Partial::Present(expr) = expr.data(db, *body) else {
-                    return "const value".into();
-                };
-
-                match expr {
-                    Expr::Lit(LitKind::Bool(value)) => format!("const {}", value),
-                    Expr::Lit(LitKind::Int(int)) => format!("const {}", int.data(db)),
-                    Expr::Lit(LitKind::String(string)) => format!("const \"{}\"", string.data(db)),
-                    Expr::Path(path) if path.is_present() => {
-                        format!("const {}", path.unwrap().pretty_print(db))
-                    }
-                    _ => "const value".into(),
+                if let Some(rendered) = pretty_print_const_body_expr(
+                    db,
+                    *body,
+                    expr,
+                    &generic_const_param_display_map(db, *body, generic_args),
+                ) {
+                    return rendered;
                 }
+
+                let fallback = self.evaluate(db, *ty);
+                if fallback != self {
+                    return fallback.pretty_print(db);
+                }
+
+                "const value".into()
             }
         }
     }
@@ -224,10 +1311,40 @@ impl<'db> ConstTyId<'db> {
         ty: Option<TyId<'db>>,
         const_def: Option<Const<'db>>,
     ) -> Self {
+        Self::from_body_with_generic_args(db, body, ty, const_def, Vec::new())
+    }
+
+    pub(super) fn from_body_with_generic_args(
+        db: &'db dyn HirAnalysisDb,
+        body: Body<'db>,
+        ty: Option<TyId<'db>>,
+        const_def: Option<Const<'db>>,
+        generic_args: Vec<TyId<'db>>,
+    ) -> Self {
+        Self::from_body_with_generic_args_and_preservation(
+            db,
+            body,
+            ty,
+            const_def,
+            generic_args,
+            false,
+        )
+    }
+
+    pub(super) fn from_body_with_generic_args_and_preservation(
+        db: &'db dyn HirAnalysisDb,
+        body: Body<'db>,
+        ty: Option<TyId<'db>>,
+        const_def: Option<Const<'db>>,
+        generic_args: Vec<TyId<'db>>,
+        preserve_unevaluated: bool,
+    ) -> Self {
         let data = ConstTyData::UnEvaluated {
             body,
             ty,
             const_def,
+            generic_args,
+            preserve_unevaluated,
         };
         Self::new(db, data)
     }
@@ -239,6 +1356,30 @@ impl<'db> ConstTyId<'db> {
         }
     }
 
+    pub(super) fn from_opt_body_with_ty_and_generic_args(
+        db: &'db dyn HirAnalysisDb,
+        body: Partial<Body<'db>>,
+        ty: Option<TyId<'db>>,
+        generic_args: Vec<TyId<'db>>,
+        preserve_unevaluated: bool,
+    ) -> Self {
+        match body {
+            Partial::Present(body) => Self::from_body_with_generic_args_and_preservation(
+                db,
+                body,
+                ty,
+                None,
+                generic_args,
+                preserve_unevaluated,
+            ),
+            Partial::Absent => Self::invalid(db, InvalidCause::ParseError),
+        }
+    }
+
+    pub(super) fn with_ty(self, db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> Self {
+        self.swap_ty(db, ty)
+    }
+
     pub(super) fn invalid(db: &'db dyn HirAnalysisDb, cause: InvalidCause<'db>) -> Self {
         let resolved = EvaluatedConstTy::Invalid;
         let ty = TyId::invalid(db, cause);
@@ -246,17 +1387,82 @@ impl<'db> ConstTyId<'db> {
         Self::new(db, data)
     }
 
+    pub fn hole(db: &'db dyn HirAnalysisDb) -> Self {
+        Self::hole_with_ty(db, TyId::invalid(db, InvalidCause::Other))
+    }
+
+    pub fn hole_with_ty(db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> Self {
+        Self::hole_with_id(db, ty, HoleId::bound_opaque())
+    }
+
+    pub fn hole_with_id(db: &'db dyn HirAnalysisDb, ty: TyId<'db>, hole_id: HoleId<'db>) -> Self {
+        Self::new(db, ConstTyData::Hole(ty, hole_id))
+    }
+
+    pub fn structural_hole(
+        db: &'db dyn HirAnalysisDb,
+        ty: TyId<'db>,
+        origin: StructuralHoleOrigin<'db>,
+        local_frame: LocalFrameId<'db>,
+    ) -> Self {
+        Self::hole_with_id(db, ty, HoleId::structural(db, ty, origin, local_frame))
+    }
+
+    pub fn structural_hole_with_app(
+        db: &'db dyn HirAnalysisDb,
+        ty: TyId<'db>,
+        origin: StructuralHoleOrigin<'db>,
+        local_frame: LocalFrameId<'db>,
+        app_frame: Option<AppFrameId<'db>>,
+    ) -> Self {
+        Self::hole_with_id(
+            db,
+            ty,
+            HoleId::structural_with_app(db, ty, origin, local_frame, app_frame),
+        )
+    }
+
+    pub fn bound_callable_hole(
+        db: &'db dyn HirAnalysisDb,
+        ty: TyId<'db>,
+        func: Func<'db>,
+        origin: CallableInputLayoutHoleOrigin,
+        ordinal: usize,
+    ) -> Self {
+        Self::hole_with_id(db, ty, HoleId::bound_callable(func, origin, ordinal))
+    }
+
     fn swap_ty(self, db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> Self {
         let data = match self.data(db) {
             ConstTyData::TyVar(var, _) => ConstTyData::TyVar(var.clone(), ty),
             ConstTyData::TyParam(param, _) => ConstTyData::TyParam(param.clone(), ty),
+            ConstTyData::Hole(_, hole_id) => ConstTyData::Hole(
+                ty,
+                match hole_id {
+                    HoleId::Structural(hole_id) => HoleId::Structural(StructuralHoleId::new(
+                        db,
+                        ty,
+                        hole_id.origin(db),
+                        hole_id.local_frame(db),
+                        hole_id.app_frame(db),
+                    )),
+                    HoleId::Bound(hole_id) => HoleId::Bound(*hole_id),
+                },
+            ),
             ConstTyData::Evaluated(evaluated, _) => ConstTyData::Evaluated(evaluated.clone(), ty),
+            ConstTyData::Abstract(expr, _) => ConstTyData::Abstract(*expr, ty),
             ConstTyData::UnEvaluated {
-                body, const_def, ..
+                body,
+                const_def,
+                generic_args,
+                preserve_unevaluated,
+                ..
             } => ConstTyData::UnEvaluated {
                 body: *body,
                 ty: Some(ty),
                 const_def: *const_def,
+                generic_args: generic_args.clone(),
+                preserve_unevaluated: *preserve_unevaluated,
             },
         };
 
@@ -268,11 +1474,15 @@ impl<'db> ConstTyId<'db> {
 pub enum ConstTyData<'db> {
     TyVar(TyVar<'db>, TyId<'db>),
     TyParam(TyParam<'db>, TyId<'db>),
+    Hole(TyId<'db>, HoleId<'db>),
     Evaluated(EvaluatedConstTy<'db>, TyId<'db>),
+    Abstract(ConstExprId<'db>, TyId<'db>),
     UnEvaluated {
         body: Body<'db>,
         ty: Option<TyId<'db>>,
         const_def: Option<Const<'db>>,
+        generic_args: Vec<TyId<'db>>,
+        preserve_unevaluated: bool,
     },
 }
 
@@ -280,6 +1490,12 @@ pub enum ConstTyData<'db> {
 pub enum EvaluatedConstTy<'db> {
     LitInt(IntegerId<'db>),
     LitBool(bool),
+    Unit,
+    Tuple(Vec<TyId<'db>>),
+    Array(Vec<TyId<'db>>),
+    Bytes(Vec<u8>),
+    Record(Vec<TyId<'db>>),
+    EnumVariant(EnumVariant<'db>),
     Invalid,
 }
 
@@ -290,6 +1506,49 @@ impl EvaluatedConstTy<'_> {
                 format!("{}", val.data(db))
             }
             EvaluatedConstTy::LitBool(val) => format!("{val}"),
+            EvaluatedConstTy::Unit => "()".to_string(),
+            EvaluatedConstTy::Tuple(elems) => {
+                let elems = elems
+                    .iter()
+                    .map(|elem| elem.pretty_print(db).as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({elems})")
+            }
+            EvaluatedConstTy::Array(elems) => {
+                let elems = elems
+                    .iter()
+                    .map(|elem| elem.pretty_print(db).as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{elems}]")
+            }
+            EvaluatedConstTy::Bytes(bytes) => {
+                let bytes = bytes
+                    .iter()
+                    .map(|b| b.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{bytes}]")
+            }
+            EvaluatedConstTy::Record(fields) => {
+                let fields = fields
+                    .iter()
+                    .map(|field| field.pretty_print(db).as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{fields}}}")
+            }
+            EvaluatedConstTy::EnumVariant(variant) => {
+                let enum_name = variant
+                    .enum_
+                    .name(db)
+                    .to_opt()
+                    .map(|n| n.data(db).to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string());
+                let variant_name = variant.name(db).unwrap_or("<unknown>");
+                format!("{enum_name}::{variant_name}")
+            }
             EvaluatedConstTy::Invalid => "<invalid>".to_string(),
         }
     }

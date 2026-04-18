@@ -1,5 +1,9 @@
 use common::InputDb;
-pub use core::lower::{SelectorError, SelectorErrorKind, parse::ParserError};
+pub use core::lower::{
+    ArithmeticAttrError, ArithmeticAttrErrorKind, ErrorDiagnostic, ErrorDiagnosticKind, EventError,
+    EventErrorKind, InlineAttrError, LoopUnrollAttrError, PayableError, PayableErrorKind,
+    SelectorError, SelectorErrorKind, parse::ParserError,
+};
 
 pub mod analysis;
 pub mod core;
@@ -10,6 +14,7 @@ pub use core::{hir_def, lower, print, semantic, span, visitor};
 pub mod test_db;
 
 pub use common::{file::File, file::Workspace, ingot::Ingot};
+
 #[salsa::db]
 pub trait HirDb: salsa::Database + InputDb {}
 

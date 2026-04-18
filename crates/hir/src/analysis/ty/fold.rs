@@ -1,18 +1,21 @@
 use std::hash::Hash;
 
 use crate::core::hir_def::IdentId;
+use crate::hir_def::{ItemKind, Trait};
 use common::indexmap::{IndexMap, IndexSet};
 
 use super::{
     trait_def::{ImplementorId, TraitInstId},
-    trait_resolution::PredicateListId,
-    ty_check::ExprProp,
+    trait_resolution::{PredicateListId, TraitGoalSolution, TraitSolverQuery},
+    ty_check::{EffectArg, ExprProp, LocalBinding, ResolvedEffectArg},
     ty_def::{TyData, TyId},
     visitor::TyVisitable,
 };
 use crate::analysis::{
     HirAnalysisDb,
-    ty::const_ty::{ConstTyData, ConstTyId},
+    place::{Place, PlaceBase},
+    ty::const_expr::{ConstExpr, ConstExprId},
+    ty::const_ty::{ConstTyData, ConstTyId, EvaluatedConstTy},
 };
 
 pub trait TyFoldable<'db>
@@ -33,6 +36,15 @@ where
 
 pub trait TyFolder<'db> {
     fn fold_ty(&mut self, db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> TyId<'db>;
+
+    fn fold_ty_app(
+        &mut self,
+        db: &'db dyn HirAnalysisDb,
+        abs: TyId<'db>,
+        arg: TyId<'db>,
+    ) -> TyId<'db> {
+        TyId::app(db, abs, arg)
+    }
 }
 
 impl<'db> TyFoldable<'db> for TyId<'db> {
@@ -47,7 +59,7 @@ impl<'db> TyFoldable<'db> for TyId<'db> {
                 let abs = folder.fold_ty(db, *abs);
                 let arg = folder.fold_ty(db, *arg);
 
-                TyId::app(db, abs, arg)
+                folder.fold_ty_app(db, abs, arg)
             }
 
             ConstTy(cty) => {
@@ -61,20 +73,62 @@ impl<'db> TyFoldable<'db> for TyId<'db> {
                         let ty = folder.fold_ty(db, *ty);
                         TyParam(param.clone(), ty)
                     }
+                    Hole(ty, hole_id) => {
+                        let ty = folder.fold_ty(db, *ty);
+                        Hole(ty, *hole_id)
+                    }
                     Evaluated(val, ty) => {
                         let ty = folder.fold_ty(db, *ty);
-                        Evaluated(val.clone(), ty)
+                        let val = match val {
+                            EvaluatedConstTy::Tuple(elems) => EvaluatedConstTy::Tuple(
+                                elems
+                                    .iter()
+                                    .copied()
+                                    .map(|elem| folder.fold_ty(db, elem))
+                                    .collect(),
+                            ),
+                            EvaluatedConstTy::Array(elems) => EvaluatedConstTy::Array(
+                                elems
+                                    .iter()
+                                    .copied()
+                                    .map(|elem| folder.fold_ty(db, elem))
+                                    .collect(),
+                            ),
+                            EvaluatedConstTy::Record(fields) => EvaluatedConstTy::Record(
+                                fields
+                                    .iter()
+                                    .copied()
+                                    .map(|field| folder.fold_ty(db, field))
+                                    .collect(),
+                            ),
+                            _ => val.clone(),
+                        };
+                        Evaluated(val, ty)
+                    }
+                    Abstract(expr, ty) => {
+                        let ty = folder.fold_ty(db, *ty);
+                        let expr = fold_const_expr_id(db, folder, *expr);
+                        Abstract(expr, ty)
                     }
                     UnEvaluated {
                         body,
                         ty,
                         const_def,
+                        generic_args,
+                        preserve_unevaluated,
                     } => {
                         let ty = ty.map(|t| folder.fold_ty(db, t));
+                        let generic_args = generic_args
+                            .iter()
+                            .copied()
+                            .map(|arg| folder.fold_ty(db, arg))
+                            .collect();
                         UnEvaluated {
                             body: *body,
                             ty,
                             const_def: *const_def,
+                            generic_args,
+                            preserve_unevaluated: *preserve_unevaluated,
                         }
                     }
                 };
@@ -103,6 +157,85 @@ impl<'db> TyFoldable<'db> for TyId<'db> {
         F: TyFolder<'db>,
     {
         folder.fold_ty(db, self)
+    }
+}
+
+fn fold_const_expr_id<'db, F>(
+    db: &'db dyn HirAnalysisDb,
+    folder: &mut F,
+    expr: ConstExprId<'db>,
+) -> ConstExprId<'db>
+where
+    F: TyFolder<'db>,
+{
+    match expr.data(db) {
+        ConstExpr::ExternConstFnCall {
+            func,
+            generic_args,
+            args,
+        } => {
+            let generic_args = generic_args
+                .iter()
+                .copied()
+                .map(|arg| folder.fold_ty(db, arg))
+                .collect();
+            let args = args
+                .iter()
+                .copied()
+                .map(|arg| folder.fold_ty(db, arg))
+                .collect();
+            ConstExprId::new(
+                db,
+                ConstExpr::ExternConstFnCall {
+                    func: *func,
+                    generic_args,
+                    args,
+                },
+            )
+        }
+        ConstExpr::UserConstFnCall {
+            func,
+            generic_args,
+            args,
+        } => {
+            let generic_args = generic_args
+                .iter()
+                .copied()
+                .map(|arg| folder.fold_ty(db, arg))
+                .collect();
+            let args = args
+                .iter()
+                .copied()
+                .map(|arg| folder.fold_ty(db, arg))
+                .collect();
+            ConstExprId::new(
+                db,
+                ConstExpr::UserConstFnCall {
+                    func: *func,
+                    generic_args,
+                    args,
+                },
+            )
+        }
+        ConstExpr::ArithBinOp { op, lhs, rhs } => {
+            let lhs = folder.fold_ty(db, *lhs);
+            let rhs = folder.fold_ty(db, *rhs);
+            ConstExprId::new(db, ConstExpr::ArithBinOp { op: *op, lhs, rhs })
+        }
+        ConstExpr::UnOp { op, expr } => {
+            let expr = folder.fold_ty(db, *expr);
+            ConstExprId::new(db, ConstExpr::UnOp { op: *op, expr })
+        }
+        ConstExpr::Cast { expr, to } => {
+            let expr = folder.fold_ty(db, *expr);
+            let to = folder.fold_ty(db, *to);
+            ConstExprId::new(db, ConstExpr::Cast { expr, to })
+        }
+        ConstExpr::TraitConst(assoc) => {
+            let assoc = assoc.fold_with(db, folder);
+            ConstExprId::new(db, ConstExpr::TraitConst(assoc))
+        }
+        ConstExpr::LocalBinding(binding) => ConstExprId::new(db, ConstExpr::LocalBinding(*binding)),
     }
 }
 
@@ -167,7 +300,7 @@ impl<'db> TyFoldable<'db> for ImplementorId<'db> {
             .iter()
             .map(|ty| ty.fold_with(db, folder))
             .collect::<Vec<_>>();
-        let hir_impl_trait = self.hir_impl_trait(db);
+        let origin = self.origin(db);
 
         let types = self
             .types(db)
@@ -175,7 +308,7 @@ impl<'db> TyFoldable<'db> for ImplementorId<'db> {
             .map(|(ident, ty)| (*ident, ty.fold_with(db, folder)))
             .collect::<IndexMap<_, _>>();
 
-        ImplementorId::new(db, trait_inst, params, types, hir_impl_trait)
+        ImplementorId::new(db, trait_inst, params, types, origin)
     }
 }
 
@@ -194,13 +327,121 @@ impl<'db> TyFoldable<'db> for PredicateListId<'db> {
     }
 }
 
+impl<'db> TyFoldable<'db> for TraitSolverQuery<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        Self {
+            goal: self.goal.fold_with(db, folder),
+            assumptions: self.assumptions.fold_with(db, folder),
+        }
+    }
+}
+
+impl<'db> TyFoldable<'db> for TraitGoalSolution<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        Self {
+            inst: self.inst.fold_with(db, folder),
+            implementor: self.implementor.fold_with(db, folder),
+        }
+    }
+}
+
+impl<'db> TyFoldable<'db> for LocalBinding<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        match self {
+            LocalBinding::Local { .. } | LocalBinding::EffectParam { .. } => self,
+            LocalBinding::Param {
+                site,
+                idx,
+                mode,
+                ty,
+                is_mut,
+            } => LocalBinding::Param {
+                site,
+                idx,
+                mode,
+                ty: ty.fold_with(db, folder),
+                is_mut,
+            },
+        }
+    }
+}
+
 impl<'db> TyFoldable<'db> for ExprProp<'db> {
     fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
     where
         F: TyFolder<'db>,
     {
         let ty = self.ty.fold_with(db, folder);
-        Self { ty, ..self }
+        let binding = self.binding.map(|binding| binding.fold_with(db, folder));
+        Self {
+            ty,
+            binding,
+            ..self
+        }
+    }
+}
+
+impl<'db> TyFoldable<'db> for Place<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        let base = self.base.fold_with(db, folder);
+        Self {
+            base,
+            projections: self.projections,
+        }
+    }
+}
+
+impl<'db> TyFoldable<'db> for PlaceBase<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        match self {
+            PlaceBase::Binding(binding) => PlaceBase::Binding(binding.fold_with(db, folder)),
+        }
+    }
+}
+
+impl<'db> TyFoldable<'db> for EffectArg<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        match self {
+            EffectArg::Place(place) => EffectArg::Place(place.fold_with(db, folder)),
+            EffectArg::Binding(binding) => EffectArg::Binding(binding.fold_with(db, folder)),
+            EffectArg::Value(_) | EffectArg::Unknown => self,
+        }
+    }
+}
+
+impl<'db> TyFoldable<'db> for ResolvedEffectArg<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        Self {
+            param_idx: self.param_idx,
+            key: self.key,
+            arg: self.arg.fold_with(db, folder),
+            pass_mode: self.pass_mode,
+            key_kind: self.key_kind,
+            instantiated_target_ty: self
+                .instantiated_target_ty
+                .map(|ty| ty.fold_with(db, folder)),
+        }
     }
 }
 
@@ -221,12 +462,20 @@ impl<'db> TyFolder<'db> for AssocTySubst<'db> {
             TyData::TyParam(param) => {
                 // If this is a trait self parameter, substitute with the trait instance's self type
                 if param.is_trait_self() {
-                    let self_ty = self.trait_inst.self_ty(db);
-                    // Avoid infinite recursion when the instance `Self` is the same param.
-                    if self_ty == ty {
-                        return ty;
+                    let owner_trait = param.owner.resolve_to::<Trait>(db).or_else(|| {
+                        match param.owner.parent_item(db)? {
+                            ItemKind::Trait(trait_) => Some(trait_),
+                            _ => None,
+                        }
+                    });
+                    if owner_trait.is_some_and(|trait_def| trait_def == self.trait_inst.def(db)) {
+                        let self_ty = self.trait_inst.self_ty(db);
+                        // Avoid infinite recursion when the instance `Self` is the same param.
+                        if self_ty == ty {
+                            return ty;
+                        }
+                        return self_ty.fold_with(db, self);
                     }
-                    return self_ty.fold_with(db, self);
                 }
                 ty.super_fold_with(db, self)
             }

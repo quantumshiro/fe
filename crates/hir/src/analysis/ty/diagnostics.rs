@@ -1,14 +1,14 @@
 use super::{
     adt_def::AdtCycleMember,
     trait_def::TraitInstId,
-    ty_check::{RecordLike, TraitOps},
-    ty_def::{Kind, TyId},
+    ty_check::{ConcreteBorrowProvider, RecordLike, TraitOps},
+    ty_def::{BorrowKind, CapabilityKind, Kind, TyId},
 };
-use crate::span::DynLazySpan;
 use crate::visitor::prelude::*;
 use crate::{analysis::HirAnalysisDb, hir_def::Trait};
 use crate::{analysis::diagnostics::DiagnosticVoucher, hir_def::PathId};
 use crate::{analysis::name_resolution::diagnostics::PathResDiag, hir_def::ItemKind};
+use crate::{analysis::ty::ty_check::EffectParamOwner, span::DynLazySpan};
 use crate::{
     core::hir_def::{
         CallableDef, Enum, FieldIndex, FieldParent, Func, GenericParamOwner, IdentId, ImplTrait,
@@ -99,7 +99,6 @@ pub enum TyLowerDiag<'db> {
     },
 
     DuplicateArgName(Func<'db>, SmallVec<[u16; 4]>),
-    DuplicateArgLabel(Func<'db>, SmallVec<[u16; 4]>),
     DuplicateFieldName(FieldParent<'db>, SmallVec<[u16; 4]>),
     DuplicateVariantName(Enum<'db>, SmallVec<[u16; 4]>),
     DuplicateGenericParamName(GenericParamOwner<'db>, SmallVec<[u16; 4]>),
@@ -123,7 +122,40 @@ pub enum TyLowerDiag<'db> {
         given: TyId<'db>,
     },
 
+    /// Layout holes (`_`) are only allowed in callable input types and contract fields.
+    ConstHoleInValuePosition {
+        span: DynLazySpan<'db>,
+        ty: TyId<'db>,
+    },
+
+    /// `own` parameters must have owned types. Borrow-handle types (`mut`/`ref`) are not owned.
+    OwnParamCannotBeBorrow {
+        span: DynLazySpan<'db>,
+        ty: TyId<'db>,
+    },
+
+    /// Non-`self` parameters cannot use the `mut x: T` prefix form unless the type is `own`.
+    InvalidMutParamPrefixWithoutOwnType {
+        span: DynLazySpan<'db>,
+    },
+
+    MixedRefSelfPrefixWithExplicitType {
+        span: DynLazySpan<'db>,
+    },
+    MixedOwnSelfPrefixWithExplicitType {
+        span: DynLazySpan<'db>,
+    },
+    InvalidMutSelfPrefixWithExplicitType {
+        span: DynLazySpan<'db>,
+    },
+
     InvalidConstTyExpr(DynLazySpan<'db>),
+
+    ConstEvalUnsupported(DynLazySpan<'db>),
+    ConstEvalNonConstCall(DynLazySpan<'db>),
+    ConstEvalDivisionByZero(DynLazySpan<'db>),
+    ConstEvalStepLimitExceeded(DynLazySpan<'db>),
+    ConstEvalRecursionLimitExceeded(DynLazySpan<'db>),
 
     NonTrailingDefaultGenericParam(LazyGenericParamSpan<'db>),
 
@@ -151,16 +183,32 @@ impl TyLowerDiag<'_> {
             Self::ConstTyMismatch { .. } => 11,
             Self::ConstTyExpected { .. } => 12,
             Self::NormalTypeExpected { .. } => 13,
+            Self::ConstHoleInValuePosition { .. } => 32,
+            Self::OwnParamCannotBeBorrow { .. } => 14,
+            Self::InvalidMutParamPrefixWithoutOwnType { .. } => 31,
             Self::InvalidConstTyExpr(_) => 15,
+            Self::ConstEvalUnsupported(_) => 23,
+            Self::ConstEvalNonConstCall(_) => 24,
+            Self::ConstEvalDivisionByZero(_) => 25,
+            Self::ConstEvalStepLimitExceeded(_) => 26,
+            Self::ConstEvalRecursionLimitExceeded(_) => 27,
+            Self::MixedRefSelfPrefixWithExplicitType { .. } => 28,
+            Self::MixedOwnSelfPrefixWithExplicitType { .. } => 29,
+            Self::InvalidMutSelfPrefixWithExplicitType { .. } => 30,
             Self::TooManyGenericArgs { .. } => 16,
             Self::DuplicateFieldName(..) => 17,
             Self::DuplicateVariantName(..) => 18,
             Self::DuplicateGenericParamName(..) => 19,
-            Self::DuplicateArgLabel(..) => 20,
             Self::NonTrailingDefaultGenericParam(_) => 21,
             Self::GenericDefaultForwardRef { .. } => 22,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub struct CallConstraintDiagInfo<'db> {
+    pub callable_def: CallableDef<'db>,
+    pub bound_span: DynLazySpan<'db>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
@@ -177,7 +225,9 @@ pub enum BodyDiag<'db> {
         conflicat_with: DynLazySpan<'db>,
         name: IdentId<'db>,
     },
+    BindingsInOrPat(DynLazySpan<'db>),
     DuplicatedRestPat(DynLazySpan<'db>),
+    UnexpectedRestPat(DynLazySpan<'db>),
 
     InvalidPathDomainInPat {
         primary: DynLazySpan<'db>,
@@ -234,9 +284,23 @@ pub enum BodyDiag<'db> {
     UndefinedVariable(DynLazySpan<'db>, IdentId<'db>),
 
     InvalidEffectKey {
-        owner: crate::analysis::ty::ty_check::EffectParamOwner<'db>,
+        owner: EffectParamOwner<'db>,
         key: PathId<'db>,
         idx: usize,
+    },
+
+    ContractRootEffectTraitNotImplemented {
+        owner: EffectParamOwner<'db>,
+        idx: usize,
+        root_ty: TyId<'db>,
+        trait_req: TraitInstId<'db>,
+    },
+
+    ContractRootEffectTypeNotZeroSized {
+        owner: EffectParamOwner<'db>,
+        key: PathId<'db>,
+        idx: usize,
+        given: TyId<'db>,
     },
 
     MissingEffect {
@@ -267,6 +331,15 @@ pub enum BodyDiag<'db> {
         provided_span: Option<DynLazySpan<'db>>,
     },
 
+    EffectProviderMismatch {
+        primary: DynLazySpan<'db>,
+        func: Func<'db>,
+        key: PathId<'db>,
+        expected: TyId<'db>,
+        given: TyId<'db>,
+        provided_span: Option<DynLazySpan<'db>>,
+    },
+
     EffectTraitUnsatisfied {
         primary: DynLazySpan<'db>,
         func: Func<'db>,
@@ -276,6 +349,20 @@ pub enum BodyDiag<'db> {
         provided_span: Option<DynLazySpan<'db>>,
     },
 
+    WithEffectTraitUnsatisfied {
+        primary: DynLazySpan<'db>,
+        key: PathId<'db>,
+        trait_req: TraitInstId<'db>,
+        given: TyId<'db>,
+    },
+
+    WithEffectTypeUnsatisfied {
+        primary: DynLazySpan<'db>,
+        key: PathId<'db>,
+        expected: TyId<'db>,
+        given: TyId<'db>,
+    },
+
     ReturnedTypeMismatch {
         primary: DynLazySpan<'db>,
         actual: TyId<'db>,
@@ -283,7 +370,22 @@ pub enum BodyDiag<'db> {
         func: Option<CallableDef<'db>>,
     },
 
+    IncompatibleBorrowProviders {
+        primary: DynLazySpan<'db>,
+        previous: DynLazySpan<'db>,
+        previous_provider: ConcreteBorrowProvider,
+        current_provider: ConcreteBorrowProvider,
+    },
+
     TypeMustBeKnown(DynLazySpan<'db>),
+    ConstValueMustBeKnown(DynLazySpan<'db>),
+
+    InvalidCast {
+        primary: DynLazySpan<'db>,
+        from: TyId<'db>,
+        to: TyId<'db>,
+        hint: Option<String>,
+    },
 
     AccessedFieldNotFound {
         primary: DynLazySpan<'db>,
@@ -296,6 +398,64 @@ pub enum BodyDiag<'db> {
         ty: String,
         op: IdentId<'db>,
         trait_path: PathId<'db>,
+    },
+    UnsupportedUnaryPlus(DynLazySpan<'db>),
+    IntLiteralOutOfRange {
+        primary: DynLazySpan<'db>,
+        literal: String,
+        ty: TyId<'db>,
+    },
+
+    BorrowFromNonPlace {
+        primary: DynLazySpan<'db>,
+    },
+
+    CannotBorrowMut {
+        primary: DynLazySpan<'db>,
+        binding: Option<(IdentId<'db>, DynLazySpan<'db>)>,
+    },
+
+    /// A call argument is not a place, but the callee requires a borrow handle (`mut`/`ref`).
+    BorrowArgMustBePlace {
+        primary: DynLazySpan<'db>,
+        kind: BorrowKind,
+    },
+
+    /// A call argument is a place, but the callee requires an explicit borrow handle (`mut`/`ref`).
+    ExplicitBorrowRequired {
+        primary: DynLazySpan<'db>,
+        kind: BorrowKind,
+        suggestion: Option<String>,
+    },
+
+    /// `own` parameters must have owned types. Borrow-handle types (`mut`/`ref`) are not owned.
+    OwnParamCannotBeBorrow {
+        primary: DynLazySpan<'db>,
+        ty: TyId<'db>,
+    },
+
+    /// `let mut` local bindings must bind owned values, not capability handles.
+    MutableBindingCannotBeCapability {
+        primary: DynLazySpan<'db>,
+        ty: TyId<'db>,
+    },
+
+    /// `own` call arguments must denote a transferable owned value.
+    ///
+    /// Capability-typed expressions (`mut`/`ref`/`view`) can only satisfy this when the checker
+    /// can safely unwrap them to an owned inner value.
+    OwnArgMustBeOwnedMove {
+        primary: DynLazySpan<'db>,
+        kind: CapabilityKind,
+        given: TyId<'db>,
+    },
+
+    /// Array repetition literals (`[x; N]`) duplicate the element value.
+    ///
+    /// Duplicating a value requires that the element type implement `core::marker::Copy`.
+    ArrayRepeatRequiresCopy {
+        primary: DynLazySpan<'db>,
+        ty: TyId<'db>,
     },
 
     NonAssignableExpr(DynLazySpan<'db>),
@@ -361,6 +521,7 @@ pub enum BodyDiag<'db> {
     AmbiguousTraitInst {
         primary: DynLazySpan<'db>,
         cands: ThinVec<TraitInstId<'db>>,
+        required_by: Option<CallConstraintDiagInfo<'db>>,
     },
 
     InvisibleAmbiguousTrait {
@@ -454,6 +615,39 @@ pub enum BodyDiag<'db> {
         first_use: DynLazySpan<'db>,
         handler_ty: TyId<'db>,
     },
+
+    /// A fallback arm `_` is only allowed in a bare recv block.
+    RecvFallbackOnlyInBareBlock {
+        primary: DynLazySpan<'db>,
+    },
+
+    /// At most one fallback arm may exist in a contract.
+    RecvDuplicateFallback {
+        primary: DynLazySpan<'db>,
+        first_use: DynLazySpan<'db>,
+    },
+
+    /// Fallback arms are unit-returning and may not declare `-> T`.
+    RecvFallbackReturnTypeNotAllowed {
+        primary: DynLazySpan<'db>,
+    },
+
+    // Const fn / const-check diagnostics -----------------------------------
+    ConstFnEffectsNotAllowed(DynLazySpan<'db>),
+    ConstFnWithNotAllowed(DynLazySpan<'db>),
+    ConstFnLoopNotAllowed(DynLazySpan<'db>),
+    ConstFnMatchNotAllowed(DynLazySpan<'db>),
+    ConstFnAssignmentNotAllowed(DynLazySpan<'db>),
+    ConstFnAggregateNotAllowed(DynLazySpan<'db>),
+    ConstFnMutableBindingNotAllowed(DynLazySpan<'db>),
+    ConstFnNonConstCall {
+        primary: DynLazySpan<'db>,
+        callee: CallableDef<'db>,
+    },
+    ConstFnEffectfulCall {
+        primary: DynLazySpan<'db>,
+        callee: CallableDef<'db>,
+    },
 }
 
 impl<'db> BodyDiag<'db> {
@@ -536,6 +730,8 @@ impl<'db> BodyDiag<'db> {
             Self::TypeMismatch { .. } => 0,
             Self::InfiniteOccurrence(..) => 1,
             Self::DuplicatedRestPat(..) => 2,
+            Self::UnexpectedRestPat(..) => 75,
+            Self::BindingsInOrPat(..) => 76,
             Self::InvalidPathDomainInPat { .. } => 3,
             Self::UnitVariantExpected { .. } => 4,
             Self::TupleVariantExpected { .. } => 5,
@@ -547,15 +743,33 @@ impl<'db> BodyDiag<'db> {
             Self::MissingRecordFields { .. } => 11,
             Self::UndefinedVariable(..) => 12,
             Self::InvalidEffectKey { .. } => 51,
+            Self::ContractRootEffectTraitNotImplemented { .. } => 53,
+            Self::ContractRootEffectTypeNotZeroSized { .. } => 54,
             Self::MissingEffect { .. } => 36,
             Self::EffectMutabilityMismatch { .. } => 37,
             Self::EffectTypeMismatch { .. } => 38,
+            Self::EffectProviderMismatch { .. } => 52,
             Self::EffectTraitUnsatisfied { .. } => 39,
+            Self::WithEffectTraitUnsatisfied { .. } => 75,
+            Self::WithEffectTypeUnsatisfied { .. } => 76,
             Self::AmbiguousEffect { .. } => 40,
             Self::ReturnedTypeMismatch { .. } => 13,
+            Self::IncompatibleBorrowProviders { .. } => 77,
             Self::TypeMustBeKnown(..) => 14,
+            Self::InvalidCast { .. } => 55,
+            Self::ConstValueMustBeKnown(..) => 64,
             Self::AccessedFieldNotFound { .. } => 15,
             Self::OpsTraitNotImplemented { .. } => 16,
+            Self::UnsupportedUnaryPlus(..) => 52,
+            Self::IntLiteralOutOfRange { .. } => 74,
+            Self::BorrowFromNonPlace { .. } => 65,
+            Self::CannotBorrowMut { .. } => 66,
+            Self::BorrowArgMustBePlace { .. } => 68,
+            Self::ExplicitBorrowRequired { .. } => 69,
+            Self::OwnParamCannotBeBorrow { .. } => 70,
+            Self::OwnArgMustBeOwnedMove { .. } => 72,
+            Self::MutableBindingCannotBeCapability { .. } => 73,
+            Self::ArrayRepeatRequiresCopy { .. } => 71,
             Self::NonAssignableExpr(..) => 17,
             Self::ImmutableAssignment { .. } => 18,
             Self::LoopControlOutsideOfLoop { .. } => 19,
@@ -584,6 +798,18 @@ impl<'db> BodyDiag<'db> {
             Self::RecvArmNotVariantOfMsg { .. } => 48,
             Self::RecvArmNotMsgVariantTrait { .. } => 49,
             Self::RecvDuplicateHandler { .. } => 50,
+            Self::RecvFallbackOnlyInBareBlock { .. } => 78,
+            Self::RecvDuplicateFallback { .. } => 79,
+            Self::RecvFallbackReturnTypeNotAllowed { .. } => 80,
+            Self::ConstFnEffectsNotAllowed(_) => 55,
+            Self::ConstFnWithNotAllowed(_) => 56,
+            Self::ConstFnLoopNotAllowed(_) => 57,
+            Self::ConstFnMatchNotAllowed(_) => 58,
+            Self::ConstFnAssignmentNotAllowed(_) => 59,
+            Self::ConstFnAggregateNotAllowed(_) => 60,
+            Self::ConstFnMutableBindingNotAllowed(_) => 61,
+            Self::ConstFnNonConstCall { .. } => 62,
+            Self::ConstFnEffectfulCall { .. } => 63,
         }
     }
 }
@@ -595,6 +821,7 @@ pub enum TraitLowerDiag<'db> {
         conflict_with: ImplTrait<'db>,
     },
     ExternalTraitForExternalType(ImplTrait<'db>),
+    CyclicTraitRef(ImplTrait<'db>),
     CyclicSuperTraits(Vec<Trait<'db>>),
 }
 
@@ -604,6 +831,7 @@ impl TraitLowerDiag<'_> {
             Self::ExternalTraitForExternalType(_) => 0,
             Self::ConflictTraitImpl { .. } => 1,
             Self::CyclicSuperTraits { .. } => 2,
+            Self::CyclicTraitRef(_) => 3,
         }
     }
 }
@@ -631,6 +859,7 @@ pub enum TraitConstraintDiag<'db> {
         span: DynLazySpan<'db>,
         primary_goal: TraitInstId<'db>,
         unsat_subgoal: Option<TraitInstId<'db>>,
+        required_by: Option<CallConstraintDiagInfo<'db>>,
     },
 
     InfiniteBoundRecursion(DynLazySpan<'db>, String),

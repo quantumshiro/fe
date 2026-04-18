@@ -1,0 +1,76 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_wildcard.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %match_with_wildcard(v0.i256) -> i8 {
+    block0:
+        jump block4;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (0.i8 block3);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        br_table v0 block3 (0.i256 block1);
+}
+
+func private %wildcard_not_last(v0.i8) -> i8 {
+    block0:
+        jump block4;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (10.i8 block1) (99.i8 block3);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        br_table v0 block3 (0.i8 block1);
+}
+
+func private %multiple_before_wildcard(v0.i256) -> i8 {
+    block0:
+        jump block5;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (2.i8 block3) (3.i8 block4);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        jump block2;
+
+    block5:
+        br_table v0 block4 (0.i256 block1) (1.i256 block3);
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i8 = call %match_with_wildcard 0.i256;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

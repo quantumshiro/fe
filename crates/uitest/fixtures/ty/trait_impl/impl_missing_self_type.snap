@@ -1,0 +1,11 @@
+---
+source: crates/uitest/tests/ty.rs
+assertion_line: 84
+expression: diags
+input_file: fixtures/ty/trait_impl/impl_missing_self_type.fe
+---
+error[2-0002]: `MissingType` is not found
+  ┌─ impl_missing_self_type.fe:3:19
+  │
+3 │ impl WordRepr for MissingType {}
+  │                   ^^^^^^^^^^^ `MissingType` is not found

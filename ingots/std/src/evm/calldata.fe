@@ -1,0 +1,55 @@
+use core::abi::{ByteInput, Decode}
+use core::Copy
+use core::num::IntDowncast
+use ingot::abi::Sol
+use ingot::abi::sol::{decode_input}
+use ingot::evm::ops::{calldataload, calldatasize}
+
+/// A view over the current EVM calldata.
+///
+/// `base` marks the first byte visible through this view. External function
+/// selectors are not handled specially; callers choose whether to decode raw
+/// calldata (`CallData::new()`) or a rebased payload view
+/// (`CallData::with_base(4)`).
+pub struct CallData { pub base: u256 }
+
+impl Copy for CallData {}
+
+impl CallData {
+    pub fn new() -> Self {
+        CallData { base: 0 }
+    }
+    pub fn with_base(_ base: u256) -> Self {
+        CallData { base }
+    }
+
+    /// Decode Solidity ABI data from this calldata view.
+    pub fn decode<T>(self) -> T where T: Decode<Sol> {
+        decode_input(self)
+    }
+}
+
+impl ByteInput for CallData {
+    fn len(self) -> u256 {
+        let total = calldatasize()
+        if self.base > total {
+            0
+        } else {
+            total - self.base
+        }
+    }
+
+    #[arithmetic(unchecked)]
+    fn word_at(self, _ byte_offset: u256) -> u256 {
+        calldataload(self.base + byte_offset)
+    }
+
+    #[arithmetic(unchecked)]
+    fn byte_at(self, _ byte_offset: u256) -> u8 {
+        let word_offset = byte_offset - (byte_offset % 32)
+        let word = calldataload(self.base + word_offset)
+        let idx = byte_offset - word_offset
+        let shift = (31 - idx) * 8
+        (word >> shift).downcast_truncate()
+    }
+}

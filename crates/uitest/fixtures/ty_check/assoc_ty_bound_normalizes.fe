@@ -1,0 +1,8 @@
+trait HasItem {
+    type Item
+}
+
+fn use_bound<T: HasItem<Item = u256>>() -> u256 {
+    let x: T::Item = 1
+    x
+}

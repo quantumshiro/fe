@@ -1,0 +1,7 @@
+fn helper(x: u(64+1)) -> u64 {
+    x
+}
+
+pub fn call_helper() -> u64 {
+    helper(1)
+}

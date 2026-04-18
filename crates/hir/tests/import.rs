@@ -41,10 +41,14 @@ fn std_evm_import_is_available() {
     let file = db.new_stand_alone(
         Utf8PathBuf::from("std_import.fe"),
         r#"
-use std::evm::ops::sload
+use std::evm::{assert, revert}
 
-pub fn load0() -> u256 {
-    sload(0)
+fn increment(val: u256) -> u256 {
+    return val + 1
+}
+
+fn f() {
+    assert(increment(val: 0) == 1)
 }
 "#,
     );
@@ -85,7 +89,7 @@ fn format_imports<'db>(
     }
     for (use_, mut values) in use_res_map.into_iter() {
         // Skip uses whose spans cannot be resolved (for example,
-        // implicit/prelude imports that do not originate from this file).
+        // implicit imports that do not originate from this file).
         let span = use_.span();
         if span.resolve(db).is_none() {
             continue;

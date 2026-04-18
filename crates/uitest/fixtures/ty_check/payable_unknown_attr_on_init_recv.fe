@@ -1,0 +1,17 @@
+struct Store { value: u256 }
+
+pub contract Foo {
+    mut store: Store
+
+    #[payble]
+    init() {
+        store.value = 0
+    }
+
+    #[bar]
+    recv {
+        #[foo]
+        Ping {} {
+        }
+    }
+}

@@ -1,10 +1,12 @@
-use core::storage_map::{StorageMap, StorageKey}
+use std::evm::{Address, Ctx, StorageMap, assert}
+use std::evm::effects::Log
+use std::abi::sol
 
 // roles
 const MINTER: u256 = 1
 const BURNER: u256 = 2
 
-pub contract CoolCoin uses (mut ctx: Ctx, mut log: Log) {
+pub contract CoolCoin uses (ctx: mut Ctx, log: mut Log) {
     // Storage fields. These act as effects within the contract.
     mut store: TokenStore,
     mut auth: AccessControl,
@@ -97,7 +99,7 @@ pub contract CoolCoin uses (mut ctx: Ctx, mut log: Log) {
 }
 
 fn transfer(from: Address, to: Address, amount: u256)
-    uses (mut store: TokenStore, mut log: Log)
+    uses (store: mut TokenStore, log: mut Log)
 {
     assert(from != Address::zero())
     assert(to != Address::zero())
@@ -105,56 +107,56 @@ fn transfer(from: Address, to: Address, amount: u256)
     let from_balance = store.balances.get(from)
     assert(from_balance >= amount)
 
-    store.balances.set(from, from_balance - amount)
-    store.balances.set(to, store.balances.get(to) + amount)
+    store.balances.set(key: from, value: from_balance - amount)
+    store.balances.set(key: to, value: store.balances.get(to) + amount)
 
     log.emit(TransferEvent { from, to, value: amount })
 }
 
 fn mint(to: Address, amount: u256)
-    uses (mut store: TokenStore, mut log: Log)
+    uses (store: mut TokenStore, log: mut Log)
 {
     assert(to != Address::zero())
 
     store.total_supply += amount
-    store.balances.set(to, store.balances.get(to) + amount)
+    store.balances.set(key: to, value: store.balances.get(to) + amount)
 
     log.emit(TransferEvent { from: Address::zero(), to, value: amount })
 }
 
 fn burn(from: Address, amount: u256)
-    uses (mut store: TokenStore, mut log: Log)
+    uses (store: mut TokenStore, log: mut Log)
 {
     assert(from != Address::zero())
 
     let from_balance = store.balances.get(from)
     assert(from_balance >= amount)
 
-    store.balances.set(from, from_balance - amount)
+    store.balances.set(key: from, value: from_balance - amount)
     store.total_supply -= amount
 
     log.emit(TransferEvent { from, to: Address::zero(), value: amount })
 }
 
 fn approve(owner: Address, spender: Address, amount: u256)
-    uses (mut store: TokenStore, mut log: Log)
+    uses (store: mut TokenStore, log: mut Log)
 {
     assert(owner != Address::zero())
     assert(spender != Address::zero())
 
-    store.allowances.set((owner, spender), amount)
+    store.allowances.set(key: (owner, spender), value: amount)
 
     log.emit(ApprovalEvent { owner, spender, value: amount })
 }
 
 // Internal function to spend allowance
 fn spend_allowance(owner: Address, spender: Address, amount: u256)
-    uses (mut store: TokenStore)
+    uses (store: mut TokenStore)
 {
     let current = store.allowances.get((owner, spender))
     // if current != u256::MAX { // TODO: define ::MAX constants
         assert(current >= amount)
-        store.allowances.set((owner, spender), current - amount)
+        store.allowances.set(key: (owner, spender), value: current - amount)
     // }
 }
 
@@ -178,63 +180,64 @@ impl AccessControl {
     }
 
     pub fn grant(mut self, role: u256, to: Address) {
-        self.roles.set((role, to), true)
+        self.roles.set(key: (role, to), value: true)
     }
 
     pub fn revoke(mut self, role: u256, from: Address) {
-        self.roles.set((role, from), false)
+        self.roles.set(key: (role, from), value: false)
     }
 }
 
 // ERC20 standard message types
 msg Erc20 {
-    #[selector = 0x06fdde03]
+    #[selector = sol("name()")]
     Name -> String<32>,
 
-    #[selector = 0x95d89b41]
+    #[selector = sol("symbol()")]
     Symbol -> String<8>,
 
-    #[selector = 0x313ce567]
+    #[selector = sol("decimals()")]
     Decimals -> u8,
 
-    #[selector = 0x18160ddd]
+    #[selector = sol("totalSupply()")]
     TotalSupply -> u256,
 
-    #[selector = 0x70a08231]
+    #[selector = sol("balanceOf(address)")]
     BalanceOf { account: Address } -> u256,
 
-    #[selector = 0xdd62ed3e]
+    #[selector = sol("allowance(address,address)")]
     Allowance { owner: Address, spender: Address } -> u256,
 
-    #[selector = 0xa9059cbb]
+    #[selector = sol("transfer(address,uint256)")]
     Transfer { to: Address, amount: u256 } -> bool,
 
-    #[selector = 0x095ea7b3]
+    #[selector = sol("approve(address,uint256)")]
     Approve { spender: Address, amount: u256 } -> bool,
 
-    #[selector = 0x23b872dd]
+    #[selector = sol("transferFrom(address,address,uint256)")]
     TransferFrom { from: Address, to: Address, amount: u256 } -> bool,
 }
 
 // Extended ERC20 message types (minting, burning, allowance helpers)
 msg Erc20Extended {
-    #[selector = 0x40c10f19]
+    #[selector = sol("mint(address,uint256)")]
     Mint { to: Address, amount: u256 } -> bool,
 
-    #[selector = 0x42966c68]
+    #[selector = sol("burn(uint256)")]
     Burn { amount: u256 } -> bool,
 
-    #[selector = 0x79cc6790]
+    #[selector = sol("burnFrom(address,uint256)")]
     BurnFrom { from: Address, amount: u256 } -> bool,
 
-    #[selector = 0x39509351]
+    #[selector = sol("increaseAllowance(address,uint256)")]
     IncreaseAllowance { spender: Address, added_value: u256 } -> bool,
 
-    #[selector = 0xa457c2d7]
+    #[selector = sol("decreaseAllowance(address,uint256)")]
     DecreaseAllowance { spender: Address, subtracted_value: u256 } -> bool,
 }
 
 // ERC20 events
+#[event]
 struct TransferEvent {
     #[indexed]
     from: Address,
@@ -243,56 +246,11 @@ struct TransferEvent {
     value: u256,
 }
 
+#[event]
 struct ApprovalEvent {
     #[indexed]
     owner: Address,
     #[indexed]
     spender: Address,
     value: u256,
-}
-
-fn assert(_ b: bool) {
-    if !b {
-        core::intrinsic::revert(0, 0)
-    }
-}
-
-use core::abi::{Abi, AbiDecoder, Decode}
-
-pub struct Address { inner: u256 }
-impl Address {
-    pub fn zero() -> Self {
-        Address { inner: 0 }
-    }
-}
-impl<A: Abi> Decode<A> for Address {
-    fn decode<D: AbiDecoder<A>>(mut _ d: D) -> Self {
-        Address { inner: d.read_word() }
-    }
-}
-impl core::ops::Eq for Address {
-    fn eq(self, _ other: Address) -> bool {
-        self.inner == other.inner
-    }
-}
-
-impl StorageKey for Address {
-    fn write_key(ptr: u256, self) -> u256 {
-        core::intrinsic::mstore(ptr, self.inner)
-        32
-    }
-}
-
-pub struct Ctx {}
-impl Ctx {
-    pub fn caller(self) -> Address {
-        Address { inner: core::intrinsic::caller() }
-    }
-}
-
-pub struct Log {}
-impl Log {
-    pub fn emit<T>(self, _ event: T) {
-        todo()
-    }
 }

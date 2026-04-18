@@ -1,28 +1,29 @@
 ---
 source: crates/mir/tests/lowering_snapshots.rs
+assertion_line: 26
 expression: mir_output
 ---
-fn next_idx(v0: u256) -> usize:
+fn next_idx__StorPtr_Counter___3ec10ccd701e934a(v0: u256) -> usize:
   bb0:
-    v1: usize = load stor[v0].0
-    store stor[v0].0 = (v1 + 1)
-    v2: usize = load stor[v0].0
-    ret v2
+    v1: Counter = load stor[v0]
+    v2: usize = checked_add<usize>(v1, 1)
+    store stor[v0] = v2
+    v3: Counter = load stor[v0]
+    ret v3
 
 fn zst_load_index_eval() -> usize:
   bb0:
-    v4: Counter = alloc mem
-    init mem[v4] { .0 = 0 }
-    v3: Counter = v4
-    bind v3
-    v6: usize = next_idx__eff_mem(v3)
-    eval v6
-    v7: usize = load mem[v3].0
-    ret v7
+    v3: Counter = 0
+    v5: Counter = alloc mem
+    store mem[v5] = v3
+    v6: usize = next_idx__Counter_h872958864d1ad471__3a757d51681afe41(v5)
+    v3 = load mem[v5]
+    ret v3
 
-fn next_idx__eff_mem(v0: u256) -> usize:
+fn next_idx__Counter_h872958864d1ad471__3a757d51681afe41(v0: u256) -> usize:
   bb0:
-    v1: usize = load mem[v0].0
-    store mem[v0].0 = (v1 + 1)
-    v2: usize = load mem[v0].0
-    ret v2
+    v1: Counter = load stor[v0]
+    v2: usize = checked_add<usize>(v1, 1)
+    store stor[v0] = v2
+    v3: Counter = load stor[v0]
+    ret v3

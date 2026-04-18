@@ -1,0 +1,104 @@
+/// Low-level EVM/Yul builtins exposed as `extern` functions.
+///
+/// This module is intended to be internal to `std` (it should not be re-exported
+/// to non-std ingots). Higher-level access is provided via `std::evm::effects`.
+extern {
+    // -------------------------------------------------------------------------
+    // Memory
+    // -------------------------------------------------------------------------
+    pub(ingot) fn mload(_: u256) -> u256
+    pub(ingot) fn mstore(addr: u256, value: u256)
+    pub(ingot) fn mstore8(addr: u256, value: u8)
+    pub(ingot) fn msize() -> u256
+
+    // -------------------------------------------------------------------------
+    // Storage
+    // -------------------------------------------------------------------------
+    pub(ingot) fn sload(_: u256) -> u256
+    pub(ingot) fn sstore(slot: u256, value: u256)
+
+    // -------------------------------------------------------------------------
+    // Calldata / returndata
+    // -------------------------------------------------------------------------
+    pub(ingot) fn calldataload(_: u256) -> u256
+    pub(ingot) fn calldatacopy(dest: u256, offset: u256, len: u256)
+    pub(ingot) fn calldatasize() -> u256
+    pub(ingot) fn returndatacopy(dest: u256, offset: u256, len: u256)
+    pub(ingot) fn returndatasize() -> u256
+
+    // -------------------------------------------------------------------------
+    // Code / hashing
+    // -------------------------------------------------------------------------
+    pub(ingot) fn codecopy(dest: u256, offset: u256, len: u256)
+    pub(ingot) fn codesize() -> u256
+    pub(ingot) fn keccak256(offset: u256, len: u256) -> u256
+    pub(ingot) fn addmod(_ a: u256, _ b: u256, m: u256) -> u256
+    pub(ingot) fn mulmod(_ a: u256, _ b: u256, m: u256) -> u256
+
+    // -------------------------------------------------------------------------
+    // Environment
+    // -------------------------------------------------------------------------
+    pub(ingot) fn address() -> u256
+    pub(ingot) fn caller() -> u256
+    pub(ingot) fn callvalue() -> u256
+    pub(ingot) fn origin() -> u256
+    pub(ingot) fn gasprice() -> u256
+    pub(ingot) fn coinbase() -> u256
+    pub(ingot) fn timestamp() -> u256
+    pub(ingot) fn number() -> u256
+    pub(ingot) fn prevrandao() -> u256
+    pub(ingot) fn gaslimit() -> u256
+    pub(ingot) fn chainid() -> u256
+    pub(ingot) fn basefee() -> u256
+    pub(ingot) fn selfbalance() -> u256
+    pub(ingot) fn blockhash(_: u256) -> u256
+    pub(ingot) fn gas() -> u256
+
+    // -------------------------------------------------------------------------
+    // Calls / create
+    // -------------------------------------------------------------------------
+    pub(ingot) fn call(
+        gas: u256,
+        addr: u256,
+        value: u256,
+        args_offset: u256,
+        args_len: u256,
+        ret_offset: u256,
+        ret_len: u256,
+    ) -> u256
+    pub(ingot) fn staticcall(
+        gas: u256,
+        addr: u256,
+        args_offset: u256,
+        args_len: u256,
+        ret_offset: u256,
+        ret_len: u256,
+    ) -> u256
+    pub(ingot) fn delegatecall(
+        gas: u256,
+        addr: u256,
+        args_offset: u256,
+        args_len: u256,
+        ret_offset: u256,
+        ret_len: u256,
+    ) -> u256
+    pub(ingot) fn create(value: u256, offset: u256, len: u256) -> u256
+    pub(ingot) fn create2(value: u256, offset: u256, len: u256, salt: u256) -> u256
+
+    // -------------------------------------------------------------------------
+    // Logs
+    // -------------------------------------------------------------------------
+    pub(ingot) fn log0(offset: u256, len: u256)
+    pub(ingot) fn log1(offset: u256, len: u256, topic0: u256)
+    pub(ingot) fn log2(offset: u256, len: u256, topic0: u256, topic1: u256)
+    pub(ingot) fn log3(offset: u256, len: u256, topic0: u256, topic1: u256, topic2: u256)
+    pub(ingot) fn log4(offset: u256, len: u256, topic0: u256, topic1: u256, topic2: u256, topic3: u256)
+
+    // -------------------------------------------------------------------------
+    // Control flow
+    // -------------------------------------------------------------------------
+    pub(ingot) fn revert(offset: u256, len: u256) -> !
+    pub(ingot) fn return_data(offset: u256, len: u256) -> !
+    pub(ingot) fn selfdestruct(_: u256) -> !
+    pub(ingot) fn stop() -> !
+}

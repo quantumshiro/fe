@@ -1,0 +1,4 @@
+fn bad(xs: [u256; 2]) {
+    #[unroll()]
+    for x in xs {}
+}

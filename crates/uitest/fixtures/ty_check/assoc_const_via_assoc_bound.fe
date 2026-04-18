@@ -1,0 +1,11 @@
+trait HasValue {
+    const X: usize
+}
+
+trait HasAssoc {
+    type Assoc: HasValue
+}
+
+fn use_assoc_bound_const<T: HasAssoc>() -> usize {
+    T::Assoc::X
+}

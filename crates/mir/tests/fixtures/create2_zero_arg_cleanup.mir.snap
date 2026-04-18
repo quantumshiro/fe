@@ -1,0 +1,320 @@
+---
+source: crates/mir/tests/lowering_snapshots.rs
+expression: mir_output
+---
+fn create2_zero_arg_cleanup__Evm_hef0af3106e109414__3af54274b2985741(v0: u256) -> ():
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    v1: Address = create2_stor_arg0_root_stor__Evm_hef0af3106e109414_Counter_h872958864d1ad471__aedc4c977fa26d57(0, 0)
+    v2: bool = u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v1, 0)
+    eval assert(v2)
+    ret
+
+fn __Counter_init() -> ():
+  bb0:
+    v0: u256 = callvalue()
+    br (v0 != 0) bb1 bb2
+  bb1:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+  bb2:
+    v1: u256 = code_region_offset(code_region(__Counter_runtime))
+    v2: u256 = code_region_len(code_region(__Counter_runtime))
+    eval codecopy(0, v1, v2)
+    terminate return_data(0, v2)
+
+#[inline(never)]
+fn __Counter_runtime() -> ():
+  bb0:
+    jmp bb1
+  bb1:
+    terminate evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+
+fn create2_stor_arg0_root_stor__Evm_hef0af3106e109414_Counter_h872958864d1ad471__aedc4c977fa26d57(v0: mut Evm, v1: u256, v2: (), v3: u256) -> Address:
+  ; runtime_abi values=[v1: u256, v3: u256] effects=[]
+  bb0:
+    v4: u256 = __Counter_init_code_len()
+    v5: u256 = __Counter_init_code_offset()
+    v6: Address = 0
+    br (!false) bb4 bb3
+  bb1:
+    v8: u256 = alloc(v4)
+    eval codecopy(v8, v5, v4)
+    v9: Address = evm_hef0af3106e109414_create_h3f3c4b410ec53b45_create2_raw_stor_arg0_root_stor(v1, v8, v4, v3)
+    v6 = v9
+    jmp bb2
+  bb2:
+    v21: bool = u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v6, 0)
+    br v21 bb5 bb6
+  bb3:
+    v10: (u256, u256) = encode_abi_payload______2439715d39cd513()
+    v12: u256 = load mem[v10].1
+    v13: u256 = checked_add<u256>(v4, v12)
+    v11: u256 = alloc(v13)
+    eval codecopy(v11, v5, v4)
+    v14: u256 = checked_add<u256>(v11, v4)
+    v15: u256 = load mem[v10].0
+    v16: u256 = load mem[v10].1
+    eval copy_words(v14, v15, v16)
+    v18: u256 = load mem[v10].1
+    v19: u256 = checked_add<u256>(v4, v18)
+    v17: u256 = v19
+    v20: Address = evm_hef0af3106e109414_create_h3f3c4b410ec53b45_create2_raw_stor_arg0_root_stor(v1, v11, v17, v3)
+    v6 = v20
+    jmp bb2
+  bb4:
+    v7: bool = u256_h3271ca15373d4483_eq_he50383edd273619f_eq(0, 0)
+    br v7 bb1 bb3
+  bb5:
+    v22: u256 = returndatasize()
+    v23: u256 = alloc(v22)
+    eval returndatacopy(v23, 0, v22)
+    terminate revert(v23, v22)
+  bb6:
+    ret v6
+
+fn u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v0: u256, v1: u256) -> bool:
+  bb0:
+    v2: bool = __ne_u256(v0, v1)
+    ret v2
+
+fn assert(v0: bool) -> ():
+  bb0:
+    br (!v0) bb1 bb2
+  bb1:
+    terminate revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1)
+  bb2:
+    ret
+
+fn evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort(v0: Evm) -> !:
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    terminate revert(0, 0)
+
+fn __Counter_init_code_len() -> u256:
+  bb0:
+    v0: u256 = code_region_len(code_region(__Counter_init))
+    ret v0
+
+fn __Counter_init_code_offset() -> u256:
+  bb0:
+    v0: u256 = code_region_offset(code_region(__Counter_init))
+    ret v0
+
+fn evm_hef0af3106e109414_create_h3f3c4b410ec53b45_create2_raw_stor_arg0_root_stor(v0: mut Evm, v1: u256, v2: u256, v3: u256, v4: u256) -> Address:
+  ; runtime_abi values=[v1: u256, v2: u256, v3: u256, v4: u256] effects=[]
+  bb0:
+    v5: u256 = create2(v1, v2, v3, v4)
+    ret v5
+
+fn u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0: u256, v1: u256) -> bool:
+  bb0:
+    v2: bool = __eq_u256(v0, v1)
+    ret v2
+
+fn encode_abi_payload______2439715d39cd513(v0: ()) -> (u256, u256):
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    br (!false) bb1 bb2
+  bb1:
+    v1: u256 = encoded_size______2439715d39cd513()
+    v2: u256 = alloc(v1)
+    eval ___h2439715d39cd513_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95()
+    v3: (u256, u256) = alloc mem
+    init mem[v3] { .0 = v2, .1 = v1 }
+    ret v3
+  bb2:
+    v4: SolEncoder = solencoder_h1b9228b90dad6928_new()
+    v5: u256 = encoded_size______2439715d39cd513()
+    v6: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v4, v5)
+    eval ___h2439715d39cd513_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95()
+    v7: (u256, u256) = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v4)
+    ret v7
+
+fn copy_words(v0: u256, v1: u256, v2: u256) -> ():
+  bb0:
+    v3: u256 = 0
+    jmp bb1
+  bb1:
+    v4: bool = u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v3, v2)
+    br v4 bb2 bb3
+  bb2:
+    v5: u256 = checked_add<u256>(v0, v3)
+    v6: u256 = checked_add<u256>(v1, v3)
+    v7: u256 = mload(v6)
+    eval mstore(v5, v7)
+    v8: u256 = checked_add<u256>(v3, 32)
+    v3 = v8
+    jmp bb1
+  bb3:
+    ret
+
+fn revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd(v0: Panic) -> !:
+  bb0:
+    v1: (u256, u256) = encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1313373041, v0)
+    v2: u256 = load mem[v1].0
+    v3: u256 = v2
+    v4: u256 = load mem[v1].1
+    v5: u256 = v4
+    terminate revert(v3, v5)
+
+fn encoded_size______2439715d39cd513() -> u256:
+  bb0:
+    v0: u256 = abi_root_head_size______2439715d39cd513()
+    ret v0
+
+fn ___h2439715d39cd513_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95(v0: (), v1: u256) -> ():
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    ret
+
+fn solencoder_h1b9228b90dad6928_new() -> SolEncoder:
+  bb0:
+    v0: SolEncoder = alloc mem
+    init mem[v0] { .0 = 0, .1 = 0, .2 = 0, .3 = 0 }
+    ret v0
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v0: mut SolEncoder, v1: u256) -> u256:
+  bb0:
+    v2: u256 = load mem[v0].*.0
+    v3: bool = u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v2, 0)
+    br v3 bb1 bb2
+  bb1:
+    v4: u256 = alloc(v1)
+    store mem[v0].*.0 = v4
+    store mem[v0].*.1 = v4
+    store mem[v0].*.2 = v4
+    store mem[v0].*.3 = (v4 + v1)
+    jmp bb2
+  bb2:
+    v5: u256 = load mem[v0].*.1
+    ret v5
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v0: SolEncoder) -> (u256, u256):
+  bb0:
+    v2: u256 = load mem[v0].*.0
+    v1: u256 = v2
+    v3: u256 = load mem[v0].*.3
+    v4: u256 = checked_sub<u256>(v3, v1)
+    v5: (u256, u256) = alloc mem
+    init mem[v5] { .0 = v1, .1 = v4 }
+    ret v5
+
+fn u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v0: u256, v1: u256) -> bool:
+  bb0:
+    v2: bool = __lt_u256(v0, v1)
+    ret v2
+
+fn encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd(v0: u32, v1: Panic) -> (u256, u256):
+  bb0:
+    v2: u256 = 4
+    v3: u256 = (v0 << 224)
+    br (!false) bb1 bb2
+  bb1:
+    v5: u256 = checked_add<u256>(v2, 32)
+    v4: u256 = v5
+    v6: u256 = alloc(v4)
+    eval mstore(v6, v3)
+    v7: u256 = checked_add<u256>(v6, v2)
+    eval panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr(v1, v7)
+    v8: (u256, u256) = alloc mem
+    init mem[v8] { .0 = v6, .1 = v4 }
+    ret v8
+  bb2:
+    v10: u256 = checked_add<u256>(v2, 32)
+    v9: u256 = v10
+    v11: SolEncoder = solencoder_h1b9228b90dad6928_new()
+    v12: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v11, v9)
+    eval mstore(v12, v3)
+    v13: u256 = checked_add<u256>(v12, v2)
+    store mem[v11].1 = v13
+    v14: u256 = checked_add<u256>(v12, v2)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v11, v14)
+    eval panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd(v1, &mem[v11])
+    v15: (u256, u256) = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v11)
+    ret v15
+
+fn abi_root_head_size______2439715d39cd513() -> u256:
+  bb0:
+    br false bb1 bb2
+  bb1:
+    ret 32
+  bb2:
+    ret 0
+
+fn panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr(v0: Panic, v1: u256) -> ():
+  bb0:
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95(v0, v1)
+    ret
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v0: mut SolEncoder, v1: u256) -> ():
+  bb0:
+    store mem[v0].*.2 = v1
+    ret
+
+fn panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd(v0: Panic, v1: mut SolEncoder) -> ():
+  bb0:
+    eval encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11(v0, v1)
+    ret
+
+fn u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95(v0: u256, v1: u256) -> ():
+  bb0:
+    eval sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word(v1, v0)
+    ret
+
+fn encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11(v0: u256, v1: mut SolEncoder) -> ():
+  bb0:
+    br false bb1 bb2
+  bb1:
+    v2: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base(v1)
+    v3: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail(v1, 32)
+    v4: u256 = checked_sub<u256>(v3, v2)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word(v1, v4)
+    v5: u256 = solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos(v1)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base(v1, v3)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v1, v3)
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v0, &mem[place_root(v1)])
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base(v1, v2)
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v1, v5)
+    ret
+  bb2:
+    eval u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v0, &mem[place_root(v1)])
+    ret
+
+fn sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word(v0: u256, v1: u256) -> ():
+  bb0:
+    eval mstore(v0, v1)
+    ret
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base(v0: SolEncoder) -> u256:
+  bb0:
+    v1: u256 = load mem[v0].*.1
+    ret v1
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail(v0: mut SolEncoder, v1: u256) -> u256:
+  bb0:
+    v2: u256 = alloc(v1)
+    store mem[v0].*.3 = (v2 + v1)
+    ret v2
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word(v0: mut SolEncoder, v1: u256) -> ():
+  bb0:
+    v3: u256 = load mem[v0].*.2
+    v2: u256 = v3
+    eval mstore(v2, v1)
+    store mem[v0].*.2 = (v2 + 32)
+    ret
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos(v0: SolEncoder) -> u256:
+  bb0:
+    v1: u256 = load mem[v0].*.2
+    ret v1
+
+fn solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base(v0: mut SolEncoder, v1: u256) -> ():
+  bb0:
+    store mem[v0].*.1 = v1
+    ret
+
+fn u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v0: u256, v1: mut SolEncoder) -> ():
+  bb0:
+    eval solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word(v1, v0)
+    ret

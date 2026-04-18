@@ -1,0 +1,70 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_nested_enum.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_Inner_0 = enum {
+    #Unit,
+    #Value(i8),
+};
+type @__fe_obj_Outer_1 = enum {
+    #First(@__fe_obj_Inner_0),
+    #Second(i8),
+};
+
+func private %match_nested_enum(v0.objref<@__fe_obj_Outer_1>) -> i8 {
+    block0:
+        jump block5;
+
+    block1:
+        jump block2;
+
+    block2:
+        v3.i8 = phi (0.i8 block1) (v9 block3) (v13 block4);
+        return v3;
+
+    block3:
+        v5.objref<@__fe_obj_Outer_1> = enum.assert_variant_ref v0 #First;
+        v6.objref<@__fe_obj_Inner_0> = enum.proj v5 #First 0.i256;
+        v7.objref<@__fe_obj_Inner_0> = enum.assert_variant_ref v6 #Value;
+        v8.objref<i8> = enum.proj v7 #Value 0.i256;
+        v9.i8 = obj.load v8;
+        jump block2;
+
+    block4:
+        v11.objref<@__fe_obj_Outer_1> = enum.assert_variant_ref v0 #Second;
+        v12.objref<i8> = enum.proj v11 #Second 0.i256;
+        v13.i8 = obj.load v12;
+        jump block2;
+
+    block5:
+        v15.enumtag(@__fe_obj_Outer_1) = enum.get_tag v0;
+        br_table v15 block8 (0.enumtag(@__fe_obj_Outer_1) block6) (1.enumtag(@__fe_obj_Outer_1) block4);
+
+    block6:
+        v19.objref<@__fe_obj_Outer_1> = enum.assert_variant_ref v0 #First;
+        v20.objref<@__fe_obj_Inner_0> = enum.proj v19 #First 0.i256;
+        v21.enumtag(@__fe_obj_Inner_0) = enum.get_tag v20;
+        br_table v21 block7 (0.enumtag(@__fe_obj_Inner_0) block1) (1.enumtag(@__fe_obj_Inner_0) block3);
+
+    block7:
+        evm_invalid;
+
+    block8:
+        evm_invalid;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i8 = call %match_nested_enum undef.objref<@__fe_obj_Outer_1>;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

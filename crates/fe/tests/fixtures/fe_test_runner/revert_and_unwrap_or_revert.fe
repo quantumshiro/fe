@@ -1,0 +1,162 @@
+use core::abi::{Abi, AbiEncoder, AbiSize, Encode}
+
+enum MyError {
+    NotAllowed,
+    OutOfBounds,
+}
+
+impl MyError {
+    fn to_int(self) -> u256 {
+        match self {
+            Self::NotAllowed => 1
+            Self::OutOfBounds => 2
+        }
+    }
+}
+
+impl AbiSize for MyError {
+    const ENCODED_SIZE: u256 = 32
+    const IS_DYNAMIC: bool = false
+    const NEEDS_PARENT_WRAPPER: bool = false
+}
+
+impl<A: Abi> Encode<A> for MyError {
+    const DIRECT_ENCODE: bool = true
+
+    fn encode<E: AbiEncoder<A>>(own self, _ e: mut E) {
+        e.write_word(self.to_int())
+    }
+
+    fn encode_to_ptr(own self, _ ptr: u256) {
+        A::store_word(ptr: ptr, value: self.to_int())
+    }
+}
+
+fn fallible_operation(ok: bool) -> Result<MyError, u256> {
+    if ok {
+        Ok(42)
+    } else {
+        Err(MyError::NotAllowed)
+    }
+}
+
+// --- revert tests ---
+
+#[test(should_revert)]
+fn test_revert_with_error() uses (evm: mut Evm) {
+    revert(MyError::NotAllowed)
+}
+
+#[test(should_revert)]
+fn test_revert_with_u256() uses (evm: mut Evm) {
+    let code: u256 = 99
+    revert(code)
+}
+
+// --- unwrap tests (ABI-encoded error via panic_with_value) ---
+
+#[test]
+fn test_unwrap_ok() uses (evm: mut Evm) {
+    let result = fallible_operation(ok: true)
+    let val = result.unwrap()
+    assert(val == 42)
+}
+
+#[test(should_revert)]
+fn test_unwrap_err() uses (evm: mut Evm) {
+    let result = fallible_operation(ok: false)
+    result.unwrap()
+}
+
+// --- unwrap with primitive error type ---
+
+fn fallible_with_u256_error(ok: bool) -> Result<u256, u256> {
+    if ok {
+        Ok(1)
+    } else {
+        Err(99)
+    }
+}
+
+#[test]
+fn test_unwrap_primitive_ok() uses (evm: mut Evm) {
+    let result = fallible_with_u256_error(ok: true)
+    let val = result.unwrap()
+    assert(val == 1)
+}
+
+#[test(should_revert)]
+fn test_unwrap_primitive_err() uses (evm: mut Evm) {
+    let result = fallible_with_u256_error(ok: false)
+    result.unwrap()
+}
+
+// --- unwrap with nested struct error type ---
+
+struct Inner {
+    code: u256,
+}
+
+impl AbiSize for Inner {
+    const ENCODED_SIZE: u256 = 32
+    const IS_DYNAMIC: bool = false
+    const NEEDS_PARENT_WRAPPER: bool = false
+}
+
+impl<A: Abi> Encode<A> for Inner {
+    const DIRECT_ENCODE: bool = true
+
+    fn encode<E: AbiEncoder<A>>(own self, _ e: mut E) {
+        e.write_word(self.code)
+    }
+
+    fn encode_to_ptr(own self, _ ptr: u256) {
+        A::store_word(ptr: ptr, value: self.code)
+    }
+}
+
+struct Outer {
+    inner: Inner,
+    extra: u256,
+}
+
+impl AbiSize for Outer {
+    const ENCODED_SIZE: u256 = 64
+    const IS_DYNAMIC: bool = false
+    const NEEDS_PARENT_WRAPPER: bool = false
+}
+
+impl<A: Abi> Encode<A> for Outer {
+    const DIRECT_ENCODE: bool = true
+
+    fn encode<E: AbiEncoder<A>>(own self, _ e: mut E) {
+        e.write_word(self.inner.code)
+        e.write_word(self.extra)
+    }
+
+    fn encode_to_ptr(own self, _ ptr: u256) {
+        self.inner.encode_to_ptr(ptr)
+        A::store_word(ptr: ptr + 32, value: self.extra)
+    }
+}
+
+fn fallible_with_struct_error(ok: bool) -> Result<Outer, u256> {
+    if ok {
+        Ok(1)
+    } else {
+        Err(Outer { inner: Inner { code: 7 }, extra: 99 })
+    }
+}
+
+#[test]
+fn test_unwrap_struct_ok() uses (evm: mut Evm) {
+    let result = fallible_with_struct_error(ok: true)
+    let val = result.unwrap()
+    assert(val == 1)
+}
+
+#[test(should_revert)]
+fn test_unwrap_struct_err() uses (evm: mut Evm) {
+    let result = fallible_with_struct_error(ok: false)
+    result.unwrap()
+}

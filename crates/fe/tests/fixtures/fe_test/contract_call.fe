@@ -1,0 +1,16 @@
+/// Simple test to verify the basic test infrastructure works.
+
+use std::evm::assert
+
+#[test]
+fn test_basic_assert() {
+    // Simple test to verify the test infrastructure works
+    let a: u256 = 1
+    let b: u256 = 1
+    let expected: u256 = 2
+    assert(a + b == expected)
+
+    let val: u256 = 42
+    let zero: u256 = 0
+    assert(val != zero)
+}

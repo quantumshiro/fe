@@ -5,8 +5,10 @@ use unwrap_infallible::UnwrapInfallible;
 use crate::{ExpectedKind, SyntaxKind};
 
 use super::{
-    ErrProof, Parser, Recovery, define_scope,
-    expr::{parse_expr, parse_expr_no_struct},
+    ErrProof, Parser, Recovery,
+    attr::parse_attr_list,
+    define_scope,
+    expr::{parse_condition_expr, parse_expr, parse_expr_no_struct},
     expr_atom::BlockExprScope,
     pat::parse_pat,
     token_stream::TokenStream,
@@ -16,22 +18,48 @@ use super::{
 pub fn parse_stmt<S: TokenStream>(parser: &mut Parser<S>) -> Result<(), Recovery<ErrProof>> {
     use SyntaxKind::*;
 
+    // Check for attributes before for statements (for #[unroll])
+    let checkpoint = if parser.current_kind() == Some(Pound) {
+        parse_attr_list(parser)?
+    } else {
+        None
+    };
+
+    // Attributes parsed at statement position are currently only consumed by
+    // `for` statements (#[unroll]/#[unroll(never)]). Report other uses explicitly
+    // instead of silently dropping them.
+    if checkpoint.is_some() && parser.current_kind() != Some(ForKw) {
+        parser.error("statement attributes are only supported on `for` loops");
+    }
+
     match parser.current_kind() {
-        Some(LetKw) => parser.parse(LetStmtScope::default()),
-        Some(ForKw) => parser.parse(ForStmtScope::default()),
-        Some(WhileKw) => parser.parse(WhileStmtScope::default()),
+        Some(LetKw) => parser
+            .parse_cp(LetStmtScope::default(), checkpoint)
+            .map(|_| ()),
+        Some(ForKw) => parser
+            .parse_cp(ForStmtScope::default(), checkpoint)
+            .map(|_| ()),
+        Some(WhileKw) => parser
+            .parse_cp(WhileStmtScope::default(), checkpoint)
+            .map(|_| ()),
         Some(ContinueKw) => {
             parser
-                .parse(ContinueStmtScope::default())
+                .parse_cp(ContinueStmtScope::default(), checkpoint)
                 .unwrap_infallible();
             Ok(())
         }
         Some(BreakKw) => {
-            parser.parse(BreakStmtScope::default()).unwrap_infallible();
+            parser
+                .parse_cp(BreakStmtScope::default(), checkpoint)
+                .unwrap_infallible();
             Ok(())
         }
-        Some(ReturnKw) => parser.parse(ReturnStmtScope::default()),
-        _ => parser.parse(ExprStmtScope::default()),
+        Some(ReturnKw) => parser
+            .parse_cp(ReturnStmtScope::default(), checkpoint)
+            .map(|_| ()),
+        _ => parser
+            .parse_cp(ExprStmtScope::default(), checkpoint)
+            .map(|_| ()),
     }
 }
 
@@ -89,7 +117,7 @@ impl super::Parse for WhileStmtScope {
         parser.bump_expected(SyntaxKind::WhileKw);
 
         parser.set_scope_recovery_stack(&[SyntaxKind::LBrace]);
-        parse_expr_no_struct(parser)?;
+        parse_condition_expr(parser)?;
 
         if parser.find_and_pop(
             SyntaxKind::LBrace,
@@ -131,7 +159,7 @@ impl super::Parse for ReturnStmtScope {
 
         if !matches!(
             parser.current_kind(),
-            None | Some(SyntaxKind::Newline | SyntaxKind::RBrace)
+            None | Some(SyntaxKind::Newline | SyntaxKind::RBrace | SyntaxKind::Comma)
         ) {
             parse_expr(parser)?;
         }

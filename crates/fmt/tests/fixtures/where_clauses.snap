@@ -1,5 +1,6 @@
 ---
 source: crates/fmt/tests/format_snapshots.rs
+assertion_line: 16
 expression: output
 input_file: tests/fixtures/where_clauses.fe
 ---
@@ -17,7 +18,7 @@ struct BoundedStruct<T> where T: Clone { value: T }
 
 // Enum with where clause
 enum BoundedEnum<T> where T: Clone {
-    Some(T),
+    Some(T,),
     None,
 }
 

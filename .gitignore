@@ -6,3 +6,16 @@ tarpaulin-report.html
 /docs/tmp_snippets
 .vscode
 .DS_Store
+**/*.fe-lsp.json
+**/.fe-lsp/
+
+# OpenSpec and AI assistant files
+openspec/
+AGENTS.md
+CLAUDE.md
+.claude/
+.gemini/
+
+# Local debug artifacts
+stackify_*.txt
+trace_*.txt

@@ -1,0 +1,133 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_tuple_binding.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_tuple_0 = {i8, i8};
+type @__fe_obj_tuple_1 = {@__fe_obj_tuple_0, i8};
+
+func private %match_tuple_extract(v0.objref<@__fe_obj_tuple_0>) -> i8 {
+    block0:
+        jump block5;
+
+    block1:
+        v5.objref<i8> = obj.proj v0 1.i256;
+        v6.i8 = obj.load v5;
+        jump block2;
+
+    block2:
+        v7.i8 = phi (v6 block1) (v10 block3) (v16 block8);
+        return v7;
+
+    block3:
+        v9.objref<i8> = obj.proj v0 0.i256;
+        v10.i8 = obj.load v9;
+        jump block2;
+
+    block4:
+        v12.objref<i8> = obj.proj v0 0.i256;
+        v13.i8 = obj.load v12;
+        v14.objref<i8> = obj.proj v0 1.i256;
+        v15.i8 = obj.load v14;
+        (v16.i8, v17.i1) = uaddo v13 v15;
+        br v17 block7 block8;
+
+    block5:
+        v23.objref<i8> = obj.proj v0 0.i256;
+        v24.i8 = obj.load v23;
+        br_table v24 block6 (0.i8 block1);
+
+    block6:
+        v26.objref<i8> = obj.proj v0 1.i256;
+        v27.i8 = obj.load v26;
+        br_table v27 block4 (0.i8 block3);
+
+    block7:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block8:
+        jump block2;
+}
+
+func private %match_nested_extract(v0.objref<@__fe_obj_tuple_1>) -> i8 {
+    block0:
+        jump block5;
+
+    block1:
+        v5.objref<i8> = obj.proj v0 1.i256;
+        v6.i8 = obj.load v5;
+        jump block2;
+
+    block2:
+        v7.i8 = phi (v6 block1) (v15 block10) (v27 block11);
+        return v7;
+
+    block3:
+        v9.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v10.objref<i8> = obj.proj v9 1.i256;
+        v11.i8 = obj.load v10;
+        v12.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v13.objref<i8> = obj.proj v12 0.i256;
+        v14.i8 = obj.load v13;
+        (v15.i8, v16.i1) = uaddo v14 v11;
+        br v16 block9 block10;
+
+    block4:
+        v22.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v23.objref<i8> = obj.proj v22 0.i256;
+        v24.i8 = obj.load v23;
+        v25.objref<i8> = obj.proj v0 1.i256;
+        v26.i8 = obj.load v25;
+        (v27.i8, v28.i1) = uaddo v24 v26;
+        br v28 block9 block11;
+
+    block5:
+        v30.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v31.objref<i8> = obj.proj v30 1.i256;
+        v32.i8 = obj.load v31;
+        br_table v32 block8 (0.i8 block6);
+
+    block6:
+        v34.objref<@__fe_obj_tuple_0> = obj.proj v0 0.i256;
+        v35.objref<i8> = obj.proj v34 0.i256;
+        v36.i8 = obj.load v35;
+        br_table v36 block7 (0.i8 block1);
+
+    block7:
+        v38.objref<i8> = obj.proj v0 1.i256;
+        v39.i8 = obj.load v38;
+        br_table v39 block4 (0.i8 block3);
+
+    block8:
+        v41.objref<i8> = obj.proj v0 1.i256;
+        v42.i8 = obj.load v41;
+        br_table v42 block4 (0.i8 block3);
+
+    block9:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block10:
+        jump block2;
+
+    block11:
+        jump block2;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i8 = call %match_tuple_extract undef.objref<@__fe_obj_tuple_0>;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

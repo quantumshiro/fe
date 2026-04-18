@@ -5,6 +5,7 @@ use super::{
     attr::parse_attr_list,
     define_scope,
     func::FuncScope,
+    item::parse_vis_restriction,
     param::{parse_generic_params_opt, parse_where_clause_opt},
     parse_list,
     token_stream::TokenStream,
@@ -69,7 +70,13 @@ impl super::Parse for RecordFieldDefScope {
         parser.set_newline_as_trivia(false);
         parse_attr_list(parser)?;
 
-        parser.bump_if(SyntaxKind::PubKw);
+        if parser.bump_if(SyntaxKind::PubKw) {
+            // Check for visibility restriction: pub(ingot), pub(super), pub(in path)
+            if parser.current_kind() == Some(SyntaxKind::LParen) {
+                parser.bump(); // (
+                parse_vis_restriction(parser);
+            }
+        }
         // Since the Fe-V2 doesn't support method definition in a struct, we add an
         // ad-hoc check for the method definition in a struct to avoid the confusing
         // error message.
@@ -81,8 +88,9 @@ impl super::Parse for RecordFieldDefScope {
         if parser.current_kind() == Some(SyntaxKind::FnKw) {
             parser.error_msg_on_current_token("function definition in struct is not allowed");
             let checkpoint = parser.enter(super::ErrorScope::new(), None);
-            parser.parse(FuncScope::default())?;
+            let result = parser.parse(FuncScope::default());
             parser.leave(checkpoint);
+            result?;
             return Ok(());
         }
 

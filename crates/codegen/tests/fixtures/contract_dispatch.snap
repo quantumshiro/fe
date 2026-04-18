@@ -9,15 +9,15 @@ object "MinimalDispatcher" {
 
   object "MinimalDispatcher_deployed" {
     code {
-      function dispatch() {
-        let v0 := emit_code()
+      function $dispatch() {
+        let v0 := $emit_code()
         leave
       }
-      function emit_code() -> ret {
+      function $emit_code() -> ret {
         ret := 1
         leave
       }
-      dispatch()
+      $dispatch()
       return(0, 0)
     }
   }

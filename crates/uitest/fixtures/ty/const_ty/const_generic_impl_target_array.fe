@@ -1,0 +1,29 @@
+// Test for const generic in impl target array type.
+// Validates that const generics can be used in array types within impl targets.
+
+pub trait Seq {
+    type Item
+    fn len(self) -> usize
+    fn get(ref self, _: usize) -> ref Self::Item
+}
+
+// This works because the impl scope is entered before lowering the target type,
+// allowing const generic params like `N` to be resolved in `[T; N]`.
+impl<T, const N: usize> Seq for [T; N] {
+    type Item = T
+    fn len(self) -> usize {
+        N
+    }
+    fn get(ref self, _ i: usize) -> ref T {
+        ref self[i]
+    }
+}
+
+fn use_seq() {
+    let arr: [u256; 2] = [1, 2]
+    let borrowed: ref [u256; 2] = ref arr
+    let first: ref u256 = borrowed.get(0)
+    let second: ref u256 = borrowed.get(1)
+    first
+    second
+}

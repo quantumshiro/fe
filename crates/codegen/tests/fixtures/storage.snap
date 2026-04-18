@@ -5,57 +5,95 @@ input_file: tests/fixtures/storage.fe
 ---
 object "Coin" {
   code {
-    function init() {
+    function $init__Evm_hef0af3106e109414__3af54274b2985741() {
       let v0 := datasize("Coin_deployed")
       let v1 := dataoffset("Coin_deployed")
       codecopy(0, v1, v0)
-      leave
+      return(0, v0)
     }
-    init()
+    $init__Evm_hef0af3106e109414__3af54274b2985741()
   }
 
   object "Coin_deployed" {
     code {
-      function abi_encode(value) {
+      function $abi_encode__Evm_hef0af3106e109414__3af54274b2985741($value) {
         let v0 := 0
-        mstore(v0, value)
+        mstore(v0, $value)
         return(v0, 32)
       }
-      function balance_of_raw(user, store) -> ret {
+      function $balance_of_raw__StorPtr_CoinStore___ba1c0d0726e89ba2($user, $store) -> ret {
         let v0 := 0
-        switch user
+        switch $user
           case 0 {
-            let v1 := sload(store)
+            let v1 := sload($store)
             v0 := v1
           }
           default {
-            let v2 := sload(add(store, 1))
+            let v2 := sload(add($store, 1))
             v0 := v2
           }
         ret := v0
         leave
       }
-      function credit_alice(amount, store, supply) -> ret {
-        let v0 := sload(store)
-        sstore(store, add(v0, amount))
-        let v1 := sload(supply)
-        sstore(supply, add(v1, amount))
-        let v2 := sload(store)
-        ret := v2
+      function $checked_add_u256($a, $b) -> ret {
+        let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
         leave
       }
-      function credit_bob(amount, store, supply) -> ret {
-        let v0 := sload(add(store, 1))
-        sstore(add(store, 1), add(v0, amount))
-        let v1 := sload(supply)
-        sstore(supply, add(v1, amount))
-        let v2 := sload(add(store, 1))
-        ret := v2
+      function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+        let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+        let v4 := v3
+        if v4 {
+          revert(0, 0)
+        }
+        ret := v0
         leave
       }
-      function runtime() {
-        let v0 := 0
-        let v1 := 2
+      function $checked_sub_u256($a, $b) -> ret {
+        let v0 := $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+        let v3 := v2
+        if v3 {
+          revert(0, 0)
+        }
+        let v4 := $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($a, $b)
+        ret := v4
+        leave
+      }
+      function $credit_alice__StorPtr_CoinStore__StorPtr_TotalSupply___c407f5b00af9ba78($amount, $store, $supply) -> ret {
+        let v0 := sload($store)
+        let v1 := $checked_add_u256(v0, $amount)
+        sstore($store, v1)
+        let v2 := sload($supply)
+        let v3 := $checked_add_u256(v2, $amount)
+        sstore($supply, v3)
+        let v4 := sload($store)
+        ret := v4
+        leave
+      }
+      function $credit_bob__StorPtr_CoinStore__StorPtr_TotalSupply___c407f5b00af9ba78($amount, $store, $supply) -> ret {
+        let v0 := sload(add($store, 1))
+        let v1 := $checked_add_u256(v0, $amount)
+        sstore(add($store, 1), v1)
+        let v2 := sload($supply)
+        let v3 := $checked_add_u256(v2, $amount)
+        sstore($supply, v3)
+        let v4 := sload(add($store, 1))
+        ret := v4
+        leave
+      }
+      function $runtime__Evm_hef0af3106e109414__3af54274b2985741() {
+        let v0 := $stor_ptr_stor__Evm_hef0af3106e109414_CoinStore_hd26a92ca525e0e79__b6feb5585dda62f1(0)
+        let v1 := $stor_ptr_stor__Evm_hef0af3106e109414_TotalSupply_hddb16bb19b5b088e__f5679b0709de743a(2)
         let v2 := v0
         let v3 := v1
         let v4 := calldataload(0)
@@ -67,22 +105,20 @@ object "Coin" {
             let v8 := 0
             switch v6
               case 0 {
-                let v9 := credit_alice(v7, v2, v3)
+                let v9 := $credit_alice__StorPtr_CoinStore__StorPtr_TotalSupply___c407f5b00af9ba78(v7, v2, v3)
                 v8 := v9
               }
               default {
-                let v10 := credit_bob(v7, v2, v3)
+                let v10 := $credit_bob__StorPtr_CoinStore__StorPtr_TotalSupply___c407f5b00af9ba78(v7, v2, v3)
                 v8 := v10
               }
             let v11 := v8
-            abi_encode(v11)
-            return(0, 0)
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v11)
           }
           case 1818602213 {
             let v12 := calldataload(4)
-            let v13 := balance_of_raw(v12, v2)
-            abi_encode(v13)
-            return(0, 0)
+            let v13 := $balance_of_raw__StorPtr_CoinStore___ba1c0d0726e89ba2(v12, v2)
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v13)
           }
           case 217554442 {
             let v14 := calldataload(4)
@@ -90,92 +126,89 @@ object "Coin" {
             let v16 := 0
             switch v14
               case 0 {
-                let v17 := transfer_from_alice(v15, v2)
+                let v17 := $transfer_from_alice__StorPtr_CoinStore___ba1c0d0726e89ba2(v15, v2)
                 v16 := v17
               }
               default {
-                let v18 := transfer_from_bob(v15, v2)
+                let v18 := $transfer_from_bob__StorPtr_CoinStore___ba1c0d0726e89ba2(v15, v2)
                 v16 := v18
               }
             let v19 := v16
-            let v20 := transfer_result_code(v19)
-            abi_encode(v20)
-            return(0, 0)
+            let v20 := $transfer_result_code(v19)
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v20)
           }
           case 960555502 {
-            let v21 := total_supply(v3)
-            abi_encode(v21)
-            return(0, 0)
+            let v21 := $total_supply__StorPtr_TotalSupply___2e654c25952f42f9(v3)
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v21)
           }
           default {
             return(0, 0)
           }
       }
-      function total_supply(supply) -> ret {
-        let v0 := sload(supply)
+      function $stor_ptr_stor__Evm_hef0af3106e109414_CoinStore_hd26a92ca525e0e79__b6feb5585dda62f1($slot) -> ret {
+        let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__CoinStore_hd26a92ca525e0e79__a9c0a742c4f0cede($slot)
         ret := v0
         leave
       }
-      function transfer_from_alice(amount, store) -> ret {
-        let v0 := sload(store)
-        let v1 := lt(v0, amount)
-        if v1 {
-          let v2 := mload(0x40)
-          if iszero(v2) {
-            v2 := 0x80
-          }
-          mstore(0x40, add(v2, 32))
-          mstore(v2, 1)
-          ret := v2
+      function $stor_ptr_stor__Evm_hef0af3106e109414_TotalSupply_hddb16bb19b5b088e__f5679b0709de743a($slot) -> ret {
+        let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__TotalSupply_hddb16bb19b5b088e__4092604729aa99eb($slot)
+        ret := v0
+        leave
+      }
+      function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__CoinStore_hd26a92ca525e0e79__a9c0a742c4f0cede($raw) -> ret {
+        ret := $raw
+        leave
+      }
+      function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__TotalSupply_hddb16bb19b5b088e__4092604729aa99eb($raw) -> ret {
+        ret := $raw
+        leave
+      }
+      function $total_supply__StorPtr_TotalSupply___2e654c25952f42f9($supply) -> ret {
+        let v0 := sload($supply)
+        ret := v0
+        leave
+      }
+      function $transfer_from_alice__StorPtr_CoinStore___ba1c0d0726e89ba2($amount, $store) -> ret {
+        let v0 := sload($store)
+        let v1 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt_stor(v0, $amount)
+        let v2 := v1
+        if v2 {
+          ret := 1
           leave
         }
-        if iszero(v1) {
-          let v3 := sload(store)
-          sstore(store, sub(v3, amount))
-          let v4 := sload(add(store, 1))
-          sstore(add(store, 1), add(v4, amount))
-          let v5 := mload(0x40)
-          if iszero(v5) {
-            v5 := 0x80
-          }
-          mstore(0x40, add(v5, 32))
-          mstore(v5, 0)
-          ret := v5
+        if iszero(v2) {
+          let v3 := sload($store)
+          let v4 := $checked_sub_u256(v3, $amount)
+          sstore($store, v4)
+          let v5 := sload(add($store, 1))
+          let v6 := $checked_add_u256(v5, $amount)
+          sstore(add($store, 1), v6)
+          ret := 0
           leave
         }
       }
-      function transfer_from_bob(amount, store) -> ret {
-        let v0 := sload(add(store, 1))
-        let v1 := lt(v0, amount)
-        if v1 {
-          let v2 := mload(0x40)
-          if iszero(v2) {
-            v2 := 0x80
-          }
-          mstore(0x40, add(v2, 32))
-          mstore(v2, 1)
-          ret := v2
+      function $transfer_from_bob__StorPtr_CoinStore___ba1c0d0726e89ba2($amount, $store) -> ret {
+        let v0 := sload(add($store, 1))
+        let v1 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt_stor(v0, $amount)
+        let v2 := v1
+        if v2 {
+          ret := 1
           leave
         }
-        if iszero(v1) {
-          let v3 := sload(add(store, 1))
-          sstore(add(store, 1), sub(v3, amount))
-          let v4 := sload(store)
-          sstore(store, add(v4, amount))
-          let v5 := mload(0x40)
-          if iszero(v5) {
-            v5 := 0x80
-          }
-          mstore(0x40, add(v5, 32))
-          mstore(v5, 0)
-          ret := v5
+        if iszero(v2) {
+          let v3 := sload(add($store, 1))
+          let v4 := $checked_sub_u256(v3, $amount)
+          sstore(add($store, 1), v4)
+          let v5 := sload($store)
+          let v6 := $checked_add_u256(v5, $amount)
+          sstore($store, v6)
+          ret := 0
           leave
         }
       }
-      function transfer_result_code(res) -> ret {
+      function $transfer_result_code($res) -> ret {
         let v0 := 0
-        let v1 := mload(res)
-        switch v1
+        switch $res
           case 0 {
             v0 := 0
           }
@@ -187,7 +220,36 @@ object "Coin" {
         ret := v0
         leave
       }
-      runtime()
+      function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+        ret := $self
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+        let v0 := gt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+        let v0 := lt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt_stor($self, $other) -> ret {
+        let v0 := lt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+        let v0 := add($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+        let v0 := sub($self, $other)
+        ret := v0
+        leave
+      }
+      $runtime__Evm_hef0af3106e109414__3af54274b2985741()
       return(0, 0)
     }
   }

@@ -5,134 +5,225 @@ input_file: tests/fixtures/storage_map_contract.fe
 ---
 object "BalanceMap" {
   code {
-    function init() {
+    function $init__Evm_hef0af3106e109414__3af54274b2985741() {
       let v0 := datasize("BalanceMap_deployed")
       let v1 := dataoffset("BalanceMap_deployed")
       codecopy(0, v1, v0)
       return(0, v0)
     }
-    init()
+    $init__Evm_hef0af3106e109414__3af54274b2985741()
   }
 
   object "BalanceMap_deployed" {
     code {
-      function abi_encode(value) {
+      function $abi_encode__Evm_hef0af3106e109414__3af54274b2985741($value) {
         let v0 := 0
-        mstore(v0, value)
+        mstore(v0, $value)
         return(v0, 32)
       }
-      function get_allowance(addr, allowances) -> ret {
-        let v0 := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(allowances, addr)
+      function $checked_add_u256($a, $b) -> ret {
+        let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
         ret := v0
         leave
       }
-      function get_balance(addr, balances) -> ret {
-        let v0 := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(balances, addr)
+      function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+        let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+        let v4 := v3
+        if v4 {
+          revert(0, 0)
+        }
         ret := v0
         leave
       }
-      function runtime() {
-        let v0 := 0
-        let v1 := 1
-        let v2 := calldataload(0)
-        let v3 := shr(224, v2)
-        switch v3
+      function $checked_sub_u256($a, $b) -> ret {
+        let v0 := $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+        let v3 := v2
+        if v3 {
+          revert(0, 0)
+        }
+        let v4 := $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($a, $b)
+        ret := v4
+        leave
+      }
+      function $get_allowance__1_StorageMap_u256__u256__1___214b2c3f3c41c690($addr) -> ret {
+        let v0 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_1__3c02c0f2b86be0bb($addr)
+        ret := v0
+        leave
+      }
+      function $get_balance__0_StorageMap_u256__u256__0___2ec0e7c12ea7de91($addr) -> ret {
+        let v0 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_0__6a346ad3c930d971($addr)
+        ret := v0
+        leave
+      }
+      function $runtime__Evm_hef0af3106e109414__3af54274b2985741() {
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_new__u256_u256_0__6a346ad3c930d971()
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_new__u256_u256_1__3c02c0f2b86be0bb()
+        let v0 := calldataload(0)
+        let v1 := shr(224, v0)
+        switch v1
           case 2630350600 {
-            let v4 := calldataload(4)
-            let v5 := v0
-            let v6 := get_balance(v4, v5)
-            let v7 := v6
-            abi_encode(v7)
+            let v2 := calldataload(4)
+            let v3 := $get_balance__0_StorageMap_u256__u256__0___2ec0e7c12ea7de91(v2)
+            let v4 := v3
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v4)
           }
           case 1246470123 {
-            let v8 := calldataload(4)
-            let v9 := calldataload(36)
-            let v10 := v0
-            set_balance(v8, v9, v10)
-            abi_encode(0)
+            let v5 := calldataload(4)
+            let v6 := calldataload(36)
+            $set_balance__0_StorageMap_u256__u256__0___2ec0e7c12ea7de91(v5, v6)
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(0)
           }
           case 2430412327 {
-            let v11 := calldataload(4)
-            let v12 := calldataload(36)
-            let v13 := calldataload(68)
-            let v14 := v0
-            let v15 := transfer(v11, v12, v13, v14)
-            let v16 := v15
-            abi_encode(v16)
+            let v7 := calldataload(4)
+            let v8 := calldataload(36)
+            let v9 := calldataload(68)
+            let v10 := $transfer__0_StorageMap_u256__u256__0___2ec0e7c12ea7de91(v7, v8, v9)
+            let v11 := v10
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v11)
           }
           case 3378517838 {
-            let v17 := calldataload(4)
-            let v18 := v1
-            let v19 := get_allowance(v17, v18)
-            let v20 := v19
-            abi_encode(v20)
+            let v12 := calldataload(4)
+            let v13 := $get_allowance__1_StorageMap_u256__u256__1___214b2c3f3c41c690(v12)
+            let v14 := v13
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v14)
           }
           case 197806145 {
-            let v21 := calldataload(4)
-            let v22 := calldataload(36)
-            let v23 := v1
-            set_allowance(v21, v22, v23)
-            abi_encode(0)
+            let v15 := calldataload(4)
+            let v16 := calldataload(36)
+            $set_allowance__1_StorageMap_u256__u256__1___214b2c3f3c41c690(v15, v16)
+            $abi_encode__Evm_hef0af3106e109414__3af54274b2985741(0)
           }
           default {
             return(0, 0)
           }
+      }
+      function $set_allowance__1_StorageMap_u256__u256__1___214b2c3f3c41c690($addr, $value) {
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_1__3c02c0f2b86be0bb($addr, $value)
         leave
       }
-      function set_allowance(addr, value, allowances) {
-        storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(allowances, addr, value)
+      function $set_balance__0_StorageMap_u256__u256__0___2ec0e7c12ea7de91($addr, $value) {
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_0__6a346ad3c930d971($addr, $value)
         leave
       }
-      function set_balance(addr, value, balances) {
-        storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(balances, addr, value)
-        leave
-      }
-      function storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(self, key) -> ret {
-        let v0 := storagemap_k__v__storage_slot_stor__u256_u256__cc308d1bea3fb6e4(self, key)
+      function $storagemap_get_word_with_salt__u256__3271ca15373d4483($key, $salt) -> ret {
+        let v0 := $storagemap_storage_slot_with_salt__u256__3271ca15373d4483($key, $salt)
         let v1 := sload(v0)
-        let v2 := u256_loadablescalar_from_word(v1)
-        ret := v2
+        ret := v1
         leave
       }
-      function storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(self, key, value) {
-        let v0 := storagemap_k__v__storage_slot_stor__u256_u256__cc308d1bea3fb6e4(self, key)
-        let v1 := u256_loadablescalar_from_word(value)
-        sstore(v0, v1)
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_0__6a346ad3c930d971($key) -> ret {
+        let v0 := $storagemap_get_word_with_salt__u256__3271ca15373d4483($key, 0)
+        let v1 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v0)
+        ret := v1
         leave
       }
-      function storagemap_k__v__storage_slot_stor__u256_u256__cc308d1bea3fb6e4(self, key) -> ret {
-        let v0 := u256_storagekey_write_key(0, key)
-        let v1 := self
-        mstore(v0, v1)
-        let v2 := keccak256(0, add(v0, 32))
-        ret := v2
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_1__3c02c0f2b86be0bb($key) -> ret {
+        let v0 := $storagemap_get_word_with_salt__u256__3271ca15373d4483($key, 1)
+        let v1 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v0)
+        ret := v1
         leave
       }
-      function transfer(from, to, amount, balances) -> ret {
-        let v0 := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(balances, from)
-        let v1 := lt(v0, amount)
-        if v1 {
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_new__u256_u256_0__6a346ad3c930d971() {
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_new__u256_u256_1__3c02c0f2b86be0bb() {
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_0__6a346ad3c930d971($key, $value) {
+        let v0 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($value)
+        $storagemap_set_word_with_salt__u256__3271ca15373d4483($key, 0, v0)
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_1__3c02c0f2b86be0bb($key, $value) {
+        let v0 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($value)
+        $storagemap_set_word_with_salt__u256__3271ca15373d4483($key, 1, v0)
+        leave
+      }
+      function $storagemap_set_word_with_salt__u256__3271ca15373d4483($key, $salt, $word) {
+        let v0 := $storagemap_storage_slot_with_salt__u256__3271ca15373d4483($key, $salt)
+        sstore(v0, $word)
+        leave
+      }
+      function $storagemap_storage_slot_with_salt__u256__3271ca15373d4483($key, $salt) -> ret {
+        let v0 := mload(64)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(64, add(v0, 0))
+        let v1 := $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key(v0, $key)
+        let v2 := $checked_add_u256(v0, v1)
+        mstore(v2, $salt)
+        let v3 := $checked_add_u256(v1, 32)
+        let v4 := keccak256(v0, v3)
+        ret := v4
+        leave
+      }
+      function $transfer__0_StorageMap_u256__u256__0___2ec0e7c12ea7de91($from, $to, $amount) -> ret {
+        let v0 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_0__6a346ad3c930d971($from)
+        let v1 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v0, $amount)
+        let v2 := v1
+        if v2 {
           ret := 1
           leave
         }
-        if iszero(v1) {
-          let v2 := storagemap_k__v__get_stor__u256_u256__cc308d1bea3fb6e4(balances, to)
-          storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(balances, from, sub(v0, amount))
-          storagemap_k__v__set_stor__u256_u256__cc308d1bea3fb6e4(balances, to, add(v2, amount))
+        if iszero(v2) {
+          let v3 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__u256_u256_0__6a346ad3c930d971($to)
+          let v4 := $checked_sub_u256(v0, $amount)
+          $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_0__6a346ad3c930d971($from, v4)
+          let v5 := $checked_add_u256(v3, $amount)
+          $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__u256_u256_0__6a346ad3c930d971($to, v5)
           ret := 0
           leave
         }
       }
-      function u256_loadablescalar_from_word(word) -> ret {
-        ret := word
+      function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+        ret := $self
         leave
       }
-      function u256_storagekey_write_key(ptr, self) -> ret {
-        mstore(ptr, self)
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+        let v0 := gt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+        let v0 := lt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key($ptr, $self) -> ret {
+        mstore($ptr, $self)
         ret := 32
         leave
       }
-      runtime()
+      function $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word($word) -> ret {
+        ret := $word
+        leave
+      }
+      function $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($self) -> ret {
+        ret := $self
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+        let v0 := add($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+        let v0 := sub($self, $other)
+        ret := v0
+        leave
+      }
+      $runtime__Evm_hef0af3106e109414__3af54274b2985741()
       return(0, 0)
     }
   }

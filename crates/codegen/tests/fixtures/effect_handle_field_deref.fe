@@ -1,0 +1,74 @@
+use std::evm::{Evm, StorPtr}
+
+msg Msg {
+    #[selector = 1]
+    SeedSlot { slot: u256, value: u256 } -> u256,
+    #[selector = 2]
+    ReadViaHolder { slot: u256 } -> u256,
+    #[selector = 3]
+    BumpMover { by: u256 } -> u256,
+}
+
+struct Cell {
+    value: u256,
+}
+
+struct Holder {
+    ptr: StorPtr<Cell>,
+    tag: u256,
+}
+
+struct CellMover {
+    cell: mut Cell,
+}
+
+fn extract_ptr(holder: own Holder) -> StorPtr<Cell> {
+    holder.ptr
+}
+
+fn read_cell() -> u256 uses (cell: Cell) {
+    cell.value
+}
+
+fn write_cell(value: u256) -> u256 uses (cell: mut Cell) {
+    cell.value = value
+    cell.value
+}
+
+impl CellMover {
+    fn bump(mut self, by: u256) -> u256 {
+        self.cell.value += by
+        self.cell.value
+    }
+}
+
+pub contract EffectHandleFieldDeref {
+    mut live: Cell,
+
+    init() uses (mut live) {
+        live.value = 0
+    }
+
+    recv Msg {
+        SeedSlot { slot, value } -> u256 uses (evm: mut Evm) {
+            let ptr: StorPtr<Cell> = evm.stor_ptr(slot)
+            with (ptr) {
+                write_cell(value)
+            }
+        }
+
+        ReadViaHolder { slot } -> u256 uses (evm: mut Evm) {
+            let holder = Holder { ptr: evm.stor_ptr(slot), tag: 1 }
+            let ptr = extract_ptr(holder)
+            with (ptr) {
+                read_cell()
+            }
+        }
+
+        BumpMover { by } -> u256 uses (mut live) {
+            let cell = mut live
+            let mut mover = CellMover { cell }
+            mover.bump(by)
+        }
+    }
+}

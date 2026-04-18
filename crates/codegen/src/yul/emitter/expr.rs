@@ -1,6 +1,6 @@
 //! Expression and value lowering helpers shared across the Yul emitter.
 
-use hir::analysis::ty::simplified_pattern::ConstructorKind;
+use common::ingot::IngotKind;
 use hir::analysis::ty::ty_def::{PrimTy, TyBase, TyData, TyId};
 use hir::hir_def::{
     CallableDef,
@@ -9,22 +9,488 @@ use hir::hir_def::{
 use hir::projection::{IndexSource, Projection};
 use hir::span::LazySpan;
 use mir::{
-    CallOrigin, ValueId, ValueOrigin,
-    ir::{FieldPtrOrigin, Place, SyntheticValue},
+    CallOrigin, LocalId, ValueId, ValueOrigin,
+    ir::{FieldPtrOrigin, MirFunctionOrigin, Place, SyntheticValue},
     layout,
+    repr::{PlaceState, ResolvedPlace, ResolvedPlaceSegment},
 };
+use num_bigint::BigUint;
 
 use crate::yul::state::BlockState;
 
 use super::{
     YulError,
     function::FunctionEmitter,
-    util::{function_name, try_collapse_cast_shim},
+    util::{function_name, is_std_evm_ops, prefix_yul_name},
 };
 
+#[derive(Clone, Copy, Debug)]
+enum IntPrim {
+    Unsigned {
+        mask: Option<&'static str>,
+    },
+    Signed {
+        mask: Option<&'static str>,
+        signextend_byte: Option<u8>,
+    },
+}
+
+fn int_prim_from_suffix(suffix: &str) -> Option<IntPrim> {
+    Some(match suffix {
+        "u8" => IntPrim::Unsigned { mask: Some("0xff") },
+        "u16" => IntPrim::Unsigned {
+            mask: Some("0xffff"),
+        },
+        "u32" => IntPrim::Unsigned {
+            mask: Some("0xffffffff"),
+        },
+        "u64" => IntPrim::Unsigned {
+            mask: Some("0xffffffffffffffff"),
+        },
+        "u128" => IntPrim::Unsigned {
+            mask: Some("0xffffffffffffffffffffffffffffffff"),
+        },
+        "u256" | "usize" => IntPrim::Unsigned { mask: None },
+        "i8" => IntPrim::Signed {
+            mask: Some("0xff"),
+            signextend_byte: Some(0),
+        },
+        "i16" => IntPrim::Signed {
+            mask: Some("0xffff"),
+            signextend_byte: Some(1),
+        },
+        "i32" => IntPrim::Signed {
+            mask: Some("0xffffffff"),
+            signextend_byte: Some(3),
+        },
+        "i64" => IntPrim::Signed {
+            mask: Some("0xffffffffffffffff"),
+            signextend_byte: Some(7),
+        },
+        "i128" => IntPrim::Signed {
+            mask: Some("0xffffffffffffffffffffffffffffffff"),
+            signextend_byte: Some(15),
+        },
+        "i256" | "isize" => IntPrim::Signed {
+            mask: None,
+            signextend_byte: None,
+        },
+        _ => return None,
+    })
+}
+
+fn int_prim_from_prim(prim: PrimTy) -> Option<IntPrim> {
+    int_prim_from_suffix(match prim {
+        PrimTy::U8 => "u8",
+        PrimTy::U16 => "u16",
+        PrimTy::U32 => "u32",
+        PrimTy::U64 => "u64",
+        PrimTy::U128 => "u128",
+        PrimTy::U256 => "u256",
+        PrimTy::Usize => "usize",
+        PrimTy::I8 => "i8",
+        PrimTy::I16 => "i16",
+        PrimTy::I32 => "i32",
+        PrimTy::I64 => "i64",
+        PrimTy::I128 => "i128",
+        PrimTy::I256 => "i256",
+        PrimTy::Isize => "isize",
+        _ => return None,
+    })
+}
+
+fn int_prim_from_ty(db: &driver::DriverDataBase, ty: TyId<'_>) -> Option<IntPrim> {
+    let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(db).data(db) else {
+        return None;
+    };
+    int_prim_from_prim(*prim)
+}
+
+fn trunc_bits(value: &str, prim: IntPrim) -> String {
+    match prim {
+        IntPrim::Unsigned { mask: Some(mask) }
+        | IntPrim::Signed {
+            mask: Some(mask), ..
+        } => {
+            format!("and({value}, {mask})")
+        }
+        IntPrim::Unsigned { mask: None } | IntPrim::Signed { mask: None, .. } => value.to_string(),
+    }
+}
+
+fn canonical_unsigned(value: &str, mask: Option<&'static str>) -> String {
+    match mask {
+        Some(mask) => format!("and({value}, {mask})"),
+        None => value.to_string(),
+    }
+}
+
+fn canonical_signed(
+    value: &str,
+    mask: Option<&'static str>,
+    signextend_byte: Option<u8>,
+) -> String {
+    match (mask, signextend_byte) {
+        (Some(mask), Some(byte)) => format!("signextend({byte}, and({value}, {mask}))"),
+        _ => value.to_string(),
+    }
+}
+
+fn lower_primitive_int_unary(op: UnOp, arg: &str, prim: IntPrim) -> Option<String> {
+    let (mask, signextend_byte, signed) = match prim {
+        IntPrim::Unsigned { mask } => (mask, None, false),
+        IntPrim::Signed {
+            mask,
+            signextend_byte,
+        } => (mask, signextend_byte, true),
+    };
+
+    let arg_unsigned = |value: &str| canonical_unsigned(value, mask);
+    let arg_signed = |value: &str| canonical_signed(value, mask, signextend_byte);
+    let result_unsigned = |value: String| canonical_unsigned(&value, mask);
+    let result_signed = |value: String| canonical_signed(&value, mask, signextend_byte);
+
+    match op {
+        UnOp::Minus if signed => Some(result_signed(format!("sub(0, {})", arg_signed(arg)))),
+        UnOp::Plus => Some(if signed {
+            result_signed(arg_signed(arg))
+        } else {
+            result_unsigned(arg_unsigned(arg))
+        }),
+        UnOp::BitNot => {
+            let arg_bits = trunc_bits(arg, prim);
+            Some(if signed {
+                result_signed(format!("not({arg_bits})"))
+            } else {
+                result_unsigned(format!("not({arg_bits})"))
+            })
+        }
+        _ => None,
+    }
+}
+
+fn lower_primitive_int_binary(op: BinOp, lhs: &str, rhs: &str, prim: IntPrim) -> Option<String> {
+    let (mask, signextend_byte, signed) = match prim {
+        IntPrim::Unsigned { mask } => (mask, None, false),
+        IntPrim::Signed {
+            mask,
+            signextend_byte,
+        } => (mask, signextend_byte, true),
+    };
+
+    let arg_unsigned = |value: &str| canonical_unsigned(value, mask);
+    let arg_signed = |value: &str| canonical_signed(value, mask, signextend_byte);
+    let result_unsigned = |value: String| canonical_unsigned(&value, mask);
+    let result_signed = |value: String| canonical_signed(&value, mask, signextend_byte);
+
+    match op {
+        BinOp::Arith(op) => match op {
+            ArithBinOp::Add => Some(if signed {
+                result_signed(format!("add({}, {})", arg_signed(lhs), arg_signed(rhs)))
+            } else {
+                result_unsigned(format!("add({}, {})", arg_unsigned(lhs), arg_unsigned(rhs)))
+            }),
+            ArithBinOp::Sub => Some(if signed {
+                result_signed(format!("sub({}, {})", arg_signed(lhs), arg_signed(rhs)))
+            } else {
+                result_unsigned(format!("sub({}, {})", arg_unsigned(lhs), arg_unsigned(rhs)))
+            }),
+            ArithBinOp::Mul => Some(if signed {
+                result_signed(format!("mul({}, {})", arg_signed(lhs), arg_signed(rhs)))
+            } else {
+                result_unsigned(format!("mul({}, {})", arg_unsigned(lhs), arg_unsigned(rhs)))
+            }),
+            ArithBinOp::Div => Some(if signed {
+                result_signed(format!("sdiv({}, {})", arg_signed(lhs), arg_signed(rhs)))
+            } else {
+                result_unsigned(format!("div({}, {})", arg_unsigned(lhs), arg_unsigned(rhs)))
+            }),
+            ArithBinOp::Rem => Some(if signed {
+                result_signed(format!("smod({}, {})", arg_signed(lhs), arg_signed(rhs)))
+            } else {
+                result_unsigned(format!("mod({}, {})", arg_unsigned(lhs), arg_unsigned(rhs)))
+            }),
+            ArithBinOp::Pow => {
+                let base_bits = trunc_bits(lhs, prim);
+                let exp_bits = trunc_bits(rhs, prim);
+                Some(if signed {
+                    result_signed(format!("exp({base_bits}, {exp_bits})"))
+                } else {
+                    result_unsigned(format!("exp({base_bits}, {exp_bits})"))
+                })
+            }
+            ArithBinOp::LShift => {
+                let value_bits = trunc_bits(lhs, prim);
+                let shift_bits = trunc_bits(rhs, prim);
+                Some(if signed {
+                    result_signed(format!("shl({shift_bits}, {value_bits})"))
+                } else {
+                    result_unsigned(format!("shl({shift_bits}, {value_bits})"))
+                })
+            }
+            ArithBinOp::RShift => {
+                let shift_bits = trunc_bits(rhs, prim);
+                Some(if signed {
+                    result_signed(format!("sar({shift_bits}, {})", arg_signed(lhs)))
+                } else {
+                    result_unsigned(format!("shr({shift_bits}, {})", arg_unsigned(lhs)))
+                })
+            }
+            ArithBinOp::BitAnd => {
+                let lhs_bits = trunc_bits(lhs, prim);
+                let rhs_bits = trunc_bits(rhs, prim);
+                Some(if signed {
+                    result_signed(format!("and({lhs_bits}, {rhs_bits})"))
+                } else {
+                    result_unsigned(format!("and({lhs_bits}, {rhs_bits})"))
+                })
+            }
+            ArithBinOp::BitOr => {
+                let lhs_bits = trunc_bits(lhs, prim);
+                let rhs_bits = trunc_bits(rhs, prim);
+                Some(if signed {
+                    result_signed(format!("or({lhs_bits}, {rhs_bits})"))
+                } else {
+                    result_unsigned(format!("or({lhs_bits}, {rhs_bits})"))
+                })
+            }
+            ArithBinOp::BitXor => {
+                let lhs_bits = trunc_bits(lhs, prim);
+                let rhs_bits = trunc_bits(rhs, prim);
+                Some(if signed {
+                    result_signed(format!("xor({lhs_bits}, {rhs_bits})"))
+                } else {
+                    result_unsigned(format!("xor({lhs_bits}, {rhs_bits})"))
+                })
+            }
+            ArithBinOp::Range => None,
+        },
+        BinOp::Comp(op) => match op {
+            CompBinOp::Eq => {
+                let lhs_bits = trunc_bits(lhs, prim);
+                let rhs_bits = trunc_bits(rhs, prim);
+                Some(format!("eq({lhs_bits}, {rhs_bits})"))
+            }
+            CompBinOp::NotEq => {
+                let lhs_bits = trunc_bits(lhs, prim);
+                let rhs_bits = trunc_bits(rhs, prim);
+                Some(format!("iszero(eq({lhs_bits}, {rhs_bits}))"))
+            }
+            CompBinOp::Lt => Some(if signed {
+                format!("slt({}, {})", arg_signed(lhs), arg_signed(rhs))
+            } else {
+                format!("lt({}, {})", arg_unsigned(lhs), arg_unsigned(rhs))
+            }),
+            CompBinOp::LtEq => Some(if signed {
+                format!("iszero(sgt({}, {}))", arg_signed(lhs), arg_signed(rhs))
+            } else {
+                format!("iszero(gt({}, {}))", arg_unsigned(lhs), arg_unsigned(rhs))
+            }),
+            CompBinOp::Gt => Some(if signed {
+                format!("sgt({}, {})", arg_signed(lhs), arg_signed(rhs))
+            } else {
+                format!("gt({}, {})", arg_unsigned(lhs), arg_unsigned(rhs))
+            }),
+            CompBinOp::GtEq => Some(if signed {
+                format!("iszero(slt({}, {}))", arg_signed(lhs), arg_signed(rhs))
+            } else {
+                format!("iszero(lt({}, {}))", arg_unsigned(lhs), arg_unsigned(rhs))
+            }),
+        },
+        BinOp::Logical(_) | BinOp::Index => None,
+    }
+}
+
 impl<'db> FunctionEmitter<'db> {
+    fn hidden_runtime_param_local(&self, local: LocalId) -> bool {
+        self.mir_func
+            .body
+            .param_locals
+            .iter()
+            .position(|&param_local| param_local == local)
+            .is_some_and(|idx| !self.mir_func.runtime_abi.value_param_visible(idx))
+            || self
+                .mir_func
+                .body
+                .effect_param_locals
+                .iter()
+                .position(|&effect_local| effect_local == local)
+                .is_some_and(|idx| !self.mir_func.runtime_abi.effect_param_visible(idx))
+    }
+
+    /// Attempts to lower a call to a core numeric intrinsic directly to inline Yul.
+    ///
+    /// This is an optimization that avoids generating separate Yul functions for
+    /// primitive arithmetic intrinsics like `__add_u8`, `__sub_i32`, `__mul_u256`, etc.
+    /// Instead, it recognizes the naming pattern `__<op>_<type>` and emits the
+    /// corresponding Yul opcode inline with appropriate bit masking.
+    ///
+    /// For types smaller than 256 bits, proper masking is applied:
+    /// - **Unsigned types**: Results are masked with `and(result, mask)` to truncate
+    ///   overflow bits (e.g., `u8` uses mask `0xff`).
+    /// - **Signed types**: Results use `signextend(byte, and(value, mask))` to
+    ///   correctly propagate the sign bit.
+    /// - **256-bit types** (`u256`, `i256`): No masking needed.
+    ///
+    /// # Parameters
+    /// - `call`: The call origin containing the target function and arguments.
+    /// - `state`: Current block state for lowering argument values.
+    ///
+    /// # Returns
+    /// - `Ok(Some(yul))`: The intrinsic was recognized and lowered to inline Yul.
+    /// - `Ok(None)`: The call is not a recognized core numeric intrinsic; the caller
+    ///   should fall back to normal function call emission.
+    /// - `Err(...)`: An error occurred during lowering.
+    fn try_lower_core_numeric_intrinsic_call(
+        &self,
+        call: &CallOrigin<'_>,
+        state: &BlockState,
+    ) -> Result<Option<String>, YulError> {
+        let Some(mir::CallTargetRef::Hir(target)) = call.target.as_ref() else {
+            return Ok(None);
+        };
+        let CallableDef::Func(func) = target.callable_def else {
+            return Ok(None);
+        };
+        if func.body(self.db).is_some() {
+            return Ok(None);
+        }
+
+        match target.callable_def.ingot(self.db).kind(self.db) {
+            IngotKind::Core | IngotKind::Std => {}
+            _ => return Ok(None),
+        }
+
+        let Some(name_id) = target.callable_def.name(self.db) else {
+            return Ok(None);
+        };
+        let name = name_id.data(self.db).as_str();
+        if name == "__bitcast" || !name.starts_with("__") {
+            return Ok(None);
+        }
+
+        let Some((op, suffix)) = name[2..].rsplit_once('_') else {
+            return Ok(None);
+        };
+
+        let mut lowered_args = Vec::with_capacity(call.args.len());
+        for &arg in &call.args {
+            lowered_args.push(self.lower_value(arg, state)?);
+        }
+        if !call.effect_args.is_empty() {
+            return Err(YulError::Unsupported(format!(
+                "core numeric intrinsic `{name}` unexpectedly has effect args"
+            )));
+        }
+
+        let lowered = if suffix == "bool" {
+            let normalize_bool = |value: &str| format!("iszero(iszero({value}))");
+
+            match (op, lowered_args.as_slice()) {
+                ("not", [arg]) => Some(format!("iszero({})", normalize_bool(arg))),
+                ("bitand", [lhs, rhs]) => Some(format!(
+                    "and({}, {})",
+                    normalize_bool(lhs),
+                    normalize_bool(rhs)
+                )),
+                ("bitor", [lhs, rhs]) => Some(format!(
+                    "or({}, {})",
+                    normalize_bool(lhs),
+                    normalize_bool(rhs)
+                )),
+                ("bitxor", [lhs, rhs]) => Some(format!(
+                    "xor({}, {})",
+                    normalize_bool(lhs),
+                    normalize_bool(rhs)
+                )),
+                ("eq", [lhs, rhs]) => Some(format!(
+                    "eq({}, {})",
+                    normalize_bool(lhs),
+                    normalize_bool(rhs)
+                )),
+                ("ne", [lhs, rhs]) => Some(format!(
+                    "iszero(eq({}, {}))",
+                    normalize_bool(lhs),
+                    normalize_bool(rhs)
+                )),
+                _ => None,
+            }
+        } else if let Some(int_prim) = int_prim_from_suffix(suffix) {
+            match (op, lowered_args.as_slice()) {
+                ("add", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::Add), lhs, rhs, int_prim)
+                }
+                ("sub", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::Sub), lhs, rhs, int_prim)
+                }
+                ("mul", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::Mul), lhs, rhs, int_prim)
+                }
+                ("div", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::Div), lhs, rhs, int_prim)
+                }
+                ("rem", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::Rem), lhs, rhs, int_prim)
+                }
+                ("pow", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::Pow), lhs, rhs, int_prim)
+                }
+                ("shl", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::LShift), lhs, rhs, int_prim)
+                }
+                ("shr", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::RShift), lhs, rhs, int_prim)
+                }
+                ("bitand", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::BitAnd), lhs, rhs, int_prim)
+                }
+                ("bitor", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::BitOr), lhs, rhs, int_prim)
+                }
+                ("bitxor", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Arith(ArithBinOp::BitXor), lhs, rhs, int_prim)
+                }
+                ("bitnot", [arg]) => lower_primitive_int_unary(UnOp::BitNot, arg, int_prim),
+                ("neg", [arg]) => lower_primitive_int_unary(UnOp::Minus, arg, int_prim),
+                ("eq", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Comp(CompBinOp::Eq), lhs, rhs, int_prim)
+                }
+                ("ne", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Comp(CompBinOp::NotEq), lhs, rhs, int_prim)
+                }
+                ("lt", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Comp(CompBinOp::Lt), lhs, rhs, int_prim)
+                }
+                ("le", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Comp(CompBinOp::LtEq), lhs, rhs, int_prim)
+                }
+                ("gt", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Comp(CompBinOp::Gt), lhs, rhs, int_prim)
+                }
+                ("ge", [lhs, rhs]) => {
+                    lower_primitive_int_binary(BinOp::Comp(CompBinOp::GtEq), lhs, rhs, int_prim)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        Ok(lowered)
+    }
+    pub(super) fn core_lib(&self) -> mir::CoreLib<'db> {
+        let scope = match self.mir_func.origin {
+            MirFunctionOrigin::Hir(func) => func.scope(),
+            MirFunctionOrigin::Synthetic(synth) => synth.contract().scope(),
+        };
+        mir::CoreLib::new(self.db, scope)
+    }
+
     fn format_hir_expr_context(&self, expr: hir::hir_def::ExprId) -> String {
-        let Some(body) = self.mir_func.func.body(self.db) else {
+        let Some(body) = (match self.mir_func.origin {
+            MirFunctionOrigin::Hir(func) => func.body(self.db),
+            MirFunctionOrigin::Synthetic(_) => None,
+        }) else {
             return format!(
                 "func={} expr={expr:?} (missing HIR body)",
                 self.mir_func.symbol_name
@@ -56,7 +522,31 @@ impl<'db> FunctionEmitter<'db> {
         };
 
         let expr_data = match expr.data(self.db, body) {
-            hir::hir_def::Partial::Present(expr) => format!("{expr:?}"),
+            hir::hir_def::Partial::Present(expr_data) => match expr_data {
+                hir::hir_def::Expr::Path(path) => path
+                    .to_opt()
+                    .map(|path| format!("Path({})", path.pretty_print(self.db)))
+                    .unwrap_or_else(|| "Path(<absent>)".into()),
+                hir::hir_def::Expr::Call(callee, args) => {
+                    let callee_data = match callee.data(self.db, body) {
+                        hir::hir_def::Partial::Present(hir::hir_def::Expr::Path(path)) => path
+                            .to_opt()
+                            .map(|path| format!("Path({})", path.pretty_print(self.db)))
+                            .unwrap_or_else(|| "Path(<absent>)".into()),
+                        hir::hir_def::Partial::Present(other) => format!("{other:?}"),
+                        hir::hir_def::Partial::Absent => "<absent>".into(),
+                    };
+                    format!("Call({callee:?} {callee_data}, {args:?})")
+                }
+                hir::hir_def::Expr::MethodCall(receiver, method, _, args) => {
+                    let method_name = method
+                        .to_opt()
+                        .map(|id| id.data(self.db).to_string())
+                        .unwrap_or_else(|| "<absent>".into());
+                    format!("MethodCall({receiver:?}, {method_name}, {args:?})")
+                }
+                other => format!("{other:?}"),
+            },
             hir::hir_def::Partial::Absent => "<absent>".into(),
         };
 
@@ -93,17 +583,31 @@ impl<'db> FunctionEmitter<'db> {
             ),
             ValueOrigin::Unit => Ok("0".into()),
             ValueOrigin::Unary { op, inner } => {
-                let value = self.lower_value(*inner, state)?;
+                let lowered = self.lower_value(*inner, state)?;
+                if let Some(int_prim) =
+                    int_prim_from_ty(self.db, self.mir_func.body.value(*inner).ty)
+                    && let Some(expr) = lower_primitive_int_unary(*op, &lowered, int_prim)
+                {
+                    return Ok(expr);
+                }
                 match op {
-                    UnOp::Minus => Ok(format!("sub(0, {value})")),
-                    UnOp::Not => Ok(format!("iszero({value})")),
-                    UnOp::Plus => Ok(value),
-                    UnOp::BitNot => Ok(format!("not({value})")),
+                    UnOp::Minus => Ok(format!("sub(0, {lowered})")),
+                    UnOp::Not => Ok(format!("iszero({lowered})")),
+                    UnOp::Plus => Ok(lowered),
+                    UnOp::BitNot => Ok(format!("not({lowered})")),
+                    UnOp::Mut => todo!(),
+                    UnOp::Ref => todo!(),
                 }
             }
             ValueOrigin::Binary { op, lhs, rhs } => {
                 let left = self.lower_value(*lhs, state)?;
                 let right = self.lower_value(*rhs, state)?;
+                if let Some(int_prim) = int_prim_from_ty(self.db, self.mir_func.body.value(*lhs).ty)
+                    && int_prim_from_ty(self.db, self.mir_func.body.value(*rhs).ty).is_some()
+                    && let Some(expr) = lower_primitive_int_binary(*op, &left, &right, int_prim)
+                {
+                    return Ok(expr);
+                }
                 match op {
                     BinOp::Arith(op) => match op {
                         ArithBinOp::Add => Ok(format!("add({left}, {right})")),
@@ -117,6 +621,12 @@ impl<'db> FunctionEmitter<'db> {
                         ArithBinOp::BitAnd => Ok(format!("and({left}, {right})")),
                         ArithBinOp::BitOr => Ok(format!("or({left}, {right})")),
                         ArithBinOp::BitXor => Ok(format!("xor({left}, {right})")),
+                        // Range should be lowered to Range type construction before codegen
+                        ArithBinOp::Range => {
+                            todo!(
+                                "Range operator should be handled during type checking/MIR lowering"
+                            )
+                        }
                     },
                     BinOp::Comp(op) => {
                         let expr = match op {
@@ -141,27 +651,101 @@ impl<'db> FunctionEmitter<'db> {
                     )),
                 }
             }
-            ValueOrigin::Local(local) => state
-                .resolve_local(*local)
-                .ok_or_else(|| {
-                    let local_data = self.mir_func.body.local(*local);
-                    let is_param = self.mir_func.body.param_locals.contains(local);
-                    let is_effect = self.mir_func.body.effect_param_locals.contains(local);
-                    YulError::Unsupported(format!(
-                        "unbound MIR local reached codegen (func={}, local=l{} `{}`, ty={}, param={is_param}, effect={is_effect})",
-                        self.mir_func.symbol_name,
-                        local.index(),
-                        local_data.name,
-                        local_data.ty.pretty_print(self.db),
-                    ))
-                }),
-            ValueOrigin::FuncItem(root) => Err(YulError::Unsupported(format!(
-                "function item has no runtime value (symbol={})",
-                root.symbol.as_deref().unwrap_or("<unresolved symbol>")
-            ))),
-            ValueOrigin::Synthetic(synth) => self.lower_synthetic_value(synth),
+            ValueOrigin::Local(local) => {
+                if let Some(name) = state.resolve_local(*local) {
+                    return Ok(name);
+                }
+                if self.hidden_runtime_param_local(*local) {
+                    return Ok("0".into());
+                }
+
+                let local_data = self.mir_func.body.local(*local);
+                let is_param = self.mir_func.body.param_locals.contains(local);
+                let is_effect = self.mir_func.body.effect_param_locals.contains(local);
+
+                Err(YulError::Unsupported(format!(
+                    "unbound MIR local reached codegen (func={}, local=l{} `{}`, ty={}, param={is_param}, effect={is_effect})",
+                    self.mir_func.symbol_name,
+                    local.index(),
+                    local_data.name,
+                    local_data.ty.pretty_print(self.db),
+                )))
+            }
+            ValueOrigin::PlaceRoot(local) => {
+                if let Some(name) = state.resolve_local(*local) {
+                    return Ok(name);
+                }
+                if self.hidden_runtime_param_local(*local) {
+                    return Ok("0".into());
+                }
+                Err(YulError::Unsupported(format!(
+                    "unbound MIR place-root local reached codegen (func={}, local=l{} `{}`, ty={})",
+                    self.mir_func.symbol_name,
+                    local.index(),
+                    self.mir_func.body.local(*local).name,
+                    self.mir_func.body.local(*local).ty.pretty_print(self.db),
+                )))
+            }
+            ValueOrigin::CodeRegionRef(_) => {
+                debug_assert!(
+                    layout::is_zero_sized_ty_in(self.db, &self.layout, value.ty),
+                    "code-region values should be zero-sized (ty={})",
+                    value.ty.pretty_print(self.db)
+                );
+                Ok("0".into())
+            }
+            ValueOrigin::Synthetic(synth) => self.lower_synthetic_value(synth, value.ty),
             ValueOrigin::FieldPtr(field_ptr) => self.lower_field_ptr(field_ptr, state),
-            ValueOrigin::PlaceRef(place) => self.lower_place_ref(place, state),
+            ValueOrigin::PlaceRef(place) => {
+                if !value.repr.is_ref() {
+                    if self.place_yields_location_value(
+                        place,
+                        value.ty,
+                        self.mir_func.body.value_pointer_info(value_id),
+                    )? {
+                        return self.lower_place_address(place, state);
+                    }
+                    let loaded_ty = if value.repr.address_space().is_none() {
+                        value
+                            .ty
+                            .as_capability(self.db)
+                            .map(|(_, inner_ty)| inner_ty)
+                            .unwrap_or(value.ty)
+                    } else {
+                        value.ty
+                    };
+                    return self.lower_place_load(place, loaded_ty, state);
+                }
+                self.lower_place_ref(place, state)
+            }
+            ValueOrigin::MoveOut { place } => {
+                if value.repr.is_ref() {
+                    self.lower_place_ref(place, state)
+                } else {
+                    if self.place_yields_location_value(
+                        place,
+                        value.ty,
+                        self.mir_func.body.value_pointer_info(value_id),
+                    )? {
+                        return self.lower_place_address(place, state);
+                    }
+                    let loaded_ty = if value.repr.address_space().is_none() {
+                        value
+                            .ty
+                            .as_capability(self.db)
+                            .map(|(_, inner_ty)| inner_ty)
+                            .unwrap_or(value.ty)
+                    } else {
+                        value.ty
+                    };
+                    self.lower_place_load(place, loaded_ty, state)
+                }
+            }
+            ValueOrigin::ConstRegion(id) => {
+                let label = self.const_region_labels.get(id).unwrap();
+                Ok(format!("dataoffset(\"{label}\")"))
+            }
+            ValueOrigin::TransparentCast { value } => self.lower_value(*value, state),
         }
     }
 
@@ -176,10 +760,56 @@ impl<'db> FunctionEmitter<'db> {
         call: &CallOrigin<'_>,
         state: &BlockState,
     ) -> Result<String, YulError> {
+        if let Some(mir::CallTargetRef::Hir(target)) = call.target.as_ref()
+            && matches!(
+                target.callable_def.ingot(self.db).kind(self.db),
+                IngotKind::Core
+            )
+            && target.callable_def.name(self.db).is_some_and(|name_id| {
+                matches!(name_id.data(self.db).as_str(), "__as_bytes" | "__keccak256")
+            })
+        {
+            return Err(YulError::Unsupported(
+                "core::keccak requires a compile-time constant value".into(),
+            ));
+        }
+
+        if call
+            .target
+            .as_ref()
+            .and_then(|target| match target {
+                mir::CallTargetRef::Hir(target) => target.callable_def.name(self.db),
+                mir::CallTargetRef::Synthetic(_) => None,
+            })
+            .is_some_and(|name_id| name_id.data(self.db) == "contract_field_slot")
+        {
+            return Err(YulError::Unsupported(
+                "`contract_field_slot` must be constant-folded before codegen".into(),
+            ));
+        }
+
+        if let Some(intrinsic) = self.try_lower_core_numeric_intrinsic_call(call, state)? {
+            return Ok(intrinsic);
+        }
+
+        let is_evm_op = match call.target.as_ref() {
+            Some(mir::CallTargetRef::Hir(target)) => {
+                matches!(
+                    target.callable_def,
+                    CallableDef::Func(func) if is_std_evm_ops(self.db, func)
+                )
+            }
+            Some(mir::CallTargetRef::Synthetic(_)) | None => false,
+        };
         let callee = if let Some(name) = &call.resolved_name {
             name.clone()
         } else {
-            match call.callable.callable_def {
+            let Some(mir::CallTargetRef::Hir(target)) = call.target.as_ref() else {
+                return Err(YulError::Unsupported(
+                    "call is missing a resolved symbol name".into(),
+                ));
+            };
+            match target.callable_def {
                 CallableDef::Func(func) => function_name(self.db, func),
                 CallableDef::VariantCtor(_) => {
                     return Err(YulError::Unsupported(
@@ -188,15 +818,17 @@ impl<'db> FunctionEmitter<'db> {
                 }
             }
         };
+        let callee = if is_evm_op {
+            callee
+        } else {
+            prefix_yul_name(&callee)
+        };
         let mut lowered_args = Vec::with_capacity(call.args.len());
         for &arg in &call.args {
             lowered_args.push(self.lower_value(arg, state)?);
         }
         for &arg in &call.effect_args {
             lowered_args.push(self.lower_value(arg, state)?);
-        }
-        if let Some(arg) = try_collapse_cast_shim(&callee, &lowered_args)? {
-            return Ok(arg);
         }
         if lowered_args.is_empty() {
             Ok(format!("{callee}()"))
@@ -210,11 +842,53 @@ impl<'db> FunctionEmitter<'db> {
     /// * `value` - Synthetic value emitted during MIR construction.
     ///
     /// Returns the literal Yul expression for the synthetic value.
-    fn lower_synthetic_value(&self, value: &SyntheticValue) -> Result<String, YulError> {
+    fn lower_synthetic_value(
+        &self,
+        value: &SyntheticValue,
+        ty: TyId<'db>,
+    ) -> Result<String, YulError> {
         match value {
-            SyntheticValue::Int(int) => Ok(int.to_string()),
+            SyntheticValue::Int(int) => {
+                let ty = ty
+                    .as_capability(self.db)
+                    .map(|(_, inner)| inner)
+                    .unwrap_or(ty);
+                let TyData::TyBase(TyBase::Prim(prim)) = ty.base_ty(self.db).data(self.db) else {
+                    return Ok(int.to_string());
+                };
+                let maybe_signed_subword = match prim {
+                    PrimTy::I8 => Some((BigUint::from(0xffu16), BigUint::from(0x80u16), 0u8)),
+                    PrimTy::I16 => Some((BigUint::from(0xffffu32), BigUint::from(0x8000u32), 1)),
+                    PrimTy::I32 => Some((
+                        BigUint::from(0xffff_ffffu64),
+                        BigUint::from(0x8000_0000u64),
+                        3,
+                    )),
+                    PrimTy::I64 => Some((BigUint::from(u64::MAX), BigUint::from(1u128 << 63), 7)),
+                    PrimTy::I128 => {
+                        Some((BigUint::from(u128::MAX), BigUint::from(1u128 << 127), 15))
+                    }
+                    _ => None,
+                };
+                if let Some((mask, sign_bit, byte)) = maybe_signed_subword {
+                    let masked = int & mask;
+                    if (&masked & sign_bit) != BigUint::from(0u8) {
+                        return Ok(format!("signextend({byte}, {})", masked));
+                    }
+                    return Ok(masked.to_string());
+                }
+                Ok(int.to_string())
+            }
             SyntheticValue::Bool(flag) => Ok(if *flag { "1" } else { "0" }.into()),
-            SyntheticValue::Bytes(bytes) => Ok(format!("0x{}", hex::encode(bytes))),
+            SyntheticValue::Bytes(bytes) => {
+                if bytes.len() > 32 {
+                    return Err(YulError::Unsupported(format!(
+                        "SyntheticValue::Bytes must fit in one EVM word, got {} bytes",
+                        bytes.len()
+                    )));
+                }
+                Ok(format!("0x{}", hex::encode(bytes)))
+            }
         }
     }
 
@@ -234,8 +908,11 @@ impl<'db> FunctionEmitter<'db> {
             Ok(base)
         } else {
             let offset = match field_ptr.addr_space {
-                mir::ir::AddressSpaceKind::Memory => field_ptr.offset_bytes,
-                mir::ir::AddressSpaceKind::Storage => field_ptr.offset_bytes / 32,
+                mir::ir::AddressSpaceKind::Memory
+                | mir::ir::AddressSpaceKind::Calldata
+                | mir::ir::AddressSpaceKind::Code => field_ptr.offset_bytes,
+                mir::ir::AddressSpaceKind::Storage
+                | mir::ir::AddressSpaceKind::TransientStorage => field_ptr.offset_bytes / 32,
             };
             Ok(format!("add({}, {})", base, offset))
         }
@@ -252,24 +929,51 @@ impl<'db> FunctionEmitter<'db> {
         loaded_ty: TyId<'db>,
         state: &BlockState,
     ) -> Result<String, YulError> {
-        if layout::ty_size_bytes(self.db, loaded_ty).is_some_and(|size| size == 0) {
+        if layout::ty_size_bytes_in(self.db, &self.layout, loaded_ty).is_some_and(|size| size == 0)
+        {
             return Ok("0".into());
         }
-        let addr = self.lower_place_address(place, state)?;
-        let raw_load = match place.address_space {
-            mir::ir::AddressSpaceKind::Memory => format!("mload({addr})"),
+
+        let packed = self.is_packed_scalar_array_access(place, loaded_ty)?;
+        let (addr, place_state) = self.lower_place_terminal(place, state)?;
+        let raw_load = match place_state
+            .location_address_space()
+            .ok_or_else(|| YulError::Unsupported(format!("place is not a location: {place:?}")))?
+        {
+            mir::ir::AddressSpaceKind::Memory => {
+                if packed {
+                    format!("byte(0, mload({addr}))")
+                } else {
+                    format!("mload({addr})")
+                }
+            }
+            mir::ir::AddressSpaceKind::Calldata => format!("calldataload({addr})"),
             mir::ir::AddressSpaceKind::Storage => format!("sload({addr})"),
+            mir::ir::AddressSpaceKind::TransientStorage => format!("tload({addr})"),
+            mir::ir::AddressSpaceKind::Code => {
+                return Err(YulError::Unsupported(
+                    "cannot lower code space load into a pure expression. intercept in emit_load_inst".into(),
+                ));
+            }
         };
 
-        // Apply type-specific conversion (LoadableScalar::from_word equivalent)
+        // Apply type-specific conversion (std::evm::word::WordRepr::from_word equivalent)
         Ok(self.apply_from_word_conversion(&raw_load, loaded_ty))
     }
 
-    /// Applies the LoadableScalar::from_word conversion for a given type.
+    pub(super) fn is_packed_scalar_array_access(
+        &self,
+        place: &Place<'db>,
+        scalar_ty: TyId<'db>,
+    ) -> Result<bool, YulError> {
+        layout::is_packed_scalar_array_access(self.db, &self.mir_func.body, place, scalar_ty)
+            .map_err(YulError::Unsupported)
+    }
+
+    /// Applies the `WordRepr::from_word` conversion for a given type.
     ///
-    /// This mirrors the Fe core library's from_word implementations defined in:
-    /// - `library/core/src/ptr.fe` (LoadableScalar trait)
-    /// - `library/core/src/enum_repr.fe` (enum discriminant handling)
+    /// This mirrors the stdlib word-conversion semantics defined in:
+    /// - `ingots/std/src/evm/word.fe` (`WordRepr` trait)
     ///
     /// Conversion rules:
     /// - bool: word != 0
@@ -277,9 +981,10 @@ impl<'db> FunctionEmitter<'db> {
     /// - u256: identity
     /// - i8/i16/i32/i64/i128/i256: sign extension
     ///
-    /// NOTE: This is a single source of truth for codegen. If the core library
-    /// semantics change, this function must be updated to match.
-    fn apply_from_word_conversion(&self, raw_load: &str, ty: TyId<'db>) -> String {
+    /// NOTE: This is a single source of truth for codegen. If the stdlib word
+    /// conversion semantics change, this function must be updated to match.
+    pub(super) fn apply_from_word_conversion(&self, raw_load: &str, ty: TyId<'db>) -> String {
+        let ty = mir::repr::word_conversion_leaf_ty(self.db, ty);
         let base_ty = ty.base_ty(self.db);
         if let TyData::TyBase(TyBase::Prim(prim)) = base_ty.data(self.db) {
             match prim {
@@ -318,10 +1023,14 @@ impl<'db> FunctionEmitter<'db> {
                     // Full-width signed doesn't need masking, sign is already there
                     raw_load.to_string()
                 }
-                // String, Array, Tuple, Ptr are aggregate/pointer types - no conversion
-                PrimTy::String | PrimTy::Array | PrimTy::Tuple(_) | PrimTy::Ptr => {
-                    raw_load.to_string()
-                }
+                // Aggregate/pointer-like types - no conversion
+                PrimTy::String
+                | PrimTy::Array
+                | PrimTy::Tuple(_)
+                | PrimTy::Ptr
+                | PrimTy::View
+                | PrimTy::BorrowMut
+                | PrimTy::BorrowRef => raw_load.to_string(),
             }
         } else {
             // Non-primitive types (aggregates, etc.) - no conversion
@@ -329,8 +1038,9 @@ impl<'db> FunctionEmitter<'db> {
         }
     }
 
-    /// Applies the StorableScalar::to_word conversion for a given type.
+    /// Applies the `WordRepr::to_word` conversion for a given type.
     pub(super) fn apply_to_word_conversion(&self, raw_value: &str, ty: TyId<'db>) -> String {
+        let ty = mir::repr::word_conversion_leaf_ty(self.db, ty);
         let base_ty = ty.base_ty(self.db);
         if let TyData::TyBase(TyBase::Prim(prim)) = base_ty.data(self.db) {
             match prim {
@@ -350,9 +1060,13 @@ impl<'db> FunctionEmitter<'db> {
                 | PrimTy::I128
                 | PrimTy::I256
                 | PrimTy::Isize => raw_value.to_string(),
-                PrimTy::String | PrimTy::Array | PrimTy::Tuple(_) | PrimTy::Ptr => {
-                    raw_value.to_string()
-                }
+                PrimTy::String
+                | PrimTy::Array
+                | PrimTy::Tuple(_)
+                | PrimTy::Ptr
+                | PrimTy::View
+                | PrimTy::BorrowMut
+                | PrimTy::BorrowRef => raw_value.to_string(),
             }
         } else {
             raw_value.to_string()
@@ -371,89 +1085,123 @@ impl<'db> FunctionEmitter<'db> {
         self.lower_place_address(place, state)
     }
 
-    /// Computes the address for a place by walking the projection path.
-    ///
-    /// Returns a Yul expression representing the memory/storage address.
-    /// For memory, computes byte offsets. For storage, computes slot offsets.
-    fn lower_place_address(
+    pub(super) fn lower_place_space(
         &self,
         place: &Place<'db>,
-        state: &BlockState,
-    ) -> Result<String, YulError> {
-        let mut base_expr = self.lower_value(place.base, state)?;
+    ) -> Result<mir::ir::AddressSpaceKind, YulError> {
+        let resolved = self.resolve_place(place)?;
+        resolved
+            .final_state()
+            .location_address_space()
+            .ok_or_else(|| YulError::Unsupported(format!("place is not a location: {place:?}")))
+    }
 
-        if place.projection.is_empty() {
-            return Ok(base_expr);
+    fn resolve_place(&self, place: &Place<'db>) -> Result<ResolvedPlace<'db>, YulError> {
+        let core = self.core_lib();
+        mir::repr::resolve_place(
+            self.db,
+            &core,
+            &self.mir_func.body.values,
+            &self.mir_func.body.locals,
+            place,
+        )
+        .ok_or_else(|| {
+            let base = self.mir_func.body.value(place.base);
+            YulError::Unsupported(format!(
+                "failed to resolve MIR place {place:?} (base ty={}, repr={:?}, origin={:?}, pointer_info={:?})",
+                base.ty.pretty_print(self.db),
+                base.repr,
+                base.origin,
+                base.pointer_info,
+            ))
+        })
+    }
+
+    fn place_yields_location_value(
+        &self,
+        place: &Place<'db>,
+        value_ty: TyId<'db>,
+        pointer_info: Option<mir::ir::PointerInfo<'db>>,
+    ) -> Result<bool, YulError> {
+        mir::repr::place_yields_location_value(
+            self.db,
+            &self.core_lib(),
+            &self.mir_func.body.values,
+            &self.mir_func.body.locals,
+            place,
+            value_ty,
+            pointer_info,
+        )
+        .ok_or_else(|| YulError::Unsupported(format!("failed to resolve MIR place {place:?}")))
+    }
+
+    fn lower_place_segment_terminal(
+        &self,
+        segment_base_expr: String,
+        segment: &ResolvedPlaceSegment<'db>,
+        state: &BlockState,
+    ) -> Result<(String, PlaceState<'db>), YulError> {
+        let address_space = segment
+            .base
+            .location_address_space()
+            .ok_or_else(|| YulError::Unsupported("place segment is not a location".to_string()))?;
+        if segment.projections.is_empty() {
+            return Ok((segment_base_expr, segment.terminal_state()));
         }
 
-        // Get the base value's type to navigate projections
-        let base_value = self.mir_func.body.value(place.base);
-        let mut current_ty = base_value.ty;
+        let mut base_expr = segment_base_expr;
         let mut total_offset: usize = 0;
-        let is_storage = matches!(place.address_space, mir::ir::AddressSpaceKind::Storage);
+        let is_slot_addressed = matches!(
+            address_space,
+            mir::ir::AddressSpaceKind::Storage | mir::ir::AddressSpaceKind::TransientStorage
+        );
 
-        for proj in place.projection.iter() {
-            match proj {
+        for step in &segment.projections {
+            match &step.projection {
                 Projection::Field(field_idx) => {
-                    let field_types = current_ty.field_types(self.db);
-                    if field_types.is_empty() {
-                        return Err(YulError::Unsupported(format!(
-                            "place projection: no field types for type but accessing field {}",
-                            field_idx
-                        )));
+                    if mir::repr::transparent_field0_inner_ty(self.db, step.owner.ty, *field_idx)
+                        == Some(step.result.ty)
+                    {
+                        continue;
                     }
-                    // Use slot-based offsets for storage, byte-based for memory
-                    total_offset += if is_storage {
-                        layout::field_offset_slots(self.db, current_ty, *field_idx)
+                    total_offset += if is_slot_addressed {
+                        layout::field_offset_slots(self.db, step.owner.ty, *field_idx)
                     } else {
-                        layout::field_offset_bytes_or_word_aligned(self.db, current_ty, *field_idx)
+                        layout::field_offset_memory_in(
+                            self.db,
+                            &self.layout,
+                            step.owner.ty,
+                            *field_idx,
+                        )
                     };
-                    // Update current type to the field's type
-                    current_ty = *field_types.get(*field_idx).ok_or_else(|| {
-                        YulError::Unsupported(format!(
-                            "place projection: target field {} out of bounds (have {} fields)",
-                            field_idx,
-                            field_types.len()
-                        ))
-                    })?;
                 }
                 Projection::VariantField {
                     variant,
                     enum_ty,
                     field_idx,
                 } => {
-                    // Skip discriminant then compute field offset
-                    // Use slot-based offsets for storage, byte-based for memory
-                    if is_storage {
+                    if is_slot_addressed {
                         total_offset += 1;
                         total_offset += layout::variant_field_offset_slots(
                             self.db, *enum_ty, *variant, *field_idx,
                         );
                     } else {
-                        total_offset += layout::DISCRIMINANT_SIZE_BYTES;
-                        total_offset += layout::variant_field_offset_bytes_or_word_aligned(
-                            self.db, *enum_ty, *variant, *field_idx,
+                        total_offset += self.layout.discriminant_size_bytes;
+                        total_offset += layout::variant_field_offset_memory_in(
+                            self.db,
+                            &self.layout,
+                            *enum_ty,
+                            *variant,
+                            *field_idx,
                         );
                     }
-                    // Update current type to the field's type
-                    let ctor = ConstructorKind::Variant(*variant, *enum_ty);
-                    let field_types = ctor.field_types(self.db);
-                    current_ty = *field_types.get(*field_idx).ok_or_else(|| {
-                        YulError::Unsupported(format!(
-                            "place projection: target variant field {} out of bounds (have {} fields)",
-                            field_idx,
-                            field_types.len()
-                        ))
-                    })?;
                 }
-                Projection::Discriminant => {
-                    current_ty = TyId::new(self.db, TyData::TyBase(TyBase::Prim(PrimTy::U256)));
-                }
+                Projection::Discriminant => {}
                 Projection::Index(idx_source) => {
-                    let stride = if is_storage {
-                        layout::array_elem_stride_slots(self.db, current_ty)
+                    let stride = if is_slot_addressed {
+                        layout::array_elem_stride_slots(self.db, step.owner.ty)
                     } else {
-                        layout::array_elem_stride_bytes(self.db, current_ty)
+                        layout::array_elem_stride_memory_in(self.db, &self.layout, step.owner.ty)
                     }
                     .ok_or_else(|| {
                         YulError::Unsupported(
@@ -479,19 +1227,10 @@ impl<'db> FunctionEmitter<'db> {
                             base_expr = format!("add({base_expr}, {offset_expr})");
                         }
                     }
-
-                    // Update current type to the element type.
-                    let (base_ty, args) = current_ty.decompose_ty_app(self.db);
-                    if !base_ty.is_array(self.db) || args.is_empty() {
-                        return Err(YulError::Unsupported(
-                            "place projection: array index on non-array type".to_string(),
-                        ));
-                    }
-                    current_ty = args[0];
                 }
                 Projection::Deref => {
                     return Err(YulError::Unsupported(
-                        "place projection: pointer dereference not yet implemented".to_string(),
+                        "place projection: deref reached segment walker".to_string(),
                     ));
                 }
             }
@@ -500,6 +1239,95 @@ impl<'db> FunctionEmitter<'db> {
         if total_offset != 0 {
             base_expr = format!("add({base_expr}, {total_offset})");
         }
-        Ok(base_expr)
+
+        Ok((base_expr, segment.terminal_state()))
+    }
+
+    fn lower_place_terminal(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<(String, PlaceState<'db>), YulError> {
+        let resolved = self.resolve_place(place)?;
+        let root_expr = if let ValueOrigin::Local(local) =
+            &self.mir_func.body.value(place.base).origin
+            && let Some(spill) = self.mir_func.body.spill_slots.get(local)
+        {
+            state.resolve_local(*spill).ok_or_else(|| {
+                let local_data = self.mir_func.body.local(*spill);
+                YulError::Unsupported(format!(
+                    "unbound MIR spill slot local reached codegen (func={}, local=l{} `{}`, ty={})",
+                    self.mir_func.symbol_name,
+                    spill.index(),
+                    local_data.name,
+                    local_data.ty.pretty_print(self.db),
+                ))
+            })?
+        } else {
+            self.lower_value(place.base, state)?
+        };
+        let mut current_terminal: Option<(String, PlaceState<'db>)> = None;
+
+        for (idx, segment) in resolved.segments.iter().enumerate() {
+            let segment_base_expr = match (idx == 0, segment.start_kind, current_terminal.take()) {
+                (true, None, None)
+                | (true, Some(mir::repr::DerefStepKind::ReuseLocation), None)
+                | (true, Some(mir::repr::DerefStepKind::UseBaseValue), None) => root_expr.clone(),
+                (true, Some(mir::repr::DerefStepKind::LoadLocationValue), None) => self
+                    .apply_from_word_conversion(
+                        &Self::yul_load(
+                            segment.before.location_address_space().ok_or_else(|| {
+                                YulError::Unsupported(
+                                    "place terminal is not a location".to_string(),
+                                )
+                            })?,
+                            &root_expr,
+                        ),
+                        segment.before.ty,
+                    ),
+                (false, Some(mir::repr::DerefStepKind::ReuseLocation), Some((addr, _))) => addr,
+                (
+                    false,
+                    Some(mir::repr::DerefStepKind::LoadLocationValue),
+                    Some((addr, terminal_state)),
+                ) => self.apply_from_word_conversion(
+                    &Self::yul_load(
+                        terminal_state.location_address_space().ok_or_else(|| {
+                            YulError::Unsupported("place terminal is not a location".to_string())
+                        })?,
+                        &addr,
+                    ),
+                    segment.before.ty,
+                ),
+                (false, None, Some(_))
+                | (false, Some(mir::repr::DerefStepKind::UseBaseValue), Some(_))
+                | (true, None, Some(_))
+                | (true, Some(_), Some(_))
+                | (false, _, None) => {
+                    return Err(YulError::Unsupported(format!(
+                        "invalid resolved place segment sequence: {place:?}"
+                    )));
+                }
+            };
+            current_terminal =
+                Some(self.lower_place_segment_terminal(segment_base_expr, segment, state)?);
+        }
+
+        current_terminal.ok_or_else(|| {
+            YulError::Unsupported(format!("resolved place produced no segments: {place:?}"))
+        })
+    }
+
+    /// Computes the address for a place by walking the projection path.
+    ///
+    /// Returns a Yul expression representing the memory/storage address.
+    /// For memory, computes byte offsets. For storage, computes slot offsets.
+    pub(super) fn lower_place_address(
+        &self,
+        place: &Place<'db>,
+        state: &BlockState,
+    ) -> Result<String, YulError> {
+        self.lower_place_terminal(place, state)
+            .map(|(addr, _)| addr)
     }
 }

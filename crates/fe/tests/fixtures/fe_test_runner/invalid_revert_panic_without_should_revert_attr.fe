@@ -1,0 +1,2 @@
+#[test(panic = 0x11)]
+fn test_panic_without_should_revert() {}

@@ -1,0 +1,20 @@
+use std::abi::sol
+
+msg CounterMsg {
+    #[selector = sol("count()")]
+    Count -> u256,
+}
+
+pub contract Counter {
+    count: u256,
+
+    recv {
+        CounterMsg::Count {} -> u256 uses (count) {
+            count
+        }
+
+        _ uses (mut count) {
+            count += 1
+        }
+    }
+}

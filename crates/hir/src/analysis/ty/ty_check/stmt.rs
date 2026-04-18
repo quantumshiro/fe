@@ -1,11 +1,70 @@
-use crate::core::hir_def::{IdentId, Partial, Stmt, StmtId};
+use salsa::Update;
 
-use super::TyChecker;
+use crate::analysis::HirAnalysisDb;
+use crate::core::hir_def::{ExprId, IdentId, Partial, Pat, PatId, Stmt, StmtId};
+
+use super::{Callable, LocalBinding, TyChecker, instantiate_trait_method};
 use crate::analysis::ty::{
+    canonical::Canonical,
+    corelib::resolve_core_trait,
     diagnostics::BodyDiag,
-    fold::TyFoldable,
+    fold::{TyFoldable, TyFolder},
+    trait_def::{TraitInstId, impls_for_ty},
     ty_def::{InvalidCause, TyId},
+    visitor::TyVisitable,
 };
+
+/// Resolved Seq trait methods for a for-loop.
+///
+/// This stores the pre-resolved `Callable` for `Seq::len` and `Seq::get`
+/// so that MIR lowering can emit direct method calls without re-resolving.
+#[derive(Debug, Clone, PartialEq, Eq, Update)]
+pub struct ForLoopSeq<'db> {
+    /// The type being iterated over
+    pub iterable_ty: TyId<'db>,
+    /// The element type (Seq::Item for the iterable)
+    pub elem_ty: TyId<'db>,
+    /// The trait instance (Seq for the iterable type)
+    pub trait_inst: TraitInstId<'db>,
+    /// Resolved callable for Seq::len(self) -> usize
+    pub len_callable: Callable<'db>,
+    /// Resolved callable for Seq::get(self, i: usize) -> T
+    pub get_callable: Callable<'db>,
+    /// Resolved effect arguments for Seq::len, in callee effect-param order.
+    pub len_effect_args: Vec<super::ResolvedEffectArg<'db>>,
+    /// Resolved effect arguments for Seq::get, in callee effect-param order.
+    pub get_effect_args: Vec<super::ResolvedEffectArg<'db>>,
+}
+
+impl<'db> TyVisitable<'db> for ForLoopSeq<'db> {
+    fn visit_with<V>(&self, visitor: &mut V)
+    where
+        V: crate::analysis::ty::visitor::TyVisitor<'db> + ?Sized,
+    {
+        self.iterable_ty.visit_with(visitor);
+        self.elem_ty.visit_with(visitor);
+        self.trait_inst.visit_with(visitor);
+        self.len_callable.visit_with(visitor);
+        self.get_callable.visit_with(visitor);
+    }
+}
+
+impl<'db> TyFoldable<'db> for ForLoopSeq<'db> {
+    fn super_fold_with<F>(self, db: &'db dyn HirAnalysisDb, folder: &mut F) -> Self
+    where
+        F: TyFolder<'db>,
+    {
+        ForLoopSeq {
+            iterable_ty: self.iterable_ty.fold_with(db, folder),
+            elem_ty: self.elem_ty.fold_with(db, folder),
+            trait_inst: self.trait_inst.fold_with(db, folder),
+            len_callable: self.len_callable.fold_with(db, folder),
+            get_callable: self.get_callable.fold_with(db, folder),
+            len_effect_args: self.len_effect_args,
+            get_effect_args: self.get_effect_args,
+        }
+    }
+}
 
 impl<'db> TyChecker<'db> {
     pub(super) fn check_stmt(&mut self, stmt: StmtId, expected: TyId<'db>) -> TyId<'db> {
@@ -31,22 +90,84 @@ impl<'db> TyChecker<'db> {
 
         let span = stmt.span(self.env.body()).into_let_stmt();
 
-        let ascription = match ascription {
-            Some(ty) => self.lower_ty(*ty, span.ty(), true),
-            None => self.fresh_ty(),
-        };
+        let ascription = ascription.map(|ty| self.lower_ty(ty, span.ty(), true));
 
         if let Some(expr) = expr {
-            self.check_expr(*expr, ascription);
-        }
+            let prop = if let Some(ascription) = ascription {
+                self.check_expr(*expr, ascription)
+            } else {
+                self.check_expr_unknown(*expr)
+            };
+            let (pat_expected, mode) = self.destructure_source_mode(prop.ty);
+            self.check_pat(*pat, pat_expected);
+            if let Some(LocalBinding::Local { pat, .. }) = self.env.pat_binding(*pat) {
+                self.env
+                    .set_local_borrow_provider(pat, prop.borrow_provider);
+            }
 
-        self.check_pat(*pat, ascription);
+            match mode {
+                super::DestructureSourceMode::Owned => {
+                    if self.pattern_binds_any(*pat) {
+                        self.record_implicit_move_for_owned_expr(*expr, prop.ty);
+                    }
+                }
+                super::DestructureSourceMode::Borrow(kind) => {
+                    self.retype_pattern_bindings_for_borrow(*pat, kind);
+                }
+            }
+        } else {
+            let ascription = ascription.unwrap_or_else(|| self.fresh_ty());
+            self.check_pat(*pat, ascription);
+        }
+        self.check_mutable_pattern_bindings(*pat);
         self.env.flush_pending_bindings();
         TyId::unit(self.db)
     }
 
+    fn check_mutable_pattern_bindings(&mut self, pat: PatId) {
+        let Partial::Present(pat_data) = pat.data(self.db, self.body()) else {
+            return;
+        };
+
+        match pat_data {
+            Pat::Path(_, is_mut) => {
+                if !*is_mut {
+                    return;
+                }
+
+                let Some(binding) = self.env.pat_binding(pat) else {
+                    return;
+                };
+                let ty = self.env.lookup_binding_ty(&binding);
+                if ty.has_invalid(self.db) || ty.as_capability(self.db).is_none() {
+                    return;
+                }
+
+                self.push_diag(BodyDiag::MutableBindingCannotBeCapability {
+                    primary: pat.span(self.body()).into_path_pat().mut_token().into(),
+                    ty,
+                });
+            }
+            Pat::Tuple(pats) | Pat::PathTuple(_, pats) => {
+                for &pat in pats {
+                    self.check_mutable_pattern_bindings(pat);
+                }
+            }
+            Pat::Record(_, fields) => {
+                for field in fields {
+                    self.check_mutable_pattern_bindings(field.pat);
+                }
+            }
+            Pat::Or(lhs, rhs) => {
+                self.check_mutable_pattern_bindings(*lhs);
+                self.check_mutable_pattern_bindings(*rhs);
+            }
+            Pat::WildCard | Pat::Rest | Pat::Lit(..) => {}
+        }
+    }
+
     fn check_for(&mut self, stmt: StmtId, stmt_data: &Stmt<'db>) -> TyId<'db> {
-        let Stmt::For(pat, expr, body) = stmt_data else {
+        let Stmt::For(pat, expr, body, _unroll) = stmt_data else {
             unreachable!()
         };
 
@@ -56,27 +177,13 @@ impl<'db> TyChecker<'db> {
             .fold_with(self.db, &mut self.table);
         let expr_ty = typed_expr.ty;
 
-        let (base, arg) = expr_ty.decompose_ty_app(self.db);
-        // TODO: We can generalize this by just checking the `expr_ty` implements
-        // `Iterator` trait when `std::iter::Iterator` is implemented.
-        let elem_ty = if base.is_array(self.db) {
-            arg[0]
-        } else if base.has_invalid(self.db) {
-            TyId::invalid(self.db, InvalidCause::Other)
-        } else if base.is_ty_var(self.db) {
-            let diag = BodyDiag::TypeMustBeKnown(expr.span(self.body()).into());
-            self.push_diag(diag);
-            TyId::invalid(self.db, InvalidCause::Other)
-        } else {
-            let diag = BodyDiag::TraitNotImplemented {
-                primary: expr.span(self.body()).into(),
-                ty: expr_ty.pretty_print(self.db).to_string(),
-                trait_name: IdentId::new(self.db, "Iterator".to_string()),
-            };
-            self.push_diag(diag);
+        // Resolve Seq implementation and get element type
+        let (elem_ty, for_loop_seq) = self.resolve_seq_info(expr_ty, *expr, stmt);
 
-            TyId::invalid(self.db, InvalidCause::Other)
-        };
+        // Store the resolved Seq info for MIR lowering
+        if let Some(seq_info) = for_loop_seq {
+            self.env.register_for_loop_seq(stmt, seq_info);
+        }
 
         self.check_pat(*pat, elem_ty);
 
@@ -93,16 +200,176 @@ impl<'db> TyChecker<'db> {
         TyId::unit(self.db)
     }
 
+    /// Resolve the Seq implementation for an iterable type.
+    ///
+    /// Returns the element type and optionally the resolved Seq methods.
+    /// The ForLoopSeq is None only when there's an error (type doesn't implement Seq).
+    fn resolve_seq_info(
+        &mut self,
+        iterable_ty: TyId<'db>,
+        expr: ExprId,
+        _stmt: StmtId,
+    ) -> (TyId<'db>, Option<ForLoopSeq<'db>>) {
+        let (base, _args) = iterable_ty.decompose_ty_app(self.db);
+
+        // Handle invalid and unknown types
+        if base.has_invalid(self.db) {
+            return (TyId::invalid(self.db, InvalidCause::Other), None);
+        }
+        if base.is_ty_var(self.db) {
+            let diag = BodyDiag::TypeMustBeKnown(expr.span(self.body()).into());
+            self.push_diag(diag);
+            return (TyId::invalid(self.db, InvalidCause::Other), None);
+        }
+
+        // Look up Seq trait (if missing, treat as invalid).
+        let Some(seq_trait) = resolve_core_trait(self.db, self.env.scope(), &["seq", "Seq"]) else {
+            return (TyId::invalid(self.db, InvalidCause::Other), None);
+        };
+
+        let iterable_candidates = self.capability_fallback_candidates(iterable_ty);
+        let scope_ingot = self.env.scope().ingot(self.db);
+
+        for iterable_lookup_ty in iterable_candidates {
+            let canonical_ty = Canonical::new(self.db, iterable_lookup_ty);
+            let search_ingots = [
+                Some(scope_ingot),
+                iterable_lookup_ty
+                    .ingot(self.db)
+                    .filter(|&ingot| ingot != scope_ingot),
+            ];
+
+            for ingot in search_ingots.into_iter().flatten() {
+                for impl_ in impls_for_ty(self.db, ingot, canonical_ty) {
+                    let snapshot = self.snapshot_state();
+                    let impl_id = impl_.skip_binder();
+                    if impl_id.trait_def(self.db) != seq_trait {
+                        self.commit_state(snapshot);
+                        continue;
+                    }
+
+                    // Instantiate the impl's trait instance (with associated type
+                    // bindings) using fresh type variables, then unify to get concrete types
+                    let raw_trait_inst = impl_id.trait_inst(self.db);
+                    let trait_inst = self.table.instantiate_with_fresh_vars(
+                        crate::analysis::ty::binder::Binder::bind(raw_trait_inst),
+                    );
+
+                    // Unify the trait's Self type with the iterable type
+                    let self_ty = trait_inst.self_ty(self.db);
+                    if self.table.unify(self_ty, iterable_lookup_ty).is_err() {
+                        self.rollback_state(snapshot);
+                        continue;
+                    }
+
+                    // Fold to resolve type variables
+                    use crate::analysis::ty::fold::TyFoldable;
+                    let trait_inst = trait_inst.fold_with(self.db, &mut self.table);
+
+                    // Resolve the element type from Seq's associated type `Item`
+                    let item_ident = IdentId::new(self.db, "Item".to_string());
+                    let Some(&elem_ty) = trait_inst.assoc_type_bindings(self.db).get(&item_ident)
+                    else {
+                        self.rollback_state(snapshot);
+                        continue;
+                    };
+                    let elem_ty = elem_ty.fold_with(self.db, &mut self.table);
+
+                    // Resolve len and get methods from the trait
+                    let len_ident = IdentId::new(self.db, "len".to_string());
+                    let get_ident = IdentId::new(self.db, "get".to_string());
+
+                    let method_defs = seq_trait.method_defs(self.db);
+                    let Some(&len_method) = method_defs.get(&len_ident) else {
+                        self.rollback_state(snapshot);
+                        continue;
+                    };
+                    let Some(&get_method) = method_defs.get(&get_ident) else {
+                        self.rollback_state(snapshot);
+                        continue;
+                    };
+
+                    // Create Callable objects for the methods
+                    let span: crate::span::DynLazySpan<'db> = expr.span(self.body()).into();
+
+                    let len_func_ty = instantiate_trait_method(
+                        self.db,
+                        len_method,
+                        &mut self.table,
+                        iterable_lookup_ty,
+                        trait_inst,
+                    );
+                    let Ok(len_callable) =
+                        Callable::new(self.db, len_func_ty, span.clone(), Some(trait_inst))
+                    else {
+                        self.rollback_state(snapshot);
+                        continue;
+                    };
+
+                    let get_func_ty = instantiate_trait_method(
+                        self.db,
+                        get_method,
+                        &mut self.table,
+                        iterable_lookup_ty,
+                        trait_inst,
+                    );
+                    let Ok(mut get_callable) =
+                        Callable::new(self.db, get_func_ty, span, Some(trait_inst))
+                    else {
+                        self.rollback_state(snapshot);
+                        continue;
+                    };
+                    let mut len_callable = len_callable;
+
+                    let call_span: crate::span::DynLazySpan<'db> = expr.span(self.body()).into();
+                    let len_effect_args =
+                        self.resolve_callable_effects(call_span.clone(), &mut len_callable);
+                    let get_effect_args =
+                        self.resolve_callable_effects(call_span, &mut get_callable);
+
+                    let for_loop_seq = ForLoopSeq {
+                        iterable_ty,
+                        elem_ty,
+                        trait_inst,
+                        len_callable,
+                        get_callable,
+                        len_effect_args,
+                        get_effect_args,
+                    };
+
+                    self.commit_state(snapshot);
+                    return (elem_ty, Some(for_loop_seq));
+                }
+            }
+        }
+
+        // Type doesn't implement Seq
+        let diag = BodyDiag::TraitNotImplemented {
+            primary: expr.span(self.body()).into(),
+            ty: iterable_ty.pretty_print(self.db).to_string(),
+            trait_name: IdentId::new(self.db, "Seq".to_string()),
+        };
+        self.push_diag(diag);
+        (TyId::invalid(self.db, InvalidCause::Other), None)
+    }
+
     fn check_while(&mut self, stmt: StmtId, stmt_data: &Stmt<'db>) -> TyId<'db> {
         let Stmt::While(cond, body) = stmt_data else {
             unreachable!()
         };
 
-        self.check_expr(*cond, TyId::bool(self.db));
+        // Keep let-chain bindings local to the loop condition/body.
+        self.env.enter_lexical_scope();
+        self.check_cond(*cond);
 
         self.env.enter_loop(stmt);
+        self.env.enter_scope(*body);
+        self.env.flush_pending_bindings();
         self.check_expr(*body, TyId::unit(self.db));
+        self.env.leave_scope();
+        self.env.clear_pending_bindings();
         self.env.leave_loop();
+        self.env.leave_scope();
 
         TyId::unit(self.db)
     }
@@ -142,20 +409,31 @@ impl<'db> TyChecker<'db> {
             unreachable!()
         };
 
-        let (returned_ty, had_child_err) = if let Some(expr) = expr {
-            let before = self.diags.len();
-            let expected = self.fresh_ty();
-            self.check_expr(*expr, expected);
-            let ty = expected.fold_with(self.db, &mut self.table);
-            (ty, self.diags.len() > before)
-        } else {
-            (TyId::unit(self.db), false)
-        };
+        let (returned_expr, returned_prop, mut returned_ty, had_child_err) =
+            if let Some(expr) = expr {
+                let before = self.diags.len();
+                let expected = self.fresh_ty();
+                let prop = self.check_expr(*expr, expected);
+                let ty = expected.fold_with(self.db, &mut self.table);
+                (Some(*expr), Some(prop), ty, self.diags.len() > before)
+            } else {
+                (None, None, TyId::unit(self.db), false)
+            };
 
         if !had_child_err
             && !returned_ty.has_invalid(self.db)
-            && self.table.unify(returned_ty, self.expected).is_err()
+            && let Some(expr) = returned_expr
+            && let Some(coerced) =
+                self.try_coerce_capability_for_expr_to_expected(expr, returned_ty, self.expected)
         {
+            returned_ty = coerced;
+        }
+
+        let ret_ty_ok = !had_child_err
+            && !returned_ty.has_invalid(self.db)
+            && self.table.unify(returned_ty, self.expected).is_ok();
+
+        if !had_child_err && !returned_ty.has_invalid(self.db) && !ret_ty_ok {
             let func = self.env.func();
             let span = stmt.span(self.env.body());
             let diag = BodyDiag::ReturnedTypeMismatch {
@@ -166,6 +444,26 @@ impl<'db> TyChecker<'db> {
             };
 
             self.push_diag(diag);
+        } else if ret_ty_ok && let Some(expr) = returned_expr {
+            self.record_implicit_move_for_owned_expr(expr, self.expected);
+        }
+
+        if ret_ty_ok
+            && let Some(expr) = returned_expr
+            && let Some(prop) = returned_prop
+            && let Some(provider) = prop.borrow_provider
+        {
+            if let Some((ref previous_span, previous_provider)) = self.first_return_borrow_provider
+            {
+                self.merge_concrete_borrow_providers(
+                    previous_span.clone(),
+                    Some(previous_provider),
+                    expr.span(self.body()).into(),
+                    Some(provider),
+                );
+            } else {
+                self.first_return_borrow_provider = Some((expr.span(self.body()).into(), provider));
+            }
         }
 
         TyId::never(self.db)

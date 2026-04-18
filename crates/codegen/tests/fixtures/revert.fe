@@ -1,6 +1,6 @@
-use core::{mstore, revert}
+use std::evm::{RawMem, RawOps}
 
-fn fail() {
-    mstore(0, 42)
-    revert(0, 32)
+fn fail() uses (ops: mut RawOps) {
+    ops.mstore(addr: 0, value: 42)
+    ops.revert(offset: 0, len: 32)
 }

@@ -1,0 +1,59 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_enum_with_data.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_MyOption_0 = enum {
+    #None,
+    #Some(i64),
+};
+
+func private %make_some(v0.i64) -> objref<@__fe_obj_MyOption_0> {
+    block0:
+        v1.objref<@__fe_obj_MyOption_0> = obj.alloc @__fe_obj_MyOption_0;
+        enum.set_tag v1 #Some;
+        v3.objref<@__fe_obj_MyOption_0> = enum.assert_variant_ref v1 #Some;
+        v4.objref<i64> = enum.proj v3 #Some 0.i256;
+        obj.store v4 v0;
+        return v1;
+}
+
+func private %match_option(v0.objref<@__fe_obj_MyOption_0>) -> i64 {
+    block0:
+        jump block4;
+
+    block1:
+        v4.objref<@__fe_obj_MyOption_0> = enum.assert_variant_ref v0 #Some;
+        v5.objref<i64> = enum.proj v4 #Some 0.i256;
+        v6.i64 = obj.load v5;
+        jump block2;
+
+    block2:
+        v7.i64 = phi (v6 block1) (0.i64 block3);
+        return v7;
+
+    block3:
+        jump block2;
+
+    block4:
+        v9.enumtag(@__fe_obj_MyOption_0) = enum.get_tag v0;
+        br_table v9 block5 (1.enumtag(@__fe_obj_MyOption_0) block1) (0.enumtag(@__fe_obj_MyOption_0) block3);
+
+    block5:
+        evm_invalid;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v2.objref<@__fe_obj_MyOption_0> = call %make_some 0.i64;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

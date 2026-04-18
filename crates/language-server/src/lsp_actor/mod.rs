@@ -88,7 +88,7 @@ impl Dispatcher<LspActorKey> for LspDispatcher {
         } else if let Some(notification) = message.downcast_ref::<AnyNotification>() {
             Ok(LspActorKey::from(&notification.method).into())
         } else if let Some(event) = message.downcast_ref::<AnyEvent>() {
-            Ok(LspActorKey::from(event.inner_type_id()).into())
+            Ok(LspActorKey::from(event.inner().type_id()).into())
         } else {
             Err(ActorError::DispatchError)
         }
@@ -135,11 +135,8 @@ mod tests {
 
     use super::*;
     use act_locally::builder::ActorBuilder;
+    use async_lsp::lsp_types::{InitializeParams, InitializeResult};
     use async_lsp::{AnyNotification, AnyRequest, LspService, ResponseError};
-    use async_lsp::{
-        RequestId,
-        lsp_types::{InitializeParams, InitializeResult},
-    };
     use serde_json::json;
     use service::LspActorService;
     use std::ops::ControlFlow;
@@ -197,13 +194,17 @@ mod tests {
         }
         service.handle_notification_mut::<Initialized>(handle_initialized);
 
-        // Test initialize request
+        // Test initialize request. async-lsp upstream marks AnyRequest as
+        // `#[non_exhaustive]` and no longer exposes a `stub` constructor,
+        // so round-trip through its `Deserialize` impl to build one in a
+        // test without reaching into private fields.
         let init_params = InitializeParams::default();
-        let init_request = AnyRequest::stub(
-            RequestId::Number(1),
-            Initialize::METHOD.to_string(),
-            serde_json::to_value(init_params).unwrap(),
-        );
+        let init_request: AnyRequest = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "method": Initialize::METHOD,
+            "params": serde_json::to_value(init_params).unwrap(),
+        }))
+        .unwrap();
 
         info!("Sending initialize request");
 
@@ -214,8 +215,12 @@ mod tests {
 
         assert_eq!(init_result_deserialized, InitializeResult::default());
 
-        // Test initialized notification
-        let init_notification = AnyNotification::stub(Initialized::METHOD.to_string(), json!(null));
+        // Test initialized notification — same reasoning as AnyRequest above.
+        let init_notification: AnyNotification = serde_json::from_value(serde_json::json!({
+            "method": Initialized::METHOD,
+            "params": json!(null),
+        }))
+        .unwrap();
 
         info!("Sending initialized notification");
         if let ControlFlow::Break(Err(e)) = service.notify(init_notification) {

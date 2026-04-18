@@ -58,6 +58,7 @@ ast_node! {
     pub struct ForStmt,
     SK::ForStmt
 }
+impl super::AttrListOwner for ForStmt {}
 impl ForStmt {
     /// Returns the pattern of the binding in the for loop.
     pub fn pat(&self) -> Option<super::Pat> {
@@ -160,9 +161,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        ast::{PatKind, TypeKind},
+        ParseError,
+        ast::{AttrListOwner, PatKind, TypeKind},
         lexer::Lexer,
-        parser::Parser,
+        parser::{Parser, RecoveryMode},
     };
 
     fn parse_stmt<T>(source: &str) -> T
@@ -170,13 +172,25 @@ mod tests {
         T: TryFrom<StmtKind, Error = TryIntoError<StmtKind>>,
     {
         let lexer = Lexer::new(source);
-        let mut parser = Parser::new(lexer);
+        let mut parser = Parser::new(lexer, RecoveryMode::Recover);
         crate::parser::stmt::parse_stmt(&mut parser).unwrap();
         Stmt::cast(parser.finish_to_node().0)
             .unwrap()
             .kind()
             .try_into()
             .unwrap()
+    }
+
+    fn parse_stmt_with_errors<T>(source: &str) -> (T, Vec<ParseError>)
+    where
+        T: TryFrom<StmtKind, Error = TryIntoError<StmtKind>>,
+    {
+        let lexer = Lexer::new(source);
+        let mut parser = Parser::new(lexer, RecoveryMode::Recover);
+        crate::parser::stmt::parse_stmt(&mut parser).unwrap();
+        let (node, errors) = parser.finish_to_node();
+        let stmt = Stmt::cast(node).unwrap().kind().try_into().unwrap();
+        (stmt, errors)
     }
 
     #[test]
@@ -214,6 +228,40 @@ mod tests {
 
     #[test]
     #[wasm_bindgen_test]
+    fn for_with_attrs() {
+        let source = r#"
+            #[unroll]
+            for x in foo {
+                bar
+            }
+        "#;
+
+        let (for_stmt, errors): (ForStmt, Vec<ParseError>) = parse_stmt_with_errors(source);
+        assert!(errors.is_empty());
+        assert!(for_stmt.attr_list().is_some());
+    }
+
+    #[test]
+    #[wasm_bindgen_test]
+    fn unsupported_stmt_attrs_report_error() {
+        let source = r#"
+            #[unroll]
+            while { x } {
+                bar
+            }
+        "#;
+
+        let (_while_stmt, errors): (WhileStmt, Vec<ParseError>) = parse_stmt_with_errors(source);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.msg().contains("only supported on `for`")),
+            "expected unsupported statement-attribute diagnostic, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    #[wasm_bindgen_test]
     fn while_() {
         let source = r#"
             while { x } {
@@ -225,6 +273,57 @@ mod tests {
         assert!(while_stmt.cond().is_some());
         assert!(while_stmt.body().is_some());
         assert_ne!(while_stmt.cond(), while_stmt.body());
+
+        let while_stmt: WhileStmt = parse_stmt(
+            r#"
+            while let Some(value) = values {
+                value
+            }
+        "#,
+        );
+        let crate::ast::ExprKind::Let(let_expr) = while_stmt.cond().unwrap().kind() else {
+            panic!("expected let condition");
+        };
+        assert!(matches!(
+            let_expr.pat().unwrap().kind(),
+            crate::ast::PatKind::PathTuple(_)
+        ));
+        assert!(matches!(
+            let_expr.expr().unwrap().kind(),
+            crate::ast::ExprKind::Path(_)
+        ));
+
+        let while_stmt: WhileStmt = parse_stmt(
+            r#"
+            while let Some(value) = values && ready {
+                value
+            }
+        "#,
+        );
+        assert!(matches!(
+            while_stmt.cond().unwrap().kind(),
+            crate::ast::ExprKind::Bin(_)
+        ));
+
+        let source = r#"
+            while ready || let Some(value) = values {
+                value
+            }
+        "#;
+        let (_while_stmt, errors): (WhileStmt, Vec<ParseError>) = parse_stmt_with_errors(source);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.msg().contains("cannot be mixed with `let` conditions")),
+            "expected let-chain `||` diagnostic, got: {errors:?}"
+        );
+        let diag = errors
+            .iter()
+            .find(|e| e.msg().contains("cannot be mixed with `let` conditions"))
+            .unwrap_or_else(|| panic!("expected let-chain `||` diagnostic, got: {errors:?}"));
+        let or_pos = source.find("||").unwrap() as u32;
+        assert_eq!(diag.range().start(), crate::TextSize::from(or_pos));
+        assert_eq!(diag.range().end(), crate::TextSize::from(or_pos + 2));
     }
 
     #[test]

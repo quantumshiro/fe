@@ -1,0 +1,20 @@
+// Test that unwrap() on a non-encodable error type produces a compile error.
+
+enum PlainError {
+    Oops,
+}
+
+fn fallible(ok: bool) -> Result<PlainError, u256> {
+    if ok {
+        Ok(42)
+    } else {
+        Err(PlainError::Oops)
+    }
+}
+
+#[test]
+fn test_unwrap_non_encodable() uses (evm: mut Evm) {
+    let result = fallible(ok: true)
+    let val = result.unwrap()
+    assert(val == 42)
+}

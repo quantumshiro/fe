@@ -1,0 +1,10 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/payable_on_msg_variant.fe
+---
+error[13-0003]: `#[payable]` must be placed on the corresponding `recv` arm, not the `msg` variant
+  ┌─ payable_on_msg_variant.fe:4:5
+  │
+4 │     #[payable]
+  │     ^^^^^^^^^^ move this attribute to the matching `recv` arm

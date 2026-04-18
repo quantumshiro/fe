@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     CallOrigin, MirFunction, MirInst, MirProjection, Rvalue, SwitchValue, TerminatingCall,
     Terminator, ValueId, ValueOrigin,
-    ir::{Place, SyntheticValue},
+    ir::{AddressSpaceKind, Place, SyntheticValue, ValueRepr},
 };
 
 /// Hashes a MIR function (including its callees) so structurally equivalent bodies
@@ -79,8 +79,17 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
         // address space (e.g. storage_slot_mem vs storage_slot_stor) are not
         // erroneously deduplicated.
         match func.receiver_space {
-            Some(crate::ir::AddressSpaceKind::Memory) => self.write_u8(1),
-            Some(crate::ir::AddressSpaceKind::Storage) => self.write_u8(2),
+            Some(AddressSpaceKind::Memory) => self.write_u8(1),
+            Some(AddressSpaceKind::Calldata) => self.write_u8(2),
+            Some(AddressSpaceKind::Storage) => self.write_u8(3),
+            Some(AddressSpaceKind::TransientStorage) => self.write_u8(4),
+            Some(AddressSpaceKind::Code) => self.write_u8(5),
+            None => self.write_u8(0),
+        }
+        match func.inline_hint {
+            Some(hir::hir_def::InlineHint::Hint) => self.write_u8(1),
+            Some(hir::hir_def::InlineHint::Always) => self.write_u8(2),
+            Some(hir::hir_def::InlineHint::Never) => self.write_u8(3),
             None => self.write_u8(0),
         }
 
@@ -88,6 +97,13 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
         self.write_usize(func.body.values.len());
         for value in func.body.values.iter() {
             self.hash_value(value);
+        }
+
+        self.write_usize(func.body.const_regions.len());
+        for region in &func.body.const_regions {
+            self.write_str(region.ty.pretty_print(self.db));
+            self.write_usize(region.bytes.len());
+            self.hasher.write(&region.bytes);
         }
 
         self.write_usize(func.body.blocks.len());
@@ -100,9 +116,24 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
         }
     }
 
-    /// Hash the origin of a MIR value, ignoring type information (handled elsewhere).
+    /// Hash a MIR value, including its logical type so width-distinct helpers are not merged.
     fn hash_value(&mut self, value: &crate::ValueData<'db>) {
         self.write_u8(0x10);
+        self.write_str(value.ty.pretty_print(self.db));
+        // Hash the runtime representation category (word vs reference + address space).
+        match value.repr {
+            ValueRepr::Word => self.write_u8(0),
+            ValueRepr::Ref(AddressSpaceKind::Memory) => self.write_u8(1),
+            ValueRepr::Ref(AddressSpaceKind::Calldata) => self.write_u8(2),
+            ValueRepr::Ref(AddressSpaceKind::Storage) => self.write_u8(3),
+            ValueRepr::Ref(AddressSpaceKind::TransientStorage) => self.write_u8(4),
+            ValueRepr::Ptr(AddressSpaceKind::Memory) => self.write_u8(5),
+            ValueRepr::Ptr(AddressSpaceKind::Calldata) => self.write_u8(6),
+            ValueRepr::Ptr(AddressSpaceKind::Storage) => self.write_u8(7),
+            ValueRepr::Ptr(AddressSpaceKind::TransientStorage) => self.write_u8(8),
+            ValueRepr::Ref(AddressSpaceKind::Code) => self.write_u8(9),
+            ValueRepr::Ptr(AddressSpaceKind::Code) => self.write_u8(10),
+        }
         self.hash_value_origin(&value.origin);
     }
 
@@ -128,6 +159,8 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     hir::hir_def::expr::UnOp::Not => 1,
                     hir::hir_def::expr::UnOp::Plus => 2,
                     hir::hir_def::expr::UnOp::BitNot => 3,
+                    hir::hir_def::expr::UnOp::Mut => 4,
+                    hir::hir_def::expr::UnOp::Ref => 5,
                 });
                 let inner = self.placeholder_value(*inner);
                 self.write_u32(inner);
@@ -173,7 +206,11 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 self.write_u8(0x08);
                 self.write_u32(local.0);
             }
-            ValueOrigin::FuncItem(root) => {
+            ValueOrigin::PlaceRoot(local) => {
+                self.write_u8(0x18);
+                self.write_u32(local.0);
+            }
+            ValueOrigin::CodeRegionRef(root) => {
                 self.write_u8(0x09);
                 let symbol = root
                     .symbol
@@ -185,12 +222,13 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     })
                     .cloned()
                     .or_else(|| root.symbol.clone())
-                    .unwrap_or_else(|| {
-                        root.func
+                    .unwrap_or_else(|| match root.origin {
+                        crate::ir::MirFunctionOrigin::Hir(func) => func
                             .name(self.db)
                             .to_opt()
                             .map(|ident| ident.data(self.db).to_string())
-                            .unwrap_or_else(|| "<unknown>".to_string())
+                            .unwrap_or_else(|| "<unknown>".to_string()),
+                        crate::ir::MirFunctionOrigin::Synthetic(id) => format!("{id:?}"),
                     });
                 self.write_str(&symbol);
             }
@@ -200,13 +238,29 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 self.write_u32(slot);
                 self.write_u64(field_ptr.offset_bytes as u64);
                 self.write_u8(match field_ptr.addr_space {
-                    crate::ir::AddressSpaceKind::Memory => 1,
-                    crate::ir::AddressSpaceKind::Storage => 2,
+                    AddressSpaceKind::Memory => 1,
+                    AddressSpaceKind::Calldata => 2,
+                    AddressSpaceKind::Storage => 3,
+                    AddressSpaceKind::TransientStorage => 4,
+                    AddressSpaceKind::Code => 5,
                 });
             }
             ValueOrigin::PlaceRef(place) => {
                 self.write_u8(0x0F);
                 self.hash_place(place);
+            }
+            ValueOrigin::MoveOut { place } => {
+                self.write_u8(0x12);
+                self.hash_place(place);
+            }
+            ValueOrigin::TransparentCast { value } => {
+                self.write_u8(0x10);
+                let slot = self.placeholder_value(*value);
+                self.write_u32(slot);
+            }
+            ValueOrigin::ConstRegion(region) => {
+                self.write_u8(0x13);
+                self.write_usize(region.index());
             }
         }
     }
@@ -253,11 +307,6 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
     fn hash_place(&mut self, place: &Place<'db>) {
         let slot = self.placeholder_value(place.base);
         self.write_u32(slot);
-        // Hash address space (0 for memory, 1 for storage)
-        self.write_u8(match place.address_space {
-            crate::ir::AddressSpaceKind::Memory => 0,
-            crate::ir::AddressSpaceKind::Storage => 1,
-        });
         self.write_usize(place.projection.len());
         for proj in place.projection.iter() {
             self.hash_projection(proj);
@@ -276,32 +325,43 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
             let slot = self.placeholder_value(*arg);
             self.write_u32(slot);
         }
-        self.write_usize(call.effect_kinds.len());
-        for kind in &call.effect_kinds {
-            self.write_u8(match kind {
-                crate::ir::EffectProviderKind::Memory => 1,
-                crate::ir::EffectProviderKind::Storage => 2,
-                crate::ir::EffectProviderKind::Calldata => 3,
-            });
-        }
-        self.write_usize(call.callable.generic_args().len());
-        let symbol = call
-            .resolved_name
-            .as_ref()
-            .and_then(|name| {
-                self.symbol_to_idx
-                    .get(name)
-                    .and_then(|idx| self.canonical_symbols[*idx].as_ref())
-            })
-            .cloned()
-            .or_else(|| call.resolved_name.clone())
-            .unwrap_or_else(|| {
-                call.callable
-                    .callable_def
-                    .name(self.db)
-                    .map(|n| n.data(self.db).to_string())
-                    .unwrap_or_else(|| "<unknown>".to_string())
-            });
+        self.write_usize(match call.target.as_ref() {
+            Some(crate::ir::CallTargetRef::Hir(target)) => target.generic_args.len(),
+            _ => 0,
+        });
+        let symbol = if let Some(checked) = call.checked_intrinsic {
+            format!(
+                "{}<{}>",
+                checked.op.helper_symbol_prefix(),
+                checked.ty.pretty_print(self.db)
+            )
+        } else {
+            call.resolved_name
+                .as_ref()
+                .and_then(|name| {
+                    self.symbol_to_idx
+                        .get(name)
+                        .and_then(|idx| self.canonical_symbols[*idx].as_ref())
+                })
+                .cloned()
+                .or_else(|| call.resolved_name.clone())
+                .or_else(|| match call.target.as_ref()? {
+                    crate::ir::CallTargetRef::Hir(target) => target
+                        .callable_def
+                        .name(self.db)
+                        .map(|n| n.data(self.db).to_string()),
+                    crate::ir::CallTargetRef::Synthetic(id) => Some(format!("{id:?}")),
+                })
+                .or_else(|| {
+                    call.builtin_terminator.map(|builtin| match builtin {
+                        crate::ir::BuiltinTerminatorKind::Abort => "<builtin_abort>".to_string(),
+                        crate::ir::BuiltinTerminatorKind::AbortWithValue => {
+                            "<builtin_abort_with_value>".to_string()
+                        }
+                    })
+                })
+                .unwrap_or_else(|| "<unknown>".to_string())
+        };
         self.write_str(&symbol);
     }
 
@@ -345,24 +405,32 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     Rvalue::Alloc { address_space } => {
                         self.write_u8(5);
                         self.write_u8(match address_space {
-                            crate::ir::AddressSpaceKind::Memory => 1,
-                            crate::ir::AddressSpaceKind::Storage => 2,
+                            AddressSpaceKind::Memory => 1,
+                            AddressSpaceKind::Calldata => 2,
+                            AddressSpaceKind::Storage => 3,
+                            AddressSpaceKind::TransientStorage => 4,
+                            AddressSpaceKind::Code => 5,
                         });
+                    }
+                    Rvalue::ConstAggregate { data, .. } => {
+                        self.write_u8(6);
+                        self.write_usize(data.len());
+                        self.hasher.write(data);
                     }
                 }
             }
-            MirInst::BindValue { value } => {
+            MirInst::BindValue { value, .. } => {
                 self.write_u8(0x25);
                 let slot = self.placeholder_value(*value);
                 self.write_u32(slot);
             }
-            MirInst::Store { place, value } => {
+            MirInst::Store { place, value, .. } => {
                 self.write_u8(0x26);
                 self.hash_place(place);
                 let slot = self.placeholder_value(*value);
                 self.write_u32(slot);
             }
-            MirInst::InitAggregate { place, inits } => {
+            MirInst::InitAggregate { place, inits, .. } => {
                 self.write_u8(0x28);
                 self.hash_place(place);
                 self.write_usize(inits.len());
@@ -375,7 +443,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     self.write_u32(slot);
                 }
             }
-            MirInst::SetDiscriminant { place, variant } => {
+            MirInst::SetDiscriminant { place, variant, .. } => {
                 self.write_u8(0x27);
                 self.hash_place(place);
                 self.write_usize(variant.idx as usize);
@@ -386,7 +454,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
     /// Hash a terminator, including block indices for CFG structure.
     fn hash_terminator(&mut self, term: &Terminator<'db>) {
         match term {
-            Terminator::Return(val) => {
+            Terminator::Return { value: val, .. } => {
                 self.write_u8(0x30);
                 if let Some(value) = val {
                     self.write_u8(1);
@@ -396,7 +464,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     self.write_u8(0);
                 }
             }
-            Terminator::TerminatingCall(call) => {
+            Terminator::TerminatingCall { call, .. } => {
                 self.write_u8(0x36);
                 match call {
                     TerminatingCall::Call(call) => {
@@ -414,7 +482,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                     }
                 }
             }
-            Terminator::Goto { target } => {
+            Terminator::Goto { target, .. } => {
                 self.write_u8(0x31);
                 self.write_usize(target.index());
             }
@@ -422,6 +490,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 cond,
                 then_bb,
                 else_bb,
+                ..
             } => {
                 self.write_u8(0x32);
                 let slot = self.placeholder_value(*cond);
@@ -433,6 +502,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 discr,
                 targets,
                 default,
+                ..
             } => {
                 self.write_u8(0x33);
                 let slot = self.placeholder_value(*discr);
@@ -444,7 +514,7 @@ impl<'db, 'a> FunctionHasher<'db, 'a> {
                 }
                 self.write_usize(default.index());
             }
-            Terminator::Unreachable => {
+            Terminator::Unreachable { .. } => {
                 self.write_u8(0x34);
             }
         }

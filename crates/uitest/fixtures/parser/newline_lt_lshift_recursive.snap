@@ -1,0 +1,11 @@
+---
+source: crates/uitest/tests/parser.rs
+assertion_line: 26
+expression: diags
+input_file: fixtures/parser/newline_lt_lshift_recursive.fe
+---
+error[1-0001]: line-start `<<` is ambiguous; use parentheses to disambiguate
+  ┌─ newline_lt_lshift_recursive.fe:4:9
+  │
+4 │         << y
+  │         ^ line-start `<<` is ambiguous; use parentheses to disambiguate

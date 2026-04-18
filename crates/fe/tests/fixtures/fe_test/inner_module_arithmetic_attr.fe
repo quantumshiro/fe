@@ -1,0 +1,26 @@
+use std::evm::effects::assert
+
+pub mod math {
+    #![arithmetic(unchecked)]
+
+    pub fn unchecked_add_overflow() -> u8 {
+        let x: u8 = 255
+        x + 1
+    }
+
+    #[arithmetic(checked)]
+    pub fn checked_add_overflow() -> u8 {
+        let x: u8 = 255
+        x + 1
+    }
+}
+
+#[test]
+fn module_inner_attr_wraps_u8_add() {
+    assert(math::unchecked_add_overflow() == 0)
+}
+
+#[test(should_revert)]
+fn module_inner_function_override_restores_checked_add() {
+    math::checked_add_overflow()
+}

@@ -1,0 +1,69 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/newtype_field_mut_method_call.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_Counter_0 = {i256, i256};
+type @__fe_obj_Container_1 = {i256, @__fe_obj_Counter_0};
+
+func private %newtype_field_mut_method_call(v0.i256) -> i256 {
+    block0:
+        v1.objref<@__fe_obj_Counter_0> = obj.alloc @__fe_obj_Counter_0;
+        v3.objref<i256> = obj.proj v1 0.i256;
+        obj.store v3 v0;
+        v5.objref<i256> = obj.proj v1 1.i256;
+        obj.store v5 0.i256;
+        v6.objref<@__fe_obj_Container_1> = obj.alloc @__fe_obj_Container_1;
+        v7.objref<i256> = obj.proj v6 0.i256;
+        obj.store v7 0.i256;
+        v8.objref<i256> = obj.proj v1 0.i256;
+        v9.i256 = obj.load v8;
+        v10.objref<@__fe_obj_Counter_0> = obj.proj v6 1.i256;
+        v11.objref<i256> = obj.proj v10 0.i256;
+        obj.store v11 v9;
+        v12.objref<i256> = obj.proj v1 1.i256;
+        v13.i256 = obj.load v12;
+        v14.objref<@__fe_obj_Counter_0> = obj.proj v6 1.i256;
+        v15.objref<i256> = obj.proj v14 1.i256;
+        obj.store v15 v13;
+        v16.objref<@__fe_obj_Counter_0> = obj.proj v6 1.i256;
+        call %wrapcounter_hbcbd3a74a267488b_bump v16;
+        v17.objref<@__fe_obj_Counter_0> = obj.proj v6 1.i256;
+        v18.objref<@__fe_obj_Counter_0> = obj.proj v6 1.i256;
+        v19.objref<i256> = obj.proj v18 0.i256;
+        v20.i256 = obj.load v19;
+        return v20;
+}
+
+func private %wrapcounter_hbcbd3a74a267488b_bump(v0.objref<@__fe_obj_Counter_0>) {
+    block0:
+        v2.objref<i256> = obj.proj v0 0.i256;
+        v3.i256 = obj.load v2;
+        (v5.i256, v6.i1) = uaddo v3 1.i256;
+        br v6 block1 block2;
+
+    block1:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block2:
+        v12.objref<i256> = obj.proj v0 0.i256;
+        obj.store v12 v5;
+        return;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i256 = call %newtype_field_mut_method_call 0.i256;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

@@ -6,7 +6,6 @@ pub struct Storage<T> {
 pub fn process()
   uses (st: Storage<u8>)
 {
-    ()
 }
 
 pub fn ambiguous_effects() {
@@ -15,8 +14,8 @@ pub fn ambiguous_effects() {
 
     // Both st1 and st2 could satisfy Storage<u8>
     // The innermost binding should win (shadowing)
-    with (Storage = st1) {
-        with (Storage = st2) {
+    with (Storage<u8> = st1) {
+        with (Storage<u8> = st2) {
             process()  // should use st2
         }
     }

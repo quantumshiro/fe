@@ -2,12 +2,12 @@ fn read_x() -> u256 uses (x: u256) {
     x
 }
 
-fn bump_x() uses (mut x: u256) {
+fn bump_x() uses (x: mut u256) {
     x += 1
 }
 
-fn test_mem_ptr() {
-    let p = core::effect_ref::MemPtr<u256> { addr: 0 }
+fn test_mem_ptr() uses (mem: std::evm::RawMem) {
+    let p: std::evm::MemPtr<u256> = mem.mem_ptr(0)
     with (p) {
         let _v = read_x()
         bump_x()
@@ -15,9 +15,19 @@ fn test_mem_ptr() {
 }
 
 fn test_calldata_ptr_readonly() {
-    let c = core::effect_ref::CalldataPtr<u256> { offset: 0 }
+    let c = std::evm::CalldataPtr<u256> { offset: 0 }
     with (c) {
         let _v = read_x()
     }
 }
 
+fn read_calldata_triplet_ptr_offset() -> u256 uses (arr: std::evm::CalldataPtr<[u256; 3]>) {
+    arr.offset
+}
+
+fn test_calldata_ptr_array_provider() {
+    let c = std::evm::CalldataPtr<[u256; 3]> { offset: 0 }
+    with (c) {
+        let _v = read_calldata_triplet_ptr_offset()
+    }
+}

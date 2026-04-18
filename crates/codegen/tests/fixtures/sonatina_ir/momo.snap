@@ -1,0 +1,39 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/momo.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_MyStruct_0 = {i8, i8};
+
+func private %read_x(v0.objref<@__fe_obj_MyStruct_0>) -> i8 {
+    block0:
+        v2.objref<i8> = obj.proj v0 0.i256;
+        v3.i8 = obj.load v2;
+        v5.objref<i8> = obj.proj v0 1.i256;
+        v6.i8 = obj.load v5;
+        (v7.i8, v8.i1) = uaddo v3 v6;
+        br v8 block1 block2;
+
+    block1:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block2:
+        return v7;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i8 = call %read_x undef.objref<@__fe_obj_MyStruct_0>;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

@@ -1,0 +1,4 @@
+#[test]
+fn test_effect() uses (x: mut u256) {
+    x += 1
+}

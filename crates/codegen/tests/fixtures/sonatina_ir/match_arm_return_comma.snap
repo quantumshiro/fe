@@ -1,0 +1,45 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_arm_return_comma.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_E_0 = enum {
+    #A(i256),
+    #B,
+};
+
+func private %f(v0.objref<@__fe_obj_E_0>) -> i256 {
+    block0:
+        jump block3;
+
+    block1:
+        v3.objref<@__fe_obj_E_0> = enum.assert_variant_ref v0 #A;
+        v4.objref<i256> = enum.proj v3 #A 0.i256;
+        v5.i256 = obj.load v4;
+        return v5;
+
+    block2:
+        return 0.i256;
+
+    block3:
+        v7.enumtag(@__fe_obj_E_0) = enum.get_tag v0;
+        br_table v7 block4 (0.enumtag(@__fe_obj_E_0) block1) (1.enumtag(@__fe_obj_E_0) block2);
+
+    block4:
+        evm_invalid;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i256 = call %f undef.objref<@__fe_obj_E_0>;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

@@ -1,0 +1,52 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/zero_sized_aggregates.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_tuple_0 = {unit, i256};
+type @__fe_obj_Wrap_1 = {unit, i256};
+
+func private %tuple_with_empty() -> i256 {
+    block0:
+        v1.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v3.objref<i256> = obj.proj v1 1.i256;
+        obj.store v3 5.i256;
+        v4.objref<i256> = obj.proj v1 1.i256;
+        v5.i256 = obj.load v4;
+        return v5;
+}
+
+func private %tuple_only_empty() {
+    block0:
+        return;
+}
+
+func private %struct_with_empty() -> i256 {
+    block0:
+        v1.objref<@__fe_obj_Wrap_1> = obj.alloc @__fe_obj_Wrap_1;
+        v3.objref<i256> = obj.proj v1 1.i256;
+        obj.store v3 7.i256;
+        v4.objref<i256> = obj.proj v1 1.i256;
+        v5.i256 = obj.load v4;
+        return v5;
+}
+
+func private %empty_field_assign() {
+    block0:
+        return;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v0.i256 = call %tuple_with_empty;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

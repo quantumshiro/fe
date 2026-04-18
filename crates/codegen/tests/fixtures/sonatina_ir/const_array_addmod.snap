@@ -1,0 +1,53 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/const_array_addmod.fe
+---
+target = "evm-ethereum-osaka"
+
+global private const [i8; 96] $__fe_const_data_0 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30];
+
+func private %get_sum() -> i256 {
+    block0:
+        v0.i256 = sym_addr $__fe_const_data_0;
+        v1.*[i256; 3] = int_to_ptr v0 *[i256; 3];
+        v3.*i256 = gep v1 0.i256 0.i256;
+        v4.i256 = ptr_to_int v3 i256;
+        v6.*i256 = alloca i256;
+        v7.i256 = ptr_to_int v6 i256;
+        evm_code_copy v7 v4 32.i256;
+        v8.i256 = mload v7 i256;
+        (v10.i256, v11.i1) = uaddo 1.i256 v8;
+        br v11 block1 block2;
+
+    block1:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block2:
+        (v17.i256, v18.i1) = evm_umodo v10 100.i256;
+        br v18 block3 block4;
+
+    block3:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 18.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block4:
+        return v17;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v0.i256 = call %get_sum;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+        data $__fe_const_data_0;
+    }
+}

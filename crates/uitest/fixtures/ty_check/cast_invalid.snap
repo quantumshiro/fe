@@ -1,0 +1,52 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/cast_invalid.fe
+---
+error[8-0055]: cast is not provably lossless
+  ┌─ cast_invalid.fe:2:5
+  │
+2 │     x as i64
+  │     ^^^^^^^^ cannot cast `u64` to `i64` with `as`
+  │
+  = try using `.downcast()` for checked narrowing/sign changes, or `.downcast_truncate()` / `.downcast_saturate()` / `.downcast_unchecked()`
+
+error[8-0055]: cast is not provably lossless
+  ┌─ cast_invalid.fe:6:5
+  │
+6 │     x as u64
+  │     ^^^^^^^^ cannot cast `i64` to `u64` with `as`
+  │
+  = try using `.downcast()` for checked narrowing/sign changes, or `.downcast_truncate()` / `.downcast_saturate()` / `.downcast_unchecked()`
+
+error[8-0055]: cast is not provably lossless
+   ┌─ cast_invalid.fe:10:5
+   │
+10 │     x as u8
+   │     ^^^^^^^ cannot cast `bool` to `u8` with `as`
+   │
+   = casts involving `bool` are not supported
+
+error[8-0055]: cast is not provably lossless
+   ┌─ cast_invalid.fe:14:5
+   │
+14 │     256 as u8
+   │     ^^^^^^^^^ cannot cast `{integer}` to `u8` with `as`
+   │
+   = integer literal `256` is not representable in `u8`
+
+error[8-0055]: cast is not provably lossless
+   ┌─ cast_invalid.fe:25:5
+   │
+25 │     x as wrapper::PrivateFieldWrapper
+   │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot cast `u32` to `PrivateFieldWrapper` with `as`
+   │
+   = cast is not allowed because the struct field is not `pub`
+
+error[8-0055]: cast is not provably lossless
+   ┌─ cast_invalid.fe:29:5
+   │
+29 │     x as u32
+   │     ^^^^^^^^ cannot cast `PrivateFieldWrapper` to `u32` with `as`
+   │
+   = cast is not allowed because the struct field is not `pub`

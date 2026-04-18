@@ -1,0 +1,17 @@
+msg Msg {
+    #[selector = 1]
+    Test -> u256,
+}
+
+pub contract C {
+    mut value: u256,
+
+    recv Msg {
+        Test -> u256 uses (mut value) {
+            let mut local = 1
+            let target: mut u256 = mut local
+            target = mut value
+            0
+        }
+    }
+}

@@ -5,10 +5,11 @@ use std::collections::{HashMap, HashSet};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Dfs, EdgeRef};
 use salsa::Setter;
+use smol_str::SmolStr;
 use url::Url;
 
-use super::{DependencyAlias, DependencyArguments, RemoteFiles};
-use crate::InputDb;
+use super::{DependencyAlias, DependencyArguments, RemoteFiles, WorkspaceMemberRecord};
+use crate::{InputDb, config::ArithmeticMode, ingot::Version};
 
 type EdgeWeight = (DependencyAlias, DependencyArguments);
 
@@ -19,6 +20,11 @@ pub struct DependencyGraph {
     node_map: HashMap<Url, NodeIndex>,
     git_locations: HashMap<Url, RemoteFiles>,
     reverse_git_map: HashMap<RemoteFiles, Url>,
+    ingots_by_metadata: HashMap<(SmolStr, Version), Url>,
+    workspace_members: HashMap<Url, Vec<WorkspaceMemberRecord>>,
+    workspace_root_by_member: HashMap<Url, Url>,
+    expected_member_metadata: HashMap<Url, (SmolStr, Version)>,
+    forced_dependency_arithmetic: HashMap<Url, ArithmeticMode>,
 }
 
 #[salsa::tracked]
@@ -27,6 +33,11 @@ impl DependencyGraph {
         DependencyGraph::new(
             db,
             DiGraph::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
@@ -58,8 +69,149 @@ impl DependencyGraph {
         self.set_node_map(db).to(node_map);
     }
 
+    pub fn register_ingot_metadata(
+        &self,
+        db: &mut dyn InputDb,
+        url: &Url,
+        name: SmolStr,
+        version: Version,
+    ) {
+        let mut map = self.ingots_by_metadata(db);
+        map.entry((name, version)).or_insert_with(|| url.clone());
+        self.set_ingots_by_metadata(db).to(map);
+    }
+
+    pub fn ingot_by_name_version(
+        &self,
+        db: &dyn InputDb,
+        name: &SmolStr,
+        version: &Version,
+    ) -> Option<Url> {
+        self.ingots_by_metadata(db)
+            .get(&(name.clone(), version.clone()))
+            .cloned()
+    }
+
+    pub fn register_workspace_member(
+        &self,
+        db: &mut dyn InputDb,
+        workspace_root: &Url,
+        member: WorkspaceMemberRecord,
+    ) {
+        let mut members = self.workspace_members(db);
+        let entry = members.entry(workspace_root.clone()).or_default();
+        if let Some(existing) = entry.iter_mut().find(|record| record.url == member.url) {
+            *existing = member.clone();
+        } else {
+            entry.push(member.clone());
+        }
+        self.set_workspace_members(db).to(members);
+
+        self.register_workspace_member_root(db, workspace_root, &member.url);
+    }
+
+    pub fn register_workspace_member_root(
+        &self,
+        db: &mut dyn InputDb,
+        workspace_root: &Url,
+        member_url: &Url,
+    ) {
+        let mut roots = self.workspace_root_by_member(db);
+        roots.insert(member_url.clone(), workspace_root.clone());
+        self.set_workspace_root_by_member(db).to(roots);
+    }
+
+    pub fn workspace_member_records(
+        &self,
+        db: &dyn InputDb,
+        workspace_root: &Url,
+    ) -> Vec<WorkspaceMemberRecord> {
+        self.workspace_members(db)
+            .get(workspace_root)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn workspace_roots(&self, db: &dyn InputDb) -> Vec<Url> {
+        self.workspace_members(db).keys().cloned().collect()
+    }
+
+    /// Ensure the workspace root has an entry in the members map even when
+    /// it has zero named members (e.g. a workspace with only glob patterns
+    /// that match nothing yet).  Without this the root would be invisible to
+    /// `workspace_roots()`.
+    pub fn ensure_workspace_root(&self, db: &mut dyn InputDb, workspace_root: &Url) {
+        let mut members = self.workspace_members(db);
+        if members.contains_key(workspace_root) {
+            return;
+        }
+        members.entry(workspace_root.clone()).or_default();
+        self.set_workspace_members(db).to(members);
+    }
+
+    pub fn workspace_members_by_name(
+        &self,
+        db: &dyn InputDb,
+        workspace_root: &Url,
+        name: &SmolStr,
+    ) -> Vec<WorkspaceMemberRecord> {
+        self.workspace_members(db)
+            .get(workspace_root)
+            .map(|members| {
+                members
+                    .iter()
+                    .filter(|member| member.name == *name)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn workspace_root_for_member(&self, db: &dyn InputDb, url: &Url) -> Option<Url> {
+        self.workspace_root_by_member(db).get(url).cloned()
+    }
+
+    pub fn register_expected_member_metadata(
+        &self,
+        db: &mut dyn InputDb,
+        url: &Url,
+        name: SmolStr,
+        version: Version,
+    ) {
+        let mut map = self.expected_member_metadata(db);
+        map.insert(url.clone(), (name, version));
+        self.set_expected_member_metadata(db).to(map);
+    }
+
+    pub fn expected_member_metadata_for(
+        &self,
+        db: &dyn InputDb,
+        url: &Url,
+    ) -> Option<(SmolStr, Version)> {
+        self.expected_member_metadata(db).get(url).cloned()
+    }
+
     pub fn contains_url(&self, db: &dyn InputDb, url: &Url) -> bool {
         self.node_map(db).contains_key(url)
+    }
+
+    pub fn force_dependency_arithmetic(
+        &self,
+        db: &mut dyn InputDb,
+        url: &Url,
+        arithmetic: ArithmeticMode,
+    ) {
+        let mut forced = self.forced_dependency_arithmetic(db);
+        forced.insert(url.clone(), arithmetic);
+        self.set_forced_dependency_arithmetic(db).to(forced);
+    }
+
+    pub fn forced_dependency_arithmetic_for(
+        &self,
+        db: &dyn InputDb,
+        url: &Url,
+    ) -> Option<ArithmeticMode> {
+        self.forced_dependency_arithmetic(db).get(url).copied()
     }
 
     pub fn add_dependency(
@@ -74,7 +226,22 @@ impl DependencyGraph {
         let mut node_map = self.node_map(db);
         let source_idx = Self::allocate_node(&mut graph, &mut node_map, source);
         let target_idx = Self::allocate_node(&mut graph, &mut node_map, target);
-        graph.add_edge(source_idx, target_idx, (alias, arguments));
+
+        // Avoid duplicate edges when re-resolving (e.g. workspace re-init after
+        // a new member ingot appears).  If an edge with the same alias already
+        // exists, update its arguments in case they changed.
+        let existing = graph
+            .edges(source_idx)
+            .find(|e| e.target() == target_idx && e.weight().0 == alias)
+            .map(|e| e.id());
+        if let Some(edge_id) = existing {
+            if graph[edge_id].1 != arguments {
+                graph[edge_id] = (alias, arguments);
+            }
+        } else {
+            graph.add_edge(source_idx, target_idx, (alias, arguments));
+        }
+
         self.set_graph(db).to(graph);
         self.set_node_map(db).to(node_map);
     }
@@ -157,6 +324,23 @@ impl DependencyGraph {
         }
     }
 
+    pub fn direct_dependencies(&self, db: &dyn InputDb, url: &Url) -> Vec<(DependencyAlias, Url)> {
+        let node_map = self.node_map(db);
+        let graph = self.graph(db);
+
+        let Some(&root) = node_map.get(url) else {
+            return Vec::new();
+        };
+
+        graph
+            .edges(root)
+            .map(|edge| {
+                let (alias, _arguments) = edge.weight();
+                (alias.clone(), graph[edge.target()].clone())
+            })
+            .collect()
+    }
+
     pub fn register_remote_checkout(
         &self,
         db: &mut dyn InputDb,
@@ -178,5 +362,26 @@ impl DependencyGraph {
 
     pub fn local_for_remote_git(&self, db: &dyn InputDb, remote: &RemoteFiles) -> Option<Url> {
         self.reverse_git_map(db).get(remote).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::define_input_db;
+
+    define_input_db!(TestDatabase);
+
+    #[test]
+    fn finds_ingot_by_metadata() {
+        let mut db = TestDatabase::default();
+        let graph = DependencyGraph::default(&db);
+
+        let url = Url::parse("file:///workspace/ingot/").unwrap();
+        let version = Version::parse("0.1.0").unwrap();
+        graph.register_ingot_metadata(&mut db, &url, "foo".into(), version.clone());
+
+        let found = graph.ingot_by_name_version(&db, &"foo".into(), &version);
+        assert_eq!(found, Some(url));
     }
 }

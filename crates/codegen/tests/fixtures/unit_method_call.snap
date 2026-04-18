@@ -3,13 +3,10 @@ source: crates/codegen/tests/yul.rs
 expression: output
 input_file: tests/fixtures/unit_method_call.fe
 ---
-function counter_increment(self) {
+function $call_unit_method() {
+  $counter_h872958864d1ad471_increment()
   leave
 }
-function call_unit_method(c) {
-  counter_increment_mem(c)
-  leave
-}
-function counter_increment_mem(self) {
+function $counter_h872958864d1ad471_increment() {
   leave
 }

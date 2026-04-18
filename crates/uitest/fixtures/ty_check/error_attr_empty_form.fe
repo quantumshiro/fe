@@ -1,0 +1,4 @@
+#[error()]
+struct BadForm {
+    code: u256,
+}

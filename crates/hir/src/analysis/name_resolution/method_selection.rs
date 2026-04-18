@@ -1,5 +1,5 @@
 use crate::core::hir_def::{IdentId, Trait, scope_graph::ScopeId};
-use common::indexmap::IndexSet;
+use common::indexmap::{IndexMap, IndexSet};
 use rustc_hash::FxHashSet;
 use thin_vec::ThinVec;
 
@@ -11,7 +11,10 @@ use crate::analysis::{
         canonical::{Canonical, Canonicalized, Solution},
         method_table::probe_method,
         trait_def::{TraitInstId, impls_for_ty},
-        trait_resolution::{GoalSatisfiability, PredicateListId, is_goal_satisfiable},
+        trait_resolution::{
+            CanonicalGoalQuery, GoalSatisfiability, PredicateListId, TraitSolveCx,
+            is_goal_query_satisfiable,
+        },
         ty_def::{TyData, TyId},
         unify::UnificationTable,
     },
@@ -54,13 +57,14 @@ impl<'db> TraitMethodCand<'db> {
 
 pub(crate) fn select_method_candidate<'db>(
     db: &'db dyn HirAnalysisDb,
-    receiver: Canonical<TyId<'db>>,
+    receiver: &Canonicalized<'db, TyId<'db>>,
     method_name: IdentId<'db>,
     scope: ScopeId<'db>,
     assumptions: PredicateListId<'db>,
     trait_: Option<Trait<'db>>,
 ) -> Result<MethodCandidate<'db>, MethodSelectionError<'db>> {
-    if receiver.value.is_ty_var(db) {
+    let receiver_ty = receiver.original();
+    if receiver_ty.is_ty_var(db) {
         return Err(MethodSelectionError::ReceiverTypeMustBeKnown);
     }
 
@@ -80,7 +84,7 @@ pub(crate) fn select_method_candidate<'db>(
 
 fn assemble_method_candidates<'db>(
     db: &'db dyn HirAnalysisDb,
-    receiver_ty: Canonical<TyId<'db>>,
+    receiver: &Canonicalized<'db, TyId<'db>>,
     method_name: IdentId<'db>,
     scope: ScopeId<'db>,
     assumptions: PredicateListId<'db>,
@@ -88,7 +92,7 @@ fn assemble_method_candidates<'db>(
 ) -> AssembledCandidates<'db> {
     CandidateAssembler {
         db,
-        receiver_ty,
+        receiver,
         method_name,
         scope,
         assumptions,
@@ -98,10 +102,10 @@ fn assemble_method_candidates<'db>(
     .assemble()
 }
 
-struct CandidateAssembler<'db> {
+struct CandidateAssembler<'db, 'a> {
     db: &'db dyn HirAnalysisDb,
     /// The type that method is being called on.
-    receiver_ty: Canonical<TyId<'db>>,
+    receiver: &'a Canonicalized<'db, TyId<'db>>,
     /// The name of the method being called.
     method_name: IdentId<'db>,
     /// The scope that candidates are being assembled in.
@@ -112,7 +116,15 @@ struct CandidateAssembler<'db> {
     candidates: AssembledCandidates<'db>,
 }
 
-impl<'db> CandidateAssembler<'db> {
+fn receiver_is_ty_param_like<'db>(db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> bool {
+    let receiver_ty = ty.as_capability(db).map(|(_, inner)| inner).unwrap_or(ty);
+    matches!(
+        receiver_ty.base_ty(db).data(db),
+        TyData::TyParam(_) | TyData::AssocTy(_) | TyData::QualifiedTy(_)
+    )
+}
+
+impl<'db, 'a> CandidateAssembler<'db, 'a> {
     fn assemble(mut self) -> AssembledCandidates<'db> {
         if self.trait_.is_none() {
             self.assemble_inherent_method_candidates();
@@ -123,17 +135,17 @@ impl<'db> CandidateAssembler<'db> {
 
     fn assemble_inherent_method_candidates(&mut self) {
         let ingot = self
-            .receiver_ty
-            .value
+            .receiver
+            .original()
             .ingot(self.db)
             .unwrap_or_else(|| self.scope.ingot(self.db));
-        for &method in probe_method(self.db, ingot, self.receiver_ty, self.method_name) {
+        for &method in probe_method(self.db, ingot, self.receiver.canonical(), self.method_name) {
             self.candidates.insert_inherent_method(method);
         }
     }
 
     fn assemble_trait_method_candidates(&mut self) {
-        let ingot = self.scope.ingot(self.db);
+        let scope_ingot = self.scope.ingot(self.db);
 
         // When the receiver is a type parameter (e.g. `D` in `fn f<D: Trait>(d: D)`),
         // we don't know its concrete type yet, so probing impls would pull in many
@@ -141,35 +153,47 @@ impl<'db> CandidateAssembler<'db> {
         //
         // In that case, rely on in-scope bounds (`assumptions`) to provide method
         // candidates.
-        let receiver_is_ty_param = matches!(
-            self.receiver_ty.value.base_ty(self.db).data(self.db),
-            TyData::TyParam(_)
-        );
+        let receiver_is_ty_param = receiver_is_ty_param_like(self.db, self.receiver.original());
 
         if !receiver_is_ty_param {
-            for &imp in impls_for_ty(self.db, ingot, self.receiver_ty) {
-                self.insert_trait_method_cand(imp.skip_binder().trait_(self.db));
-            }
-        }
-
-        let mut table = UnificationTable::new(self.db);
-        let extracted_receiver_ty = self.receiver_ty.extract_identity(&mut table);
-
-        for &pred in self.assumptions.list(self.db) {
-            let snapshot = table.snapshot();
-            let self_ty = pred.self_ty(self.db);
-            let self_ty = table.instantiate_to_term(self_ty);
-
-            if table.unify(extracted_receiver_ty, self_ty).is_ok() {
-                self.insert_trait_method_cand(pred);
-                for super_trait in pred.def(self.db).super_traits(self.db) {
-                    let super_trait = super_trait.instantiate(self.db, pred.args(self.db));
-                    self.insert_trait_method_cand(super_trait);
+            let search_ingots = [
+                Some(scope_ingot),
+                self.receiver
+                    .original()
+                    .ingot(self.db)
+                    .filter(|&ingot| ingot != scope_ingot),
+            ];
+            for ingot in search_ingots.into_iter().flatten() {
+                for &imp in impls_for_ty(self.db, ingot, self.receiver.canonical()) {
+                    self.insert_trait_method_cand(imp.skip_binder().trait_(self.db));
                 }
             }
-
-            table.rollback_to(snapshot);
         }
+
+        self.receiver.with_materialized(self.db, |cx| {
+            let receiver = cx.query();
+            for &pred in self.assumptions.list(self.db) {
+                let snapshot = cx.snapshot();
+                // `*`-kind receivers need a fully applied self type before
+                // bound unification, otherwise abstract constructors can never
+                // match the concrete receiver term.
+                let self_ty = if receiver.is_star_kind(self.db) {
+                    cx.materialize_to_term(pred.self_ty(self.db))
+                } else {
+                    cx.materialize(pred.self_ty(self.db))
+                };
+
+                if cx.unify::<TyId<'db>>(receiver, self_ty).is_ok() {
+                    self.insert_trait_method_cand(pred);
+                    for super_trait in pred.def(self.db).super_traits(self.db) {
+                        let super_trait = super_trait.instantiate(self.db, pred.args(self.db));
+                        self.insert_trait_method_cand(super_trait);
+                    }
+                }
+
+                cx.rollback_to(snapshot);
+            }
+        });
     }
 
     fn allow_trait(&self, trait_def: Trait<'db>) -> bool {
@@ -187,15 +211,15 @@ impl<'db> CandidateAssembler<'db> {
     }
 }
 
-struct MethodSelector<'db> {
+struct MethodSelector<'db, 'a> {
     db: &'db dyn HirAnalysisDb,
-    receiver: Canonical<TyId<'db>>,
+    receiver: &'a Canonicalized<'db, TyId<'db>>,
     scope: ScopeId<'db>,
     candidates: AssembledCandidates<'db>,
     assumptions: PredicateListId<'db>,
 }
 
-impl<'db> MethodSelector<'db> {
+impl<'db, 'a> MethodSelector<'db, 'a> {
     fn select(self) -> Result<MethodCandidate<'db>, MethodSelectionError<'db>> {
         if let Some(res) = self.select_inherent_method() {
             return res;
@@ -280,9 +304,84 @@ impl<'db> MethodSelector<'db> {
                 Ok(self.check_inst(def, method))
             }
 
-            _ => Err(MethodSelectionError::AmbiguousTraitMethod(
-                visible_traits.into_iter().map(|cand| cand.0).collect(),
-            )),
+            _ => {
+                // Some candidates are equivalent after trait solving (e.g., an explicit
+                // bound and an implied/blanket-derived bound for the same method), but we
+                // must still treat distinct methods as ambiguous so later return-type
+                // constraints can disambiguate them.
+                let mut selected = IndexMap::default();
+                for (inst, method) in visible_traits.iter().copied() {
+                    match self.check_inst(inst, method) {
+                        MethodCandidate::TraitMethod(cand) => {
+                            selected.insert(cand, true);
+                        }
+                        MethodCandidate::NeedsConfirmation(cand) => {
+                            selected.entry(cand).or_insert(false);
+                        }
+                        MethodCandidate::InherentMethod(_) => unreachable!(),
+                    }
+                }
+
+                if selected.len() == 1 {
+                    let (cand, confirmed) = selected.into_iter().next().unwrap();
+                    return Ok(if confirmed {
+                        MethodCandidate::TraitMethod(cand)
+                    } else {
+                        MethodCandidate::NeedsConfirmation(cand)
+                    });
+                }
+
+                let confirmed: Vec<_> = selected
+                    .iter()
+                    .filter_map(|(&cand, &is_confirmed)| is_confirmed.then_some(cand))
+                    .collect();
+                if confirmed.len() == 1
+                    && (self.receiver.original().has_var(self.db)
+                        || selected
+                            .iter()
+                            .filter_map(|(&cand, &is_confirmed)| (!is_confirmed).then_some(cand))
+                            .all(|cand| self.candidate_specializes_to(cand, confirmed[0])))
+                {
+                    return Ok(MethodCandidate::TraitMethod(confirmed[0]));
+                }
+
+                Err(MethodSelectionError::AmbiguousTraitMethod(
+                    visible_traits.into_iter().map(|cand| cand.0).collect(),
+                ))
+            }
+        }
+    }
+
+    fn candidate_specializes_to(
+        &self,
+        candidate: TraitMethodCand<'db>,
+        confirmed: TraitMethodCand<'db>,
+    ) -> bool {
+        let mut table = UnificationTable::new(self.db);
+        let candidate_inst = self.receiver.extract_solution(&mut table, candidate.inst);
+        let confirmed_inst = self.receiver.extract_solution(&mut table, confirmed.inst);
+        if candidate_inst.def(self.db) != confirmed_inst.def(self.db)
+            || candidate.method.name(self.db) != confirmed.method.name(self.db)
+        {
+            return false;
+        }
+
+        let solve_cx = TraitSolveCx::new(self.db, self.scope).with_assumptions(self.assumptions);
+        let query = CanonicalGoalQuery::new(self.db, candidate_inst, self.assumptions);
+        let confirmed = Canonical::new(self.db, confirmed_inst);
+        let mut table = UnificationTable::new(self.db);
+        match is_goal_query_satisfiable(self.db, solve_cx, &query) {
+            GoalSatisfiability::Satisfied(solution) => {
+                Canonical::new(self.db, query.extract_solution(&mut table, solution).inst)
+                    == confirmed
+            }
+            GoalSatisfiability::NeedsConfirmation(solutions) => {
+                solutions.into_iter().any(|solution| {
+                    Canonical::new(self.db, query.extract_solution(&mut table, solution).inst)
+                        == confirmed
+                })
+            }
+            GoalSatisfiability::ContainsInvalid | GoalSatisfiability::UnSat(_) => false,
         }
     }
 
@@ -298,34 +397,30 @@ impl<'db> MethodSelector<'db> {
         let mut table = UnificationTable::new(self.db);
         // Seed the table with receiver's canonical variables so that subsequent
         // canonicalization can safely probe them.
-        let _ = self.receiver.extract_identity(&mut table);
+        let _ = self.receiver.canonical().extract_identity(&mut table);
 
         // If the receiver is a type parameter (e.g. `D` in `fn f<D: Trait>(d: D)`),
         // prefer preserving any trait arguments coming from bounds rather than
         // introducing fresh inference vars. Otherwise, unconstrained trait args
         // can trigger spurious "type annotation needed" diagnostics on method calls
         // whose signatures don't mention those args (e.g. `AbiDecoder<A>::read_word`).
-        let receiver_is_ty_param = matches!(
-            self.receiver.value.base_ty(self.db).data(self.db),
-            TyData::TyParam(_)
-        );
+        let receiver_is_ty_param = receiver_is_ty_param_like(self.db, self.receiver.original());
 
-        let canonical_cand = Canonicalized::new(self.db, inst);
+        let query = CanonicalGoalQuery::new(self.db, inst, self.assumptions);
         let inst = if receiver_is_ty_param {
             inst
         } else {
             table.instantiate_with_fresh_vars(Binder::bind(inst))
         };
 
-        match is_goal_satisfiable(
+        match is_goal_query_satisfiable(
             self.db,
-            self.scope.ingot(self.db),
-            canonical_cand.value,
-            self.assumptions,
+            TraitSolveCx::new(self.db, self.scope).with_assumptions(self.assumptions),
+            &query,
         ) {
             GoalSatisfiability::Satisfied(solution) => {
                 // Map back the solution to the current context.
-                let solution = canonical_cand.extract_solution(&mut table, *solution);
+                let solution = query.extract_solution(&mut table, solution).inst;
                 // Replace TyParams in the solved instance with fresh inference vars so
                 // downstream unification can bind them (e.g., T = u32). For receiver type
                 // parameters, keep the bound's args intact.
@@ -342,7 +437,7 @@ impl<'db> MethodSelector<'db> {
                 ))
             }
 
-            &GoalSatisfiability::NeedsConfirmation(_)
+            GoalSatisfiability::NeedsConfirmation(_)
             | GoalSatisfiability::ContainsInvalid
             | GoalSatisfiability::UnSat(_) => {
                 MethodCandidate::NeedsConfirmation(TraitMethodCand::new(
@@ -402,5 +497,120 @@ struct AssembledCandidates<'db> {
 impl<'db> AssembledCandidates<'db> {
     fn insert_inherent_method(&mut self, method: CallableDef<'db>) {
         self.inherent_methods.insert(method);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use camino::Utf8PathBuf;
+
+    use crate::{
+        analysis::{
+            name_resolution::{PathRes, resolve_path},
+            ty::{
+                canonical::Canonical, trait_def::impls_for_ty, trait_resolution::PredicateListId,
+            },
+        },
+        hir_def::{IdentId, PathId},
+        test_db::HirAnalysisTestDb,
+    };
+
+    #[test]
+    fn address_has_wordrepr_impl_in_std_trait_env() {
+        let mut db = HirAnalysisTestDb::default();
+        let file = db.new_stand_alone(
+            Utf8PathBuf::from("address_has_wordrepr_impl_in_std_trait_env.fe"),
+            r#"
+use std::evm::word::WordRepr
+
+fn test_it() {
+    let _ = Address::zero()
+}
+"#,
+        );
+        let (top_mod, _) = db.top_mod(file);
+        db.assert_no_diags(top_mod);
+
+        let assumptions = PredicateListId::empty_list(&db);
+        let scope = top_mod.scope();
+
+        let address = match resolve_path(
+            &db,
+            PathId::from_ident(&db, IdentId::new(&db, "Address".to_string())),
+            scope,
+            assumptions,
+            false,
+        )
+        .unwrap()
+        {
+            PathRes::Ty(ty) | PathRes::TyAlias(_, ty) => ty,
+            res => panic!("expected Address to resolve to a type, got {res:?}"),
+        };
+        let wordrepr = match resolve_path(
+            &db,
+            PathId::from_ident(&db, IdentId::new(&db, "WordRepr".to_string())),
+            scope,
+            assumptions,
+            false,
+        )
+        .unwrap()
+        {
+            PathRes::Trait(inst) => inst.def(&db),
+            res => panic!("expected WordRepr to resolve to a trait, got {res:?}"),
+        };
+
+        let std_ingot = address.ingot(&db).expect("Address should come from std");
+        let impls = impls_for_ty(&db, std_ingot, Canonical::new(&db, address));
+        let impl_trait_names: Vec<_> = impls
+            .iter()
+            .map(|imp| {
+                imp.skip_binder()
+                    .trait_(&db)
+                    .pretty_print(&db, false)
+                    .to_string()
+            })
+            .collect();
+
+        assert!(
+            impls
+                .iter()
+                .any(|imp| imp.skip_binder().trait_def(&db) == wordrepr),
+            "expected WordRepr impl for Address, found {impl_trait_names:?}"
+        );
+    }
+
+    #[test]
+    fn address_wordrepr_method_resolves_across_std_modules() {
+        let mut db = HirAnalysisTestDb::default();
+        let file = db.new_stand_alone(
+            Utf8PathBuf::from("address_wordrepr_method_resolves_across_std_modules.fe"),
+            r#"
+use std::evm::word::WordRepr
+
+fn test_it() {
+    let a = Address { inner: 42 }
+    let _w = a.to_word()
+}
+"#,
+        );
+        let (top_mod, _) = db.top_mod(file);
+        db.assert_no_diags(top_mod);
+    }
+
+    #[test]
+    fn storage_map_address_value_uses_wordrepr_impl() {
+        let mut db = HirAnalysisTestDb::default();
+        let file = db.new_stand_alone(
+            Utf8PathBuf::from("storage_map_address_value_uses_wordrepr_impl.fe"),
+            r#"
+use std::evm::StorageMap
+
+fn test_it() {
+    let _map: StorageMap<Address, Address, 0> = StorageMap::new()
+}
+"#,
+        );
+        let (top_mod, _) = db.top_mod(file);
+        db.assert_no_diags(top_mod);
     }
 }

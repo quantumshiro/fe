@@ -4,21 +4,50 @@ struct GenericMsg<T> {
     pub value: T,
 }
 
+impl<T> core::abi::AbiSize for GenericMsg<T>
+    where T: core::abi::AbiSize
+{
+    const ENCODED_SIZE: u256 = T::ENCODED_SIZE
+    const IS_DYNAMIC: bool = T::IS_DYNAMIC
+    const NEEDS_PARENT_WRAPPER: bool = T::IS_DYNAMIC
+}
+
+impl<T> core::abi::Encode<std::abi::Sol> for GenericMsg<T>
+    where T: core::abi::Encode<std::abi::Sol>
+{
+    const DIRECT_ENCODE: bool = false
+
+    fn encode<E: core::abi::AbiEncoder<std::abi::Sol>>(own self, _ e: mut E) {
+        let Self { value } = self
+        value.encode(e)
+    }
+
+    fn encode_to_ptr(own self, _ ptr: u256) {
+        core::panic()
+    }
+}
+
+impl<T> core::abi::Decode<std::abi::Sol> for GenericMsg<T>
+    where T: core::abi::Decode<std::abi::Sol>
+{
+    fn decode<D: core::abi::AbiDecoder<std::abi::Sol>>(_ d: mut D) -> Self {
+        let value = T::decode(d)
+        Self { value }
+    }
+}
+
 impl core::message::MsgVariant<std::abi::Sol> for GenericMsg<u8> {
     const SELECTOR: u32 = 0x01
-    type Args = (u8,)
     type Return = u8
 }
 
 impl core::message::MsgVariant<std::abi::Sol> for GenericMsg<u16> {
     const SELECTOR: u32 = 0x02
-    type Args = (u16,)
     type Return = u16
 }
 
 impl core::message::MsgVariant<std::abi::Sol> for GenericMsg<u64> {
     const SELECTOR: u32 = 0x03
-    type Args = (u64,)
     type Return = u64
 }
 

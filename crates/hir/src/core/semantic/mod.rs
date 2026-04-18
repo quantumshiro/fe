@@ -21,18 +21,28 @@
 //!   method(s) here.
 
 pub mod reference;
+pub mod symbol;
 pub use reference::{
     FieldAccessView, HasReferences, MethodCallView, PathView, ReferenceView, Target, UsePathView,
+};
+pub use symbol::{
+    IndexedReference, ReferenceIndex, SignatureWithSpan, SourceLocation, SymbolKind, SymbolView,
+    item_kind_to_url_suffix, qualify_path_with_ingot_name, scope_to_doc_path,
 };
 
 use crate::HirDb;
 use crate::analysis::HirAnalysisDb;
+use crate::analysis::ty::corelib::{
+    resolve_core_trait, resolve_lib_func_path, resolve_lib_type_path,
+};
 use crate::analysis::ty::diagnostics::{ImplDiag, TyLowerDiag};
+use crate::analysis::ty::fold::TyFoldable;
 use crate::analysis::ty::normalize::normalize_ty;
 use crate::analysis::ty::ty_def::Kind;
 use crate::analysis::ty::ty_error::collect_hir_ty_diags;
 use crate::hir_def::params::KindBound as HirKindBound;
 use crate::hir_def::scope_graph::ScopeId;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 pub fn lower_hir_kind_local(k: &HirKindBound) -> Kind {
     use crate::hir_def::Partial;
@@ -56,26 +66,47 @@ use crate::hir_def::*;
 // When adding real methods, prefer calling internal lowering/normalization here
 // rather than exposing raw syntax.
 use crate::analysis::ty::adt_def::{AdtCycleMember, AdtDef, AdtField, AdtRef};
+use crate::analysis::ty::const_ty::{
+    CallableInputLayoutHoleOrigin, ConstTyData, ConstTyId, EvaluatedConstTy,
+};
+use crate::analysis::ty::effects::{EffectKeyKind, resolve_effect_key};
+use crate::analysis::ty::layout_holes::{
+    LayoutPlaceholderPolicy, callable_input_layout_bindings_by_origin,
+    collect_layout_hole_tys_in_order, collect_unique_layout_placeholders_in_order_with_policy,
+    layout_hole_fallback_ty, substitute_layout_holes_by_identity,
+    substitute_layout_holes_by_identity_in, substitute_layout_placeholders_by_identity,
+};
 use crate::analysis::ty::trait_def::{
-    ImplementorId, TraitInstId, does_impl_trait_conflict, ingot_trait_env,
+    ImplementorId, ImplementorOrigin, TraitInstId, does_impl_trait_conflict, ingot_trait_env,
 };
 use crate::analysis::ty::trait_lower::{TraitRefLowerError, lower_trait_ref};
 use crate::analysis::ty::trait_resolution::constraint::{
-    collect_adt_constraints, collect_constraints, collect_func_def_constraints,
+    collect_adt_constraints, collect_constraints, collect_func_decl_constraints,
+    collect_func_def_constraints,
 };
-use crate::analysis::ty::ty_def::{TyBase, TyData};
+use crate::analysis::ty::ty_def::{TyBase, TyData, TyParam, strip_derived_adt_layout_args};
 use crate::analysis::ty::ty_lower::{GenericParamTypeSet, collect_generic_params};
-use crate::analysis::ty::visitor::{TyVisitor, walk_ty};
+use crate::analysis::ty::visitor::{TyVisitable, TyVisitor, walk_ty};
 use crate::analysis::ty::{
     diagnostics::{TraitConstraintDiag, TyDiagCollection},
-    trait_resolution::{PredicateListId, WellFormedness, check_ty_wf},
-    ty_def::{InvalidCause, TyId},
+    trait_resolution::{
+        GoalSatisfiability, PredicateListId, TraitSolveCx, WellFormedness, check_ty_wf,
+        is_goal_satisfiable,
+    },
+    ty_check::EffectParamSite,
+    ty_contains_const_hole,
+    ty_def::{InvalidCause, PrimTy, TyId, instantiate_adt_field_ty},
     ty_error::collect_ty_lower_errors,
-    ty_lower::{TyAlias, lower_hir_ty, lower_type_alias, lower_type_alias_from_hir},
+    ty_lower::{
+        TyAlias, lower_callable_input_param_ty, lower_hir_ty, lower_opt_hir_ty, lower_type_alias,
+        lower_type_alias_from_hir, resolve_callable_input_effect_key,
+    },
 };
 use crate::core::adt_lower::{lower_adt, lower_contract_fields};
 use common::indexmap::IndexMap;
 use indexmap::IndexSet;
+use num_bigint::BigUint;
+use num_traits::ToPrimitive;
 use salsa::Update;
 // Re-export from crate root for backwards compatibility
 pub use crate::diagnosable as diagnostics;
@@ -104,12 +135,391 @@ pub fn constraints_for<'db>(
             collect_func_def_constraints(db, f.into(), true).instantiate_identity()
         }
         ItemKind::Impl(i) => collect_constraints(db, i.into()).instantiate_identity(),
-        ItemKind::Trait(t) => collect_constraints(db, t.into()).instantiate_identity(),
+        ItemKind::Trait(t) => {
+            let mut preds = collect_constraints(db, t.into()).instantiate_identity();
+            let self_pred = TraitInstId::new(db, t, t.params(db).to_vec(), IndexMap::new());
+            if !preds.list(db).contains(&self_pred) {
+                let mut merged = preds.list(db).to_vec();
+                merged.push(self_pred);
+                preds = PredicateListId::new(db, merged);
+            }
+            preds
+        }
         ItemKind::ImplTrait(i) => collect_constraints(db, i.into()).instantiate_identity(),
         _ => PredicateListId::empty_list(db),
     }
 }
 
+/// Trait header validation must not assume `Self: Trait` yet.
+///
+/// The synthetic self-predicate from [`constraints_for`] is only valid once the trait
+/// interface has been established. Using it while lowering the trait's own super-traits or
+/// where-predicate headers can make projection resolution recurse through the in-progress trait
+/// definition.
+pub(crate) fn header_constraints_for<'db>(
+    db: &'db dyn HirAnalysisDb,
+    item: ItemKind<'db>,
+) -> PredicateListId<'db> {
+    match item {
+        ItemKind::Trait(trait_) => collect_constraints(db, trait_.into()).instantiate_identity(),
+        _ => constraints_for(db, item),
+    }
+}
+
+type CallableInputLayoutArgs<'db> =
+    FxHashMap<CallableInputLayoutHoleOrigin, FxHashMap<TyId<'db>, TyId<'db>>>;
+
+fn callable_input_layout_args<'db>(
+    db: &'db dyn HirAnalysisDb,
+    func: Func<'db>,
+) -> CallableInputLayoutArgs<'db> {
+    callable_input_layout_bindings_by_origin(db, CallableDef::Func(func))
+        .into_iter()
+        .map(|(origin, bindings)| (origin, bindings.into_iter().collect()))
+        .collect()
+}
+
+fn canonicalize_effect_binding_trait_inst<'db>(
+    db: &'db dyn HirAnalysisDb,
+    trait_inst: TraitInstId<'db>,
+) -> TraitInstId<'db> {
+    let mut assoc = trait_inst
+        .assoc_ty_bindings(db)
+        .into_iter()
+        .collect::<Vec<_>>();
+    assoc.sort_by_key(|(lhs, _)| *lhs);
+    TraitInstId::new(
+        db,
+        trait_inst.def(db),
+        trait_inst.args(db).to_vec(),
+        assoc.into_iter().collect::<IndexMap<_, _>>(),
+    )
+}
+
+fn contract_effect_hidden_param_scope<'db>(
+    _db: &'db dyn HirDb,
+    site: EffectParamSite<'db>,
+) -> ScopeId<'db> {
+    match site {
+        EffectParamSite::Contract(contract)
+        | EffectParamSite::ContractInit { contract }
+        | EffectParamSite::ContractRecvArm { contract, .. } => contract.scope(),
+        EffectParamSite::Func(_) => {
+            unreachable!("contract effect hidden params must use a contract-scoped site")
+        }
+    }
+}
+
+fn contract_effect_layout_param_name<'db>(
+    db: &'db dyn HirDb,
+    site: EffectParamSite<'db>,
+    binding_idx: u32,
+    layout_idx: usize,
+) -> IdentId<'db> {
+    let site_name = |ident: Option<IdentId<'db>>, fallback: &str| {
+        ident
+            .map(|ident| ident.data(db).to_string())
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    let prefix = match site {
+        EffectParamSite::Contract(contract) => {
+            format!(
+                "__contract{}_efflayout",
+                site_name(contract.name(db).to_opt(), "contract")
+            )
+        }
+        EffectParamSite::ContractInit { contract } => {
+            format!(
+                "__init{}_efflayout",
+                site_name(contract.name(db).to_opt(), "contract")
+            )
+        }
+        EffectParamSite::ContractRecvArm {
+            contract,
+            recv_idx,
+            arm_idx,
+        } => format!(
+            "__recv{}_{}_{}_efflayout",
+            site_name(contract.name(db).to_opt(), "contract"),
+            recv_idx,
+            arm_idx
+        ),
+        EffectParamSite::Func(_) => {
+            unreachable!("contract effect hidden params must use a contract-scoped site")
+        }
+    };
+    IdentId::new(db, format!("{prefix}{binding_idx}_{layout_idx}"))
+}
+
+fn contract_effect_hidden_param_ty<'db>(
+    db: &'db dyn HirAnalysisDb,
+    site: EffectParamSite<'db>,
+    binding_idx: u32,
+    layout_idx: usize,
+    placeholder: TyId<'db>,
+) -> TyId<'db> {
+    let TyData::ConstTy(const_ty) = placeholder.data(db) else {
+        return placeholder;
+    };
+    let fallback_ty = match const_ty.data(db) {
+        ConstTyData::Hole(hole_ty, _) => layout_hole_fallback_ty(db, *hole_ty),
+        ConstTyData::TyParam(_, fallback_ty) => *fallback_ty,
+        _ => return placeholder,
+    };
+    let param = TyParam::implicit_param(
+        contract_effect_layout_param_name(db, site, binding_idx, layout_idx),
+        layout_idx,
+        fallback_ty.kind(db).clone(),
+        contract_effect_hidden_param_scope(db, site),
+    );
+    TyId::new(
+        db,
+        TyData::ConstTy(ConstTyId::new(db, ConstTyData::TyParam(param, fallback_ty))),
+    )
+}
+
+fn canonicalize_contract_effect_key_value<'db, T>(
+    db: &'db dyn HirAnalysisDb,
+    site: EffectParamSite<'db>,
+    binding_idx: u32,
+    value: T,
+) -> T
+where
+    T: TyFoldable<'db> + TyVisitable<'db> + Copy,
+{
+    let placeholders = collect_unique_layout_placeholders_in_order_with_policy(
+        db,
+        value,
+        LayoutPlaceholderPolicy::HolesAndImplicitParams,
+    );
+    if placeholders.is_empty() {
+        return value;
+    }
+
+    let layout_args = placeholders
+        .into_iter()
+        .enumerate()
+        .map(|(layout_idx, placeholder)| {
+            (
+                placeholder,
+                contract_effect_hidden_param_ty(db, site, binding_idx, layout_idx, placeholder),
+            )
+        })
+        .collect::<FxHashMap<_, _>>();
+    substitute_layout_placeholders_by_identity(
+        db,
+        value,
+        &layout_args,
+        LayoutPlaceholderPolicy::HolesAndImplicitParams,
+    )
+}
+
+fn canonicalize_contract_effect_key<'db>(
+    db: &'db dyn HirAnalysisDb,
+    site: EffectParamSite<'db>,
+    binding_idx: u32,
+    key_ty: Option<TyId<'db>>,
+    key_trait: Option<TraitInstId<'db>>,
+) -> (Option<TyId<'db>>, Option<TraitInstId<'db>>) {
+    let key_ty = key_ty.map(|ty| canonicalize_contract_effect_key_value(db, site, binding_idx, ty));
+    let key_trait = key_trait
+        .map(|trait_inst| canonicalize_contract_effect_key_value(db, site, binding_idx, trait_inst))
+        .map(|trait_inst| canonicalize_effect_binding_trait_inst(db, trait_inst));
+    (key_ty, key_trait)
+}
+
+fn func_effect_bindings_canonical<'db>(
+    db: &'db dyn HirAnalysisDb,
+    func: Func<'db>,
+) -> Vec<EffectBinding<'db>> {
+    let assumptions = collect_func_decl_constraints(db, func.into(), true).instantiate_identity();
+    let layout_args = callable_input_layout_args(db, func);
+    func.effects(db)
+        .data(db)
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, effect)| {
+            let key_path = effect.key_path.to_opt()?;
+            let binding_name = effect
+                .name
+                .or_else(|| key_path.ident(db).to_opt())
+                .unwrap_or_else(|| IdentId::new(db, "_effect".to_string()));
+            let (key_kind, key_ty, key_trait) =
+                resolve_callable_input_effect_key(db, func, idx, key_path, assumptions)
+                    .into_parts();
+            let effect_layout_args = layout_args.get(&CallableInputLayoutHoleOrigin::Effect(idx));
+            let key_ty = key_ty.map(|ty| {
+                if !ty_contains_const_hole(db, ty) {
+                    return ty;
+                }
+                let Some(effect_layout_args) = effect_layout_args else {
+                    return ty;
+                };
+                let ty = substitute_layout_holes_by_identity(db, ty, effect_layout_args);
+                debug_assert!(
+                    !ty_contains_const_hole(db, ty) || ty.has_invalid(db),
+                    "unelaborated layout hole remained in callable effect key type"
+                );
+                ty
+            });
+            let key_trait = key_trait.map(|trait_inst| {
+                if collect_layout_hole_tys_in_order(db, trait_inst).is_empty() {
+                    return canonicalize_effect_binding_trait_inst(db, trait_inst);
+                }
+                let Some(effect_layout_args) = effect_layout_args else {
+                    return canonicalize_effect_binding_trait_inst(db, trait_inst);
+                };
+                canonicalize_effect_binding_trait_inst(
+                    db,
+                    substitute_layout_holes_by_identity_in(db, trait_inst, effect_layout_args),
+                )
+            });
+            Some(EffectBinding {
+                binding_name,
+                key_kind,
+                key_ty,
+                key_trait,
+                is_mut: effect.is_mut,
+                source: EffectSource::Root,
+                binding_site: EffectParamSite::Func(func),
+                binding_idx: idx as u32,
+                binding_path: key_path,
+            })
+        })
+        .collect()
+}
+
+fn contract_effect_bindings_canonical<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+) -> Vec<EffectBinding<'db>> {
+    let assumptions = PredicateListId::empty_list(db);
+    let site = EffectParamSite::Contract(contract);
+    contract
+        .effects(db)
+        .data(db)
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, effect)| {
+            let key_path = effect.key_path.to_opt()?;
+            let binding_name = effect
+                .name
+                .or_else(|| key_path.ident(db).to_opt())
+                .unwrap_or_else(|| IdentId::new(db, "_effect".to_string()));
+            let (key_kind, key_ty, key_trait) =
+                resolve_effect_key(db, key_path, contract.scope(), assumptions).into_parts();
+            let (key_ty, key_trait) =
+                canonicalize_contract_effect_key(db, site, idx as u32, key_ty, key_trait);
+            Some(EffectBinding {
+                binding_name,
+                key_kind,
+                key_ty,
+                key_trait,
+                is_mut: effect.is_mut,
+                source: EffectSource::Root,
+                binding_site: site,
+                binding_idx: idx as u32,
+                binding_path: key_path,
+            })
+        })
+        .collect()
+}
+
+fn lower_self_fallback_param_ty<'db>(
+    db: &'db dyn HirAnalysisDb,
+    func: Func<'db>,
+    hir_ty: TypeId<'db>,
+    assumptions: PredicateListId<'db>,
+) -> TyId<'db> {
+    match hir_ty.data(db) {
+        TypeKind::Path(path) if path.to_opt().is_some_and(|path| path.is_self_ty(db)) => func
+            .expected_self_ty(db)
+            .unwrap_or_else(|| lower_hir_ty(db, hir_ty, func.scope(), assumptions)),
+        TypeKind::Mode(mode, inner) => {
+            let Some(inner) = inner.to_opt() else {
+                return TyId::invalid(db, InvalidCause::ParseError);
+            };
+
+            let inner = lower_self_fallback_param_ty(db, func, inner, assumptions);
+            match mode {
+                TypeMode::Mut => TyId::borrow_mut_of(db, inner),
+                TypeMode::Ref => TyId::borrow_ref_of(db, inner),
+                TypeMode::Own => inner,
+            }
+        }
+        _ => lower_hir_ty(db, hir_ty, func.scope(), assumptions),
+    }
+}
+
+fn elaborate_func_param_ty<'db>(
+    db: &'db dyn HirAnalysisDb,
+    func: Func<'db>,
+    assumptions: PredicateListId<'db>,
+    layout_args: &CallableInputLayoutArgs<'db>,
+    param_idx: usize,
+    param: &FuncParam<'db>,
+    apply_view: bool,
+) -> TyId<'db> {
+    let mut ty = match (
+        param.ty.to_opt(),
+        param.is_self_param(db),
+        param.self_ty_fallback,
+    ) {
+        (Some(hir_ty), true, true) => lower_self_fallback_param_ty(db, func, hir_ty, assumptions),
+        (Some(hir_ty), true, false) => lower_callable_input_param_ty(
+            db,
+            func,
+            CallableInputLayoutHoleOrigin::Receiver,
+            hir_ty,
+            assumptions,
+        ),
+        (Some(hir_ty), false, _) => lower_callable_input_param_ty(
+            db,
+            func,
+            CallableInputLayoutHoleOrigin::ValueParam(param_idx),
+            hir_ty,
+            assumptions,
+        ),
+        (None, _, _) => TyId::invalid(db, InvalidCause::ParseError),
+    };
+    let had_layout_hole = ty_contains_const_hole(db, ty);
+
+    if param.is_self_param(db)
+        && had_layout_hole
+        && let Some(receiver_layout_args) =
+            layout_args.get(&CallableInputLayoutHoleOrigin::Receiver)
+    {
+        ty = substitute_layout_holes_by_identity(db, ty, receiver_layout_args);
+    } else if had_layout_hole
+        && let Some(param_layout_args) =
+            layout_args.get(&CallableInputLayoutHoleOrigin::ValueParam(param_idx))
+    {
+        ty = substitute_layout_holes_by_identity(db, ty, param_layout_args);
+    }
+
+    let ty = if apply_view
+        && param.mode == crate::hir_def::params::FuncParamMode::View
+        && ty.as_capability(db).is_none()
+    {
+        TyId::view_of(db, ty)
+    } else {
+        ty
+    };
+
+    if had_layout_hole {
+        let func_name = func
+            .name(db)
+            .to_opt()
+            .map(|name| name.data(db).to_string())
+            .unwrap_or_else(|| "<anonymous>".to_string());
+        debug_assert!(
+            !ty_contains_const_hole(db, ty) || ty.has_invalid(db),
+            "unelaborated layout hole remained in callable parameter type for {func_name} param {param_idx}: {}",
+            ty.pretty_print(db),
+        );
+    }
+    ty
+}
 // Top‑level module items ----------------------------------------------------
 
 impl<'db> TopLevelMod<'db> {
@@ -126,6 +536,35 @@ impl<'db> Mod<'db> {
 // Function items ------------------------------------------------------------
 
 impl<'db> Func<'db> {
+    pub fn arithmetic_mode(self, db: &'db dyn HirDb) -> ArithmeticMode {
+        if let Some(mode) = self.attributes(db).arithmetic_mode(db) {
+            return mode;
+        }
+
+        let mut scope = self.scope().parent_module(db);
+        while let Some(module_scope) = scope {
+            if let ItemKind::Mod(mod_) = module_scope.item()
+                && let Some(mode) = mod_.attributes(db).arithmetic_mode(db)
+            {
+                return mode;
+            }
+            scope = module_scope.parent_module(db);
+        }
+
+        if let Some(mode) = self.top_mod(db).attributes(db).arithmetic_mode(db) {
+            return mode;
+        }
+
+        if let Some(mode) = self.top_mod(db).ingot(db).arithmetic_mode(db) {
+            return match mode {
+                common::config::ArithmeticMode::Checked => ArithmeticMode::Checked,
+                common::config::ArithmeticMode::Unchecked => ArithmeticMode::Unchecked,
+            };
+        }
+
+        ArithmeticMode::Checked
+    }
+
     /// Semantic predicate list (assumptions) for this function.
     pub(crate) fn assumptions(self, db: &'db dyn HirAnalysisDb) -> PredicateListId<'db> {
         constraints_for(db, self.into())
@@ -152,17 +591,28 @@ impl<'db> Func<'db> {
 
     /// Semantic argument types bound to identity parameters.
     pub fn arg_tys(self, db: &'db dyn HirAnalysisDb) -> Vec<Binder<TyId<'db>>> {
-        use crate::analysis::ty::ty_def::{InvalidCause, TyId};
         let assumptions = self.assumptions(db);
+        let layout_args = callable_input_layout_args(db, self);
         match self.params_list(db).to_opt() {
             Some(params) => params
                 .data(db)
                 .iter()
-                .map(|p| match p.ty.to_opt() {
-                    Some(hir_ty) => {
-                        Binder::bind(lower_hir_ty(db, hir_ty, self.scope(), assumptions))
-                    }
-                    None => Binder::bind(TyId::invalid(db, InvalidCause::ParseError)),
+                .enumerate()
+                .map(|(param_idx, param)| {
+                    let ty = elaborate_func_param_ty(
+                        db,
+                        self,
+                        assumptions,
+                        &layout_args,
+                        param_idx,
+                        param,
+                        true,
+                    );
+                    debug_assert!(
+                        !ty_contains_const_hole(db, ty) || ty.has_invalid(db),
+                        "unelaborated layout hole remained in Func::arg_tys"
+                    );
+                    Binder::bind(ty)
                 })
                 .collect(),
             None => Vec::new(),
@@ -220,6 +670,15 @@ impl<'db> Func<'db> {
         }
     }
 
+    /// Returns the containing inherent `impl` block if this function is a method
+    /// inside an `impl` block (not an `impl Trait` block).
+    pub fn containing_impl(self, db: &'db dyn HirDb) -> Option<Impl<'db>> {
+        match self.scope().parent(db)? {
+            ScopeId::Item(ItemKind::Impl(impl_)) => Some(impl_),
+            _ => None,
+        }
+    }
+
     /// If this function is a method inside an `impl Trait` block, returns the
     /// corresponding trait method definition.
     ///
@@ -235,6 +694,88 @@ impl<'db> Func<'db> {
         trait_
             .methods(db)
             .find(|m| m.name(db).to_opt() == Some(method_name))
+    }
+}
+
+// Call site analysis --------------------------------------------------------
+
+/// A call site found inside a function body.
+#[derive(Clone, Debug)]
+pub struct CallSiteView<'db> {
+    pub body: Body<'db>,
+    pub expr_id: ExprId,
+    pub kind: CallSiteKind<'db>,
+}
+
+/// Discriminant for the shape of a call expression.
+#[derive(Clone, Debug)]
+pub enum CallSiteKind<'db> {
+    FnCall,
+    MethodCall { method_name: Partial<IdentId<'db>> },
+}
+
+impl<'db> CallSiteView<'db> {
+    /// Resolve the callee of this call site via type checking.
+    pub fn target(&self, db: &'db dyn HirAnalysisDb) -> Option<CallableDef<'db>> {
+        use crate::analysis::ty::ty_check::check_func_body;
+        let func = self.body.containing_func(db)?;
+        let (_, typed_body) = check_func_body(db, func);
+        typed_body
+            .callable_expr(self.expr_id)
+            .map(|c| c.callable_def)
+    }
+
+    /// Span of the callee name at the call site (function path or method name).
+    pub fn callee_span(&self) -> crate::span::DynLazySpan<'db> {
+        let expr_span = self.expr_id.span(self.body);
+        match &self.kind {
+            CallSiteKind::FnCall => expr_span.into_call_expr().callee().into(),
+            CallSiteKind::MethodCall { .. } => {
+                expr_span.into_method_call_expr().method_name().into()
+            }
+        }
+    }
+
+    /// Span of the entire call expression.
+    pub fn call_span(&self) -> crate::span::DynLazySpan<'db> {
+        self.expr_id.span(self.body).into()
+    }
+
+    /// The function containing this call site.
+    pub fn containing_func(&self, db: &'db dyn HirDb) -> Option<Func<'db>> {
+        self.body.containing_func(db)
+    }
+}
+
+impl<'db> Body<'db> {
+    /// Enumerate all call sites (function calls and method calls) in this body.
+    pub fn call_sites(self, db: &'db dyn HirDb) -> Vec<CallSiteView<'db>> {
+        let mut sites = Vec::new();
+        for (expr_id, partial_expr) in self.exprs(db).iter() {
+            let Partial::Present(expr) = partial_expr else {
+                continue;
+            };
+            match expr {
+                Expr::Call(_, _) => {
+                    sites.push(CallSiteView {
+                        body: self,
+                        expr_id,
+                        kind: CallSiteKind::FnCall,
+                    });
+                }
+                Expr::MethodCall(_, method_name, _, _) => {
+                    sites.push(CallSiteView {
+                        body: self,
+                        expr_id,
+                        kind: CallSiteKind::MethodCall {
+                            method_name: *method_name,
+                        },
+                    });
+                }
+                _ => {}
+            }
+        }
+        sites
     }
 }
 
@@ -381,6 +922,14 @@ pub struct FuncParamView<'db> {
 }
 
 impl<'db> FuncParamView<'db> {
+    pub(crate) fn hir_ty(self, db: &'db dyn HirDb) -> Option<TypeId<'db>> {
+        self.func
+            .params_list(db)
+            .to_opt()
+            .and_then(|l| l.data(db).get(self.idx))
+            .and_then(|param| param.ty.to_opt())
+    }
+
     pub fn name(self, db: &'db dyn HirDb) -> Option<IdentId<'db>> {
         let list = self.func.params_list(db).to_opt()?;
         list.data(db).get(self.idx)?.name()
@@ -388,9 +937,17 @@ impl<'db> FuncParamView<'db> {
 
     pub fn label(self, db: &'db dyn HirDb) -> Option<IdentId<'db>> {
         let list = self.func.params_list(db).to_opt()?;
-        match list.data(db).get(self.idx)?.label {
-            Some(FuncParamName::Ident(id)) => Some(id),
-            _ => None,
+        let param = list.data(db).get(self.idx)?;
+        (!param.is_label_suppressed && !param.is_self_param(db))
+            .then(|| param.name())
+            .flatten()
+    }
+
+    pub fn is_label_suppressed(self, db: &'db dyn HirDb) -> bool {
+        let list = self.func.params_list(db).to_opt();
+        match list.and_then(|l| l.data(db).get(self.idx)) {
+            Some(p) => p.is_label_suppressed,
+            None => false,
         }
     }
 
@@ -412,6 +969,14 @@ impl<'db> FuncParamView<'db> {
         match list.and_then(|l| l.data(db).get(self.idx)) {
             Some(p) => p.is_mut,
             None => false,
+        }
+    }
+
+    pub fn mode(self, db: &'db dyn HirDb) -> crate::hir_def::params::FuncParamMode {
+        let list = self.func.params_list(db).to_opt();
+        match list.and_then(|l| l.data(db).get(self.idx)) {
+            Some(p) => p.mode,
+            None => crate::hir_def::params::FuncParamMode::View,
         }
     }
 
@@ -475,15 +1040,50 @@ impl<'db> FuncParamView<'db> {
         let func = self.func;
         let assumptions = func.assumptions(db);
 
-        let Some(hir_ty) = self
+        let Some(param) = self
             .func
             .params_list(db)
             .to_opt()
             .and_then(|l| l.data(db).get(self.idx))
-            .and_then(|p| p.ty.to_opt())
         else {
             return Vec::new();
         };
+        let Some(hir_ty) = param.ty.to_opt() else {
+            return Vec::new();
+        };
+
+        if self.is_self_param(db) && !param.self_ty_fallback {
+            if param.has_ref_prefix {
+                return vec![
+                    TyLowerDiag::MixedRefSelfPrefixWithExplicitType {
+                        span: self.span().ref_kw().into(),
+                    }
+                    .into(),
+                ];
+            }
+
+            if param.has_own_prefix {
+                return vec![
+                    TyLowerDiag::MixedOwnSelfPrefixWithExplicitType {
+                        span: self.span().own_kw().into(),
+                    }
+                    .into(),
+                ];
+            }
+
+            if param.is_mut && !allows_mut_self_prefix_with_explicit_ty(db, hir_ty) {
+                let span = self.span().mut_kw().into();
+                return vec![TyLowerDiag::InvalidMutSelfPrefixWithExplicitType { span }.into()];
+            }
+        }
+
+        if !self.is_self_param(db)
+            && param.is_mut
+            && !matches!(hir_ty.data(db), TypeKind::Mode(TypeMode::Own, _))
+        {
+            let span = self.span().mut_kw().into();
+            return vec![TyLowerDiag::InvalidMutParamPrefixWithoutOwnType { span }.into()];
+        }
 
         // Surface name-resolution errors for the parameter type first
         let errs =
@@ -492,7 +1092,15 @@ impl<'db> FuncParamView<'db> {
             return errs;
         }
 
-        let ty = lower_hir_ty(db, hir_ty, func.scope(), assumptions);
+        let semantic_ty = self.ty(db);
+        let ty = if semantic_ty.has_invalid(db) {
+            let layout_args = callable_input_layout_args(db, func);
+            elaborate_func_param_ty(db, func, assumptions, &layout_args, self.idx, param, false)
+        } else if self.mode(db) == crate::hir_def::params::FuncParamMode::View {
+            semantic_ty.as_view(db).unwrap_or(semantic_ty)
+        } else {
+            semantic_ty
+        };
         let ty_span = self.ty_span(db);
 
         let mut out = Vec::new();
@@ -514,15 +1122,29 @@ impl<'db> FuncParamView<'db> {
             return out;
         }
 
-        // Well-formedness / trait-bound satisfaction for parameter type
-        if let WellFormedness::IllFormed { goal, subgoal } =
-            check_ty_wf(db, func.top_mod(db).ingot(db), ty, assumptions)
+        if self.mode(db) == crate::hir_def::params::FuncParamMode::Own && ty.as_borrow(db).is_some()
         {
+            out.push(
+                TyLowerDiag::OwnParamCannotBeBorrow {
+                    span: ty_span.clone(),
+                    ty,
+                }
+                .into(),
+            );
+        }
+
+        // Well-formedness / trait-bound satisfaction for parameter type
+        if let WellFormedness::IllFormed { goal, subgoal } = check_ty_wf(
+            db,
+            TraitSolveCx::new(db, func.scope()).with_assumptions(assumptions),
+            ty,
+        ) {
             out.push(
                 TraitConstraintDiag::TraitBoundNotSat {
                     span: ty_span.clone(),
                     primary_goal: goal,
                     unsat_subgoal: subgoal,
+                    required_by: None,
                 }
                 .into(),
             );
@@ -530,16 +1152,35 @@ impl<'db> FuncParamView<'db> {
 
         // Self-parameter type shape check
         if self.is_self_param(db)
-            && let Some(expected) = func.expected_self_ty(db)
+            && let Some(mut expected) = func.expected_self_ty(db)
             && !ty.has_invalid(db)
             && !expected.has_invalid(db)
         {
-            let (exp_base, exp_args) = expected.decompose_ty_app(db);
+            if ty_contains_const_hole(db, expected) {
+                let layout_args = callable_input_layout_args(db, func);
+                if let Some(receiver_layout_args) =
+                    layout_args.get(&CallableInputLayoutHoleOrigin::Receiver)
+                {
+                    expected =
+                        substitute_layout_holes_by_identity(db, expected, receiver_layout_args);
+                }
+            }
             let ty_norm = normalize_ty(db, ty, func.scope(), assumptions);
-            let (ty_base, ty_args) = ty_norm.decompose_ty_app(db);
-            let same_base = ty_base == exp_base;
-            let same_args = exp_args.iter().zip(ty_args.iter()).all(|(a, b)| a == b);
-            if !(same_base && same_args) {
+
+            let matches_expected = |candidate: TyId<'db>| {
+                let (exp_base, exp_args) = expected.decompose_ty_app(db);
+                let (cand_base, cand_args) = candidate.decompose_ty_app(db);
+                cand_base == exp_base
+                    && cand_args.len() >= exp_args.len()
+                    && exp_args.iter().zip(cand_args.iter()).all(|(a, b)| a == b)
+            };
+
+            let is_allowed_self_ty = matches_expected(ty_norm)
+                || ty_norm
+                    .as_capability(db)
+                    .is_some_and(|(_, inner)| matches_expected(inner));
+
+            if !is_allowed_self_ty {
                 out.push(
                     ImplDiag::InvalidSelfType {
                         span: ty_span,
@@ -555,73 +1196,90 @@ impl<'db> FuncParamView<'db> {
     }
 }
 
+fn allows_mut_self_prefix_with_explicit_ty<'db>(db: &'db dyn HirDb, hir_ty: TypeId<'db>) -> bool {
+    if let TypeKind::Mode(TypeMode::Own, inner) = hir_ty.data(db)
+        && let Some(inner) = inner.to_opt()
+    {
+        !is_bare_self_ty(db, inner)
+    } else {
+        false
+    }
+}
+
+fn is_bare_self_ty<'db>(db: &'db dyn HirDb, hir_ty: TypeId<'db>) -> bool {
+    if let TypeKind::Path(path) = hir_ty.data(db)
+        && let Some(path) = path.to_opt()
+    {
+        path.is_self_ty(db) && path.generic_args(db).is_empty(db)
+    } else {
+        false
+    }
+}
+
 // Effect param views --------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Update)]
+#[salsa::interned]
+#[derive(Debug)]
 pub struct RecvView<'db> {
-    contract: Contract<'db>,
-    recv_idx: u32,
+    pub contract: Contract<'db>,
+    pub recv_idx: u32,
 }
 
 impl<'db> RecvView<'db> {
-    pub fn contract(self) -> Contract<'db> {
-        self.contract
-    }
-
-    pub fn index(self) -> u32 {
-        self.recv_idx
+    pub fn index(self, db: &'db dyn HirDb) -> u32 {
+        self.recv_idx(db)
     }
 
     pub fn msg_path(self, db: &'db dyn HirDb) -> Option<PathId<'db>> {
-        self.contract
+        self.contract(db)
             .recvs(db)
             .data(db)
-            .get(self.recv_idx as usize)
+            .get(self.recv_idx(db) as usize)
             .and_then(|r| r.msg_path)
     }
 
     pub fn arm(self, db: &'db dyn HirDb, arm_idx: u32) -> Option<RecvArmView<'db>> {
-        self.contract
-            .recv_arm(db, self.recv_idx as usize, arm_idx as usize)
-            .map(|_| RecvArmView {
-                recv: self,
-                arm_idx,
-            })
+        self.contract(db)
+            .recv_arm(db, self.recv_idx(db) as usize, arm_idx as usize)
+            .map(|_| RecvArmView::new(db, self, arm_idx))
     }
 
     pub fn arms(self, db: &'db dyn HirDb) -> impl Iterator<Item = RecvArmView<'db>> + 'db {
         let len = self
-            .contract
+            .contract(db)
             .recvs(db)
             .data(db)
-            .get(self.recv_idx as usize)
+            .get(self.recv_idx(db) as usize)
             .map(|r| r.arms.data(db).len())
             .unwrap_or(0);
-        (0..len).map(move |arm_idx| RecvArmView {
-            recv: self,
-            arm_idx: arm_idx as u32,
-        })
+        (0..len).map(move |arm_idx| RecvArmView::new(db, self, arm_idx as u32))
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Update)]
+#[salsa::interned]
+#[derive(Debug)]
 pub struct RecvArmView<'db> {
-    recv: RecvView<'db>,
-    arm_idx: u32,
+    pub recv: RecvView<'db>,
+    pub arm_idx: u32,
 }
 
 impl<'db> RecvArmView<'db> {
-    pub fn recv(self) -> RecvView<'db> {
-        self.recv
+    pub fn index(self, db: &'db dyn HirDb) -> u32 {
+        self.arm_idx(db)
     }
 
-    pub fn contract(self) -> Contract<'db> {
-        self.recv.contract
+    pub fn contract(self, db: &'db dyn HirDb) -> Contract<'db> {
+        self.recv(db).contract(db)
     }
 
     pub fn arm(self, db: &'db dyn HirDb) -> Option<ContractRecvArm<'db>> {
-        self.contract()
-            .recv_arm(db, self.recv.recv_idx as usize, self.arm_idx as usize)
+        let recv = self.recv(db);
+        recv.contract(db)
+            .recv_arm(db, recv.recv_idx(db) as usize, self.arm_idx(db) as usize)
+    }
+
+    pub fn is_fallback(self, db: &'db dyn HirDb) -> bool {
+        self.arm(db).is_some_and(|arm| arm.is_fallback(db))
     }
 
     pub fn effects(self, db: &'db dyn HirDb) -> EffectParamListId<'db> {
@@ -629,6 +1287,1196 @@ impl<'db> RecvArmView<'db> {
             .map(|a| a.effects)
             .unwrap_or_else(|| EffectParamListId::new(db, Vec::new()))
     }
+
+    pub fn effective_effect_env(self, db: &'db dyn HirAnalysisDb) -> EffectEnvView<'db> {
+        let contract = self.contract(db);
+        let recv_idx = self.recv(db).recv_idx(db);
+        let arm_idx = self.arm_idx(db);
+        EffectEnvView {
+            site: EffectParamSite::ContractRecvArm {
+                contract,
+                recv_idx,
+                arm_idx,
+            },
+        }
+    }
+}
+
+#[salsa::tracked]
+impl<'db> RecvArmView<'db> {
+    #[salsa::tracked]
+    pub fn variant_ty(self, db: &'db dyn HirAnalysisDb) -> TyId<'db> {
+        let assumptions = PredicateListId::empty_list(db);
+        let recv = self.recv(db);
+        let contract = recv.contract(db);
+
+        let recv_is_bare = recv.msg_path(db).is_none();
+        let msg_mod = recv
+            .msg_path(db)
+            .and_then(|p| resolve_msg_mod(db, contract, p, assumptions));
+
+        let Some(hir_arm) = self.arm(db) else {
+            return TyId::invalid(db, InvalidCause::Other);
+        };
+
+        let (_variant_struct, variant_ty) =
+            resolve_recv_variant(db, contract, msg_mod, recv_is_bare, hir_arm, assumptions);
+
+        variant_ty.unwrap_or_else(|| TyId::invalid(db, InvalidCause::Other))
+    }
+
+    #[salsa::tracked]
+    pub fn abi_info(self, db: &'db dyn HirAnalysisDb, abi: TyId<'db>) -> RecvArmAbiInfo<'db> {
+        if self.is_fallback(db) {
+            return RecvArmAbiInfo {
+                is_fallback: true,
+                selector_value: None,
+                selector_signature: None,
+                args_ty: TyId::unit(db),
+                ret_ty: None,
+            };
+        }
+
+        let assumptions = PredicateListId::empty_list(db);
+        let recv = self.recv(db);
+        let contract = recv.contract(db);
+
+        let variant_ty = self.variant_ty(db);
+        let selector_info = get_variant_selector_info(db, variant_ty, contract.scope());
+
+        let Some(msg_variant_trait) =
+            resolve_core_trait(db, contract.scope(), &["message", "MsgVariant"])
+        else {
+            return RecvArmAbiInfo {
+                is_fallback: false,
+                selector_value: selector_info.value,
+                selector_signature: selector_info.signature,
+                args_ty: variant_ty,
+                ret_ty: None,
+            };
+        };
+        let return_ident = IdentId::new(db, "Return".to_string());
+
+        let variant_ret_ty = if !variant_ty.has_invalid(db) && !abi.has_invalid(db) {
+            let inst = TraitInstId::new(
+                db,
+                msg_variant_trait,
+                vec![variant_ty, abi],
+                IndexMap::new(),
+            );
+            let return_proj = TyId::assoc_ty(db, inst, return_ident);
+            normalize_ty(db, return_proj, contract.scope(), assumptions)
+        } else {
+            TyId::invalid(db, InvalidCause::Other)
+        };
+
+        let args_ty = variant_ty;
+        let ret_ty = (variant_ret_ty != TyId::unit(db)).then_some(variant_ret_ty);
+
+        RecvArmAbiInfo {
+            is_fallback: false,
+            selector_value: selector_info.value,
+            selector_signature: selector_info.signature,
+            args_ty,
+            ret_ty,
+        }
+    }
+
+    #[salsa::tracked(return_ref)]
+    pub fn arg_bindings(self, db: &'db dyn HirAnalysisDb) -> Vec<ArgBinding<'db>> {
+        if self.is_fallback(db) {
+            return Vec::new();
+        }
+
+        let assumptions = PredicateListId::empty_list(db);
+        let recv = self.recv(db);
+        let contract = recv.contract(db);
+
+        let Some(sol_ty) = resolve_sol_abi_ty(db, contract.scope(), assumptions) else {
+            return Vec::new();
+        };
+
+        let variant_ty = self.variant_ty(db);
+        let Some(variant_struct) = variant_struct_from_ty(db, variant_ty) else {
+            return Vec::new();
+        };
+
+        let Some(hir_arm) = self.arm(db) else {
+            return Vec::new();
+        };
+
+        let abi_info = self.abi_info(db, sol_ty);
+        compute_arg_bindings(
+            db,
+            variant_struct,
+            abi_info.args_ty,
+            hir_arm.pat,
+            hir_arm.body,
+        )
+        .unwrap_or_default()
+    }
+
+    #[salsa::tracked(return_ref)]
+    pub fn effective_effect_bindings(self, db: &'db dyn HirAnalysisDb) -> Vec<EffectBinding<'db>> {
+        let contract = self.contract(db);
+        let recv_idx = self.recv(db).recv_idx(db);
+        let arm_idx = self.arm_idx(db);
+        let Some(arm) = self.arm(db) else {
+            return Vec::new();
+        };
+
+        let site = EffectParamSite::ContractRecvArm {
+            contract,
+            recv_idx,
+            arm_idx,
+        };
+        contract_scoped_effect_bindings_canonical(db, contract, site, arm.effects)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub struct ContractFieldInfo<'db> {
+    pub index: u32,
+    pub name: IdentId<'db>,
+    pub declared_ty: TyId<'db>,
+    pub is_provider: bool,
+    pub target_ty: TyId<'db>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub struct ContractFieldLayoutInfo<'db> {
+    pub index: u32,
+    pub name: IdentId<'db>,
+    pub declared_ty: TyId<'db>,
+    pub is_provider: bool,
+    pub target_ty: TyId<'db>,
+    /// Semantic address space in which this field is allocated.
+    pub address_space: TyId<'db>,
+    /// Slot offset from the start of `address_space`.
+    pub slot_offset: usize,
+    /// Total number of slots consumed by this field.
+    pub slot_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub struct ArgBinding<'db> {
+    pub pat: PatId,
+    pub tuple_index: u32,
+    pub ty: TyId<'db>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub enum EffectSource {
+    Root,
+    Field(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub struct EffectBinding<'db> {
+    pub binding_name: IdentId<'db>,
+    pub key_kind: EffectKeyKind,
+    pub key_ty: Option<TyId<'db>>,
+    pub key_trait: Option<TraitInstId<'db>>,
+    pub is_mut: bool,
+    pub source: EffectSource,
+    pub binding_site: EffectParamSite<'db>,
+    pub binding_idx: u32,
+    /// The path written at the binding site (e.g. `uses (ctx)` or `uses (mut store)`).
+    ///
+    /// Note: this is not necessarily the semantic "key path" that resolves to a type/trait; for
+    /// contract-scoped named imports, this is the import name, while the resolved key is captured
+    /// by `key_kind`/`key_ty`/`key_trait`.
+    pub binding_path: PathId<'db>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub struct EffectEnvView<'db> {
+    site: EffectParamSite<'db>,
+}
+
+impl<'db> EffectEnvView<'db> {
+    pub fn new(site: EffectParamSite<'db>) -> Self {
+        Self { site }
+    }
+
+    pub fn site(self) -> EffectParamSite<'db> {
+        self.site
+    }
+
+    pub fn bindings(self, db: &'db dyn HirAnalysisDb) -> &'db [EffectBinding<'db>] {
+        match self.site {
+            EffectParamSite::Contract(contract) => contract.effect_bindings(db).as_slice(),
+            EffectParamSite::ContractInit { contract } => {
+                contract.init_effect_bindings(db).as_slice()
+            }
+            EffectParamSite::ContractRecvArm {
+                contract,
+                recv_idx,
+                arm_idx,
+            } => {
+                let recv = RecvView::new(db, contract, recv_idx);
+                let arm = RecvArmView::new(db, recv, arm_idx);
+                arm.effective_effect_bindings(db).as_slice()
+            }
+            EffectParamSite::Func(func) => func.effective_effect_bindings(db).as_slice(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+pub struct RecvArmAbiInfo<'db> {
+    pub is_fallback: bool,
+    pub selector_value: Option<u32>,
+    pub selector_signature: Option<String>,
+    pub args_ty: TyId<'db>,
+    pub ret_ty: Option<TyId<'db>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Update)]
+struct VariantSelectorInfo {
+    value: Option<u32>,
+    signature: Option<String>,
+}
+
+fn variant_struct_from_ty<'db>(db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> Option<Struct<'db>> {
+    match ty.base_ty(db).data(db) {
+        TyData::TyBase(TyBase::Adt(adt)) => match adt.adt_ref(db) {
+            AdtRef::Struct(struct_) => Some(struct_),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn slot_const_ty<'db>(db: &'db dyn HirAnalysisDb, value: usize, ty: TyId<'db>) -> TyId<'db> {
+    let int = IntegerId::new(db, BigUint::from(value));
+    let const_ty = ConstTyId::new(
+        db,
+        ConstTyData::Evaluated(EvaluatedConstTy::LitInt(int), ty),
+    );
+    TyId::new(db, TyData::ConstTy(const_ty))
+}
+
+fn const_ty_to_usize<'db>(db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> Option<usize> {
+    let TyData::ConstTy(const_ty) = ty.data(db) else {
+        return None;
+    };
+    match const_ty.data(db) {
+        ConstTyData::Evaluated(EvaluatedConstTy::LitInt(int_id), _) => int_id.data(db).to_usize(),
+        _ => None,
+    }
+}
+
+fn contract_field_base_slot_count<'db>(db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> usize {
+    fn inner<'db>(
+        db: &'db dyn HirAnalysisDb,
+        ty: TyId<'db>,
+        visiting: &mut FxHashSet<TyId<'db>>,
+    ) -> usize {
+        if !visiting.insert(ty) {
+            return 1;
+        }
+
+        let slots = if let TyData::ConstTy(const_ty) = ty.data(db) {
+            inner(db, const_ty.ty(db), visiting)
+        } else if ty.is_never(db) || ty.is_zero_sized(db) {
+            0
+        } else if let TyData::TyParam(param) = ty.data(db)
+            && (param.is_effect() || param.is_effect_provider() || param.is_trait_self())
+        {
+            0
+        } else if let TyData::TyBase(TyBase::Func(_) | TyBase::Contract(_)) =
+            ty.base_ty(db).data(db)
+        {
+            0
+        } else if ty.is_tuple(db) {
+            ty.field_types(db)
+                .into_iter()
+                .fold(0usize, |acc, field_ty| {
+                    acc.saturating_add(inner(db, field_ty, visiting))
+                })
+        } else if ty.is_array(db) {
+            let (_, args) = ty.decompose_ty_app(db);
+            let elem_slots = args
+                .first()
+                .copied()
+                .map(|elem_ty| inner(db, elem_ty, visiting))
+                .unwrap_or(1);
+            let len = args
+                .get(1)
+                .copied()
+                .and_then(|len_ty| const_ty_to_usize(db, len_ty))
+                .unwrap_or(1);
+            elem_slots.saturating_mul(len)
+        } else if let Some(adt_def) = ty.adt_def(db) {
+            match adt_def.adt_ref(db) {
+                AdtRef::Struct(_) => ty
+                    .field_types(db)
+                    .into_iter()
+                    .fold(0usize, |acc, field_ty| {
+                        acc.saturating_add(inner(db, field_ty, visiting))
+                    }),
+                AdtRef::Enum(_) => {
+                    let args = ty.generic_args(db);
+                    let max_payload = adt_def
+                        .fields(db)
+                        .iter()
+                        .enumerate()
+                        .map(|(variant_idx, variant)| {
+                            variant.iter_types(db).enumerate().fold(
+                                0usize,
+                                |payload, (field_idx, _)| {
+                                    let field_ty = instantiate_adt_field_ty(
+                                        db,
+                                        adt_def,
+                                        variant_idx,
+                                        field_idx,
+                                        args,
+                                    );
+                                    payload.saturating_add(inner(db, field_ty, visiting))
+                                },
+                            )
+                        })
+                        .max()
+                        .unwrap_or(0);
+                    1usize.saturating_add(max_payload)
+                }
+            }
+        } else {
+            1
+        };
+
+        visiting.remove(&ty);
+        slots
+    }
+
+    inner(db, ty, &mut FxHashSet::default())
+}
+
+struct ContractFieldLayoutPlan<'db> {
+    declared_ty: TyId<'db>,
+    is_provider: bool,
+    address_space: TyId<'db>,
+    target_ty: TyId<'db>,
+    slot_basis_ty: TyId<'db>,
+    slot_placeholders: Vec<TyId<'db>>,
+    materialization_placeholders: Vec<TyId<'db>>,
+}
+
+#[derive(Clone, Copy)]
+struct ContractFieldEffectHandleCx<'db> {
+    scope: ScopeId<'db>,
+    assumptions: PredicateListId<'db>,
+    effect_handle: Trait<'db>,
+    address_space_ident: IdentId<'db>,
+    target_ident: IdentId<'db>,
+    fallback_space: TyId<'db>,
+}
+
+impl<'db> ContractFieldEffectHandleCx<'db> {
+    fn metadata(
+        self,
+        db: &'db dyn HirAnalysisDb,
+        field_ty: TyId<'db>,
+    ) -> (bool, TyId<'db>, TyId<'db>) {
+        let inst = TraitInstId::new(db, self.effect_handle, vec![field_ty], IndexMap::new());
+        match is_goal_satisfiable(db, TraitSolveCx::new(db, self.scope), inst) {
+            GoalSatisfiability::ContainsInvalid | GoalSatisfiability::UnSat(_) => {
+                (false, self.fallback_space, field_ty)
+            }
+            GoalSatisfiability::Satisfied(_) | GoalSatisfiability::NeedsConfirmation(_) => {
+                let normalize_assoc = |name, fallback, allow_holes| {
+                    inst.assoc_ty(db, name)
+                        .map(|assoc| normalize_ty(db, assoc, self.scope, self.assumptions))
+                        .filter(|ty| {
+                            !ty.has_invalid(db) && (allow_holes || !ty_contains_const_hole(db, *ty))
+                        })
+                        .unwrap_or(fallback)
+                };
+
+                (
+                    true,
+                    normalize_assoc(self.address_space_ident, self.fallback_space, false),
+                    normalize_assoc(self.target_ident, field_ty, true),
+                )
+            }
+        }
+    }
+
+    fn layout_plan(
+        self,
+        db: &'db dyn HirAnalysisDb,
+        field_ty: TyId<'db>,
+    ) -> ContractFieldLayoutPlan<'db> {
+        let (is_provider, address_space, target_ty) = self.metadata(db, field_ty);
+        // Provider slot order is defined by the normalized Target type. Contract
+        // layout must not synthesize a positional equivalence with the wrapper.
+        let slot_basis_ty = if is_provider { target_ty } else { field_ty };
+        let slot_placeholders = collect_unique_layout_placeholders_in_order_with_policy(
+            db,
+            slot_basis_ty,
+            LayoutPlaceholderPolicy::HolesAndImplicitParams,
+        );
+        let other_placeholders = if is_provider {
+            collect_unique_layout_placeholders_in_order_with_policy(
+                db,
+                field_ty,
+                LayoutPlaceholderPolicy::HolesAndImplicitParams,
+            )
+        } else {
+            collect_unique_layout_placeholders_in_order_with_policy(
+                db,
+                target_ty,
+                LayoutPlaceholderPolicy::HolesAndImplicitParams,
+            )
+        };
+        let mut seen = slot_placeholders.iter().copied().collect::<FxHashSet<_>>();
+        let mut materialization_placeholders = slot_placeholders.clone();
+        materialization_placeholders.extend(
+            other_placeholders
+                .into_iter()
+                .filter(|placeholder| seen.insert(*placeholder)),
+        );
+        ContractFieldLayoutPlan {
+            declared_ty: field_ty,
+            is_provider,
+            address_space,
+            target_ty,
+            slot_basis_ty,
+            slot_placeholders,
+            materialization_placeholders,
+        }
+    }
+}
+
+fn contract_field_layout_slot_assignments<'db>(
+    db: &'db dyn HirAnalysisDb,
+    slot_placeholders: &[TyId<'db>],
+    materialization_placeholders: &[TyId<'db>],
+    start_slot: usize,
+) -> FxHashMap<TyId<'db>, TyId<'db>> {
+    debug_assert!(materialization_placeholders.starts_with(slot_placeholders));
+    materialization_placeholders
+        .iter()
+        .enumerate()
+        .filter_map(|(offset, hole)| {
+            let TyData::ConstTy(const_ty) = hole.data(db) else {
+                return None;
+            };
+            let hole_ty = match const_ty.data(db) {
+                ConstTyData::Hole(hole_ty, _) => *hole_ty,
+                ConstTyData::TyParam(param, hole_ty) if param.is_implicit() => *hole_ty,
+                _ => return None,
+            };
+            Some((
+                *hole,
+                slot_const_ty(
+                    db,
+                    start_slot.saturating_add(offset),
+                    layout_hole_fallback_ty(db, hole_ty),
+                ),
+            ))
+        })
+        .collect()
+}
+
+fn materialize_contract_layout_holes<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ty: TyId<'db>,
+    slot_assignments: &FxHashMap<TyId<'db>, TyId<'db>>,
+) -> TyId<'db> {
+    substitute_layout_placeholders_by_identity(
+        db,
+        ty,
+        slot_assignments,
+        LayoutPlaceholderPolicy::HolesAndImplicitParams,
+    )
+}
+
+#[salsa::tracked]
+impl<'db> Contract<'db> {
+    pub fn recv(self, db: &'db dyn HirDb, recv_idx: u32) -> Option<RecvView<'db>> {
+        self.recvs(db)
+            .data(db)
+            .get(recv_idx as usize)
+            .map(|_| RecvView::new(db, self, recv_idx))
+    }
+
+    pub fn init_effect_env(self, db: &'db dyn HirDb) -> Option<EffectEnvView<'db>> {
+        self.init(db).map(|_| EffectEnvView {
+            site: EffectParamSite::ContractInit { contract: self },
+        })
+    }
+
+    pub fn recv_views(self, db: &'db dyn HirDb) -> impl Iterator<Item = RecvView<'db>> + 'db {
+        let len = self.recvs(db).data(db).len();
+        (0..len).map(move |idx| RecvView::new(db, self, idx as u32))
+    }
+
+    pub fn effect_params(
+        self,
+        db: &'db dyn HirDb,
+    ) -> impl Iterator<Item = EffectParamView<'db>> + 'db {
+        let len = self.effects(db).data(db).len();
+        let owner = EffectParamOwner::Contract(self);
+        (0..len).map(move |idx| EffectParamView { owner, idx })
+    }
+
+    /// Contract field layout for semantic consumers.
+    ///
+    /// User-visible layout behavior:
+    /// - Slot counters are maintained independently per address space.
+    /// - No packing is performed.
+    /// - Each non-zero-sized primitive consumes one slot.
+    /// - Aggregate types consume the sum of component slots.
+    /// - Enum fields consume one discriminant slot plus the max payload slots.
+    /// - Each const layout hole (`_`) also consumes one slot.
+    #[salsa::tracked(return_ref)]
+    pub fn field_layout(
+        self,
+        db: &'db dyn HirAnalysisDb,
+    ) -> IndexMap<IdentId<'db>, ContractFieldLayoutInfo<'db>> {
+        let scope = self.top_mod(db).scope();
+        let assumptions = PredicateListId::empty_list(db);
+
+        let effect_handle = resolve_core_trait(db, scope, &["effect_ref", "EffectHandle"])
+            .expect("missing required core trait `core::effect_ref::EffectHandle`");
+        let address_space_ident = IdentId::new(db, "AddressSpace".to_string());
+        let target_ident = IdentId::new(db, "Target".to_string());
+        let default_storage_address_space =
+            resolve_lib_type_path(db, scope, "core::effect_ref::Storage")
+                .unwrap_or_else(|| TyId::invalid(db, InvalidCause::Other));
+        let effect_handle_cx = ContractFieldEffectHandleCx {
+            scope,
+            assumptions,
+            effect_handle,
+            address_space_ident,
+            target_ident,
+            fallback_space: default_storage_address_space,
+        };
+
+        let hir_fields = self.hir_fields(db).data(db);
+        let mut next_slot_by_address_space: FxHashMap<TyId<'db>, usize> = FxHashMap::default();
+        let mut layout = IndexMap::new();
+
+        for (idx, field) in hir_fields
+            .iter()
+            .filter(|field| field.name.is_present())
+            .enumerate()
+        {
+            let lowered_ty = lower_opt_hir_ty(db, field.type_ref(), scope, assumptions);
+            let plan = effect_handle_cx.layout_plan(db, lowered_ty);
+            let next_slot = next_slot_by_address_space
+                .entry(plan.address_space)
+                .or_insert(0);
+            let slot_offset = *next_slot;
+            let slot_assignments = contract_field_layout_slot_assignments(
+                db,
+                &plan.slot_placeholders,
+                &plan.materialization_placeholders,
+                slot_offset,
+            );
+            let declared_ty =
+                materialize_contract_layout_holes(db, plan.declared_ty, &slot_assignments);
+            let target_ty =
+                materialize_contract_layout_holes(db, plan.target_ty, &slot_assignments);
+            let slot_basis_ty =
+                materialize_contract_layout_holes(db, plan.slot_basis_ty, &slot_assignments);
+            debug_assert!(
+                !ty_contains_const_hole(db, declared_ty)
+                    && !ty_contains_const_hole(db, target_ty)
+                    && !ty_contains_const_hole(db, slot_basis_ty),
+                "contract field layout materialization left unresolved holes"
+            );
+            let slot_count = contract_field_base_slot_count(db, slot_basis_ty)
+                .saturating_add(plan.slot_placeholders.len());
+            *next_slot = slot_offset.saturating_add(slot_count);
+
+            let name = field.name.unwrap();
+            layout.insert(
+                name,
+                ContractFieldLayoutInfo {
+                    index: idx as u32,
+                    name,
+                    declared_ty,
+                    is_provider: plan.is_provider,
+                    target_ty,
+                    address_space: plan.address_space,
+                    slot_offset,
+                    slot_count,
+                },
+            );
+        }
+
+        layout
+    }
+
+    #[salsa::tracked(return_ref)]
+    pub fn fields(
+        self,
+        db: &'db dyn HirAnalysisDb,
+    ) -> IndexMap<IdentId<'db>, ContractFieldInfo<'db>> {
+        self.field_layout(db)
+            .iter()
+            .map(|(name, field)| {
+                (
+                    *name,
+                    ContractFieldInfo {
+                        index: field.index,
+                        name: field.name,
+                        declared_ty: strip_derived_adt_layout_args(db, field.declared_ty),
+                        is_provider: field.is_provider,
+                        target_ty: strip_derived_adt_layout_args(db, field.target_ty),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[salsa::tracked]
+    pub fn init_args_ty(self, db: &'db dyn HirAnalysisDb) -> TyId<'db> {
+        let Some(init) = self.init(db) else {
+            return TyId::unit(db);
+        };
+
+        let assumptions = PredicateListId::empty_list(db);
+        let param_tys: Vec<TyId<'db>> = init
+            .params(db)
+            .data(db)
+            .iter()
+            .map(|p| match p.ty.to_opt() {
+                Some(hir_ty) => {
+                    lower_opt_hir_ty(db, Partial::Present(hir_ty), self.scope(), assumptions)
+                }
+                None => TyId::invalid(db, InvalidCause::ParseError),
+            })
+            .collect();
+
+        let base = TyId::new(
+            db,
+            TyData::TyBase(TyBase::Prim(PrimTy::Tuple(param_tys.len()))),
+        );
+        param_tys
+            .into_iter()
+            .fold(base, |acc, elem| TyId::app(db, acc, elem))
+    }
+
+    #[salsa::tracked(return_ref)]
+    pub fn effect_bindings(self, db: &'db dyn HirAnalysisDb) -> Vec<EffectBinding<'db>> {
+        contract_effect_bindings_canonical(db, self)
+    }
+
+    #[salsa::tracked(return_ref)]
+    pub fn init_effect_bindings(self, db: &'db dyn HirAnalysisDb) -> Vec<EffectBinding<'db>> {
+        let Some(init) = self.init(db) else {
+            return Vec::new();
+        };
+        contract_scoped_effect_bindings_canonical(
+            db,
+            self,
+            EffectParamSite::ContractInit { contract: self },
+            init.effects(db),
+        )
+    }
+}
+
+#[salsa::tracked]
+impl<'db> Func<'db> {
+    #[salsa::tracked(return_ref)]
+    pub fn effect_bindings(self, db: &'db dyn HirAnalysisDb) -> Vec<EffectBinding<'db>> {
+        func_effect_bindings_canonical(db, self)
+    }
+
+    #[salsa::tracked(return_ref)]
+    pub fn effective_effect_bindings(self, db: &'db dyn HirAnalysisDb) -> Vec<EffectBinding<'db>> {
+        func_effect_bindings_canonical(db, self)
+    }
+}
+
+fn contract_effect_decl_map<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+) -> FxHashMap<IdentId<'db>, EffectBinding<'db>> {
+    contract
+        .effect_bindings(db)
+        .iter()
+        .cloned()
+        .map(|binding| (binding.binding_name, binding))
+        .collect()
+}
+
+fn contract_scoped_effect_bindings_canonical<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+    list_site: EffectParamSite<'db>,
+    list: EffectParamListId<'db>,
+) -> Vec<EffectBinding<'db>> {
+    if matches!(list_site, EffectParamSite::Func(_)) {
+        unreachable!("contract-scoped effect bindings require a contract init/recv/decl site");
+    }
+
+    let fields = contract.fields(db);
+    let contract_named_effects = contract_effect_decl_map(db, contract);
+    let assumptions = PredicateListId::empty_list(db);
+
+    let mut out = Vec::new();
+    for (idx, effect) in list.data(db).iter().enumerate() {
+        let Some(key_path) = effect.key_path.to_opt() else {
+            continue;
+        };
+
+        if let Some(binding_name) = effect.name {
+            let (key_kind, key_ty, key_trait) =
+                resolve_effect_key(db, key_path, contract.scope(), assumptions).into_parts();
+            let (key_ty, key_trait) =
+                canonicalize_contract_effect_key(db, list_site, idx as u32, key_ty, key_trait);
+
+            out.push(EffectBinding {
+                binding_name,
+                key_kind,
+                key_ty,
+                key_trait,
+                is_mut: effect.is_mut,
+                source: EffectSource::Root,
+                binding_site: list_site,
+                binding_idx: idx as u32,
+                binding_path: key_path,
+            });
+            continue;
+        }
+
+        if key_path.len(db) == 1
+            && let Some(name) = key_path.ident(db).to_opt()
+            && let Some(field) = fields.get(&name)
+        {
+            let field_idx = field.index;
+            let target_ty = field.target_ty;
+
+            out.push(EffectBinding {
+                binding_name: name,
+                key_kind: EffectKeyKind::Type,
+                key_ty: Some(target_ty),
+                key_trait: None,
+                is_mut: effect.is_mut,
+                source: EffectSource::Field(field_idx),
+                binding_site: list_site,
+                binding_idx: idx as u32,
+                binding_path: key_path,
+            });
+            continue;
+        }
+
+        if key_path.len(db) == 1
+            && let Some(name) = key_path.ident(db).to_opt()
+            && let Some(binding) = contract_named_effects.get(&name)
+        {
+            out.push(EffectBinding {
+                binding_name: name,
+                key_kind: binding.key_kind,
+                key_ty: binding.key_ty,
+                key_trait: binding.key_trait,
+                is_mut: binding.is_mut,
+                source: binding.source,
+                binding_site: list_site,
+                binding_idx: idx as u32,
+                binding_path: key_path,
+            });
+            continue;
+        }
+
+        // Unlabeled contract-scoped effects are either references (field/contract effect) or
+        // invalid. Diagnostics are emitted by the type checker; keep lowering conservative.
+        let binding_name = key_path
+            .ident(db)
+            .to_opt()
+            .unwrap_or_else(|| IdentId::new(db, "_effect".to_string()));
+
+        out.push(EffectBinding {
+            binding_name,
+            key_kind: EffectKeyKind::Other,
+            key_ty: None,
+            key_trait: None,
+            is_mut: effect.is_mut,
+            source: EffectSource::Root,
+            binding_site: list_site,
+            binding_idx: idx as u32,
+            binding_path: key_path,
+        });
+    }
+
+    out
+}
+
+fn compute_arg_bindings<'db>(
+    db: &'db dyn HirAnalysisDb,
+    variant_struct: Struct<'db>,
+    args_ty: TyId<'db>,
+    arm_pat: PatId,
+    arm_body: Body<'db>,
+) -> Option<Vec<ArgBinding<'db>>> {
+    let Partial::Present(pat) = arm_pat.data(db, arm_body) else {
+        return None;
+    };
+
+    let elem_tys = args_ty.field_types(db);
+
+    let bindings = match pat {
+        Pat::Record(_, fields) => {
+            let mut out = Vec::new();
+            for f in fields {
+                let Some(label) = f.label(db, arm_body) else {
+                    continue;
+                };
+                let Some(field_idx) = variant_struct.hir_fields(db).field_idx(db, label) else {
+                    continue;
+                };
+                let Some(elem_ty) = elem_tys.get(field_idx).copied() else {
+                    continue;
+                };
+                out.push(ArgBinding {
+                    pat: f.pat,
+                    tuple_index: field_idx as u32,
+                    ty: elem_ty,
+                });
+            }
+            out
+        }
+        Pat::PathTuple(_, pats) | Pat::Tuple(pats) => pats
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, pat)| {
+                let ty = elem_tys.get(idx).copied()?;
+                Some(ArgBinding {
+                    pat: *pat,
+                    tuple_index: idx as u32,
+                    ty,
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Some(bindings)
+}
+
+fn resolve_msg_mod<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+    msg_path: PathId<'db>,
+    assumptions: PredicateListId<'db>,
+) -> Option<Mod<'db>> {
+    use crate::analysis::name_resolution::{PathRes, resolve_path};
+    use crate::hir_def::ItemKind;
+
+    if let PathRes::Mod(ScopeId::Item(ItemKind::Mod(m))) =
+        resolve_path(db, msg_path, contract.scope(), assumptions, false).ok()?
+    {
+        Some(m)
+    } else {
+        None
+    }
+}
+
+fn resolve_recv_variant<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+    msg_mod: Option<Mod<'db>>,
+    recv_is_bare: bool,
+    arm: ContractRecvArm<'db>,
+    assumptions: PredicateListId<'db>,
+) -> (Option<Struct<'db>>, Option<TyId<'db>>) {
+    let Some(variant_path) = arm.variant_path(db) else {
+        return (None, None);
+    };
+
+    if let Some(msg_mod) = msg_mod {
+        match crate::analysis::ty::ty_check::resolve_variant_in_msg(
+            db,
+            msg_mod,
+            variant_path,
+            assumptions,
+        ) {
+            Ok(resolved) => (Some(resolved.variant_struct), Some(resolved.ty)),
+            _ => (None, None),
+        }
+    } else if recv_is_bare {
+        match crate::analysis::ty::ty_check::resolve_variant_bare(
+            db,
+            contract,
+            variant_path,
+            assumptions,
+        ) {
+            Ok(resolved) => (Some(resolved.variant_struct), Some(resolved.ty)),
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    }
+}
+
+fn resolve_sol_abi_ty<'db>(
+    db: &'db dyn HirAnalysisDb,
+    scope: ScopeId<'db>,
+    assumptions: PredicateListId<'db>,
+) -> Option<TyId<'db>> {
+    use crate::analysis::name_resolution::{PathRes, resolve_path};
+    use common::ingot::IngotKind;
+
+    let ingot = scope.ingot(db);
+    let std_root = if ingot.kind(db) == IngotKind::Std {
+        IdentId::make_ingot(db)
+    } else {
+        IdentId::new(db, "std".to_string())
+    };
+
+    let sol_path = PathId::from_ident(db, std_root)
+        .push_ident(db, IdentId::new(db, "abi".to_string()))
+        .push_ident(db, IdentId::new(db, "Sol".to_string()));
+
+    match resolve_path(db, sol_path, scope, assumptions, false).ok()? {
+        PathRes::Ty(ty) | PathRes::TyAlias(_, ty) => Some(ty),
+        _ => None,
+    }
+}
+
+fn get_variant_selector_info<'db>(
+    db: &'db dyn HirAnalysisDb,
+    variant_ty: TyId<'db>,
+    scope: ScopeId<'db>,
+) -> VariantSelectorInfo {
+    use crate::analysis::ty::{
+        canonical::Canonical,
+        const_eval::{ConstValue, try_eval_const_body},
+        corelib::resolve_core_trait,
+        trait_def::impls_for_ty,
+        ty_def::{PrimTy, TyBase, TyData},
+    };
+    use num_traits::ToPrimitive;
+
+    let Some(msg_variant_trait) = resolve_core_trait(db, scope, &["message", "MsgVariant"]) else {
+        return VariantSelectorInfo {
+            value: None,
+            signature: None,
+        };
+    };
+    let canonical_ty = Canonical::new(db, variant_ty);
+    let scope_ingot = scope.ingot(db);
+    let search_ingots = [
+        Some(scope_ingot),
+        variant_ty.ingot(db).filter(|&ingot| ingot != scope_ingot),
+    ];
+
+    let Some(implementor) = search_ingots.into_iter().flatten().find_map(|ingot| {
+        impls_for_ty(db, ingot, canonical_ty)
+            .iter()
+            .find(|impl_| impl_.skip_binder().trait_def(db).eq(&msg_variant_trait))
+            .copied()
+    }) else {
+        return VariantSelectorInfo {
+            value: None,
+            signature: None,
+        };
+    };
+    let impl_ = implementor.skip_binder();
+
+    let selector_name = IdentId::new(db, "SELECTOR".to_string());
+    let hir_impl = impl_.hir_impl_trait(db);
+    let Some(selector_const) = hir_impl
+        .hir_consts(db)
+        .iter()
+        .find(|c| c.name.to_opt() == Some(selector_name))
+    else {
+        return VariantSelectorInfo {
+            value: None,
+            signature: None,
+        };
+    };
+
+    let Some(body) = selector_const.value.to_opt() else {
+        return VariantSelectorInfo {
+            value: None,
+            signature: None,
+        };
+    };
+    let signature = selector_signature_from_body(db, body, hir_impl.scope());
+    let expected_ty = TyId::new(db, TyData::TyBase(TyBase::Prim(PrimTy::U32)));
+    let value = match try_eval_const_body(db, body, expected_ty) {
+        Some(ConstValue::Int(value)) => value.to_u32(),
+        Some(
+            ConstValue::Bool(_)
+            | ConstValue::Bytes(_)
+            | ConstValue::EnumVariant(_)
+            | ConstValue::ConstArray(_),
+        )
+        | None => None,
+    };
+
+    VariantSelectorInfo { value, signature }
+}
+
+fn selector_signature_from_body<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    scope: ScopeId<'db>,
+) -> Option<String> {
+    use crate::analysis::ty::ty_def::{PrimTy, TyBase, TyData};
+
+    let expected_ty = TyId::new(db, TyData::TyBase(TyBase::Prim(PrimTy::U32)));
+    let (_, typed_body) =
+        crate::analysis::ty::ty_check::check_anon_const_body(db, body, expected_ty);
+    let mut visited = SelectorSearchVisited::new();
+
+    selector_signature_from_typed_body(db, body, scope, typed_body, &mut visited)
+}
+
+/// Tracks already-visited items to prevent cycles when following const/fn references.
+struct SelectorSearchVisited<'db> {
+    consts: FxHashSet<Const<'db>>,
+    funcs: FxHashSet<Func<'db>>,
+    locals: FxHashSet<PatId>,
+}
+
+impl<'db> SelectorSearchVisited<'db> {
+    fn new() -> Self {
+        Self {
+            consts: FxHashSet::default(),
+            funcs: FxHashSet::default(),
+            locals: FxHashSet::default(),
+        }
+    }
+}
+
+fn selector_signature_from_typed_body<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    scope: ScopeId<'db>,
+    typed_body: &crate::analysis::ty::ty_check::TypedBody<'db>,
+    visited: &mut SelectorSearchVisited<'db>,
+) -> Option<String> {
+    let expr_id = body.expr(db);
+    selector_signature_from_expr(db, body, scope, typed_body, visited, expr_id)
+}
+
+fn selector_signature_from_expr<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    scope: ScopeId<'db>,
+    typed_body: &crate::analysis::ty::ty_check::TypedBody<'db>,
+    visited: &mut SelectorSearchVisited<'db>,
+    expr_id: ExprId,
+) -> Option<String> {
+    match expr_id.data(db, body) {
+        Partial::Present(Expr::Call(_callee, args)) => {
+            if args.len() == 1
+                && args[0].label.is_none()
+                && let Partial::Present(Expr::Lit(LitKind::String(signature))) =
+                    args[0].expr.data(db, body)
+            {
+                let resolved_sol = resolve_lib_func_path(db, scope, "std::abi::sol")?;
+                if let crate::hir_def::CallableDef::Func(func) =
+                    typed_body.callable_expr(expr_id)?.callable_def
+                    && func == resolved_sol
+                {
+                    return Some(signature.data(db).to_string());
+                }
+            }
+
+            // Follow const fn calls
+            if let Some(callable) = typed_body.callable_expr(expr_id)
+                && let crate::hir_def::CallableDef::Func(func) = callable.callable_def
+                && func.is_const(db)
+                && visited.funcs.insert(func)
+            {
+                let (_, func_typed_body) = crate::analysis::ty::ty_check::check_func_body(db, func);
+                if let Some(func_body) = func_typed_body.body() {
+                    return selector_signature_from_typed_body(
+                        db,
+                        func_body,
+                        func.scope(),
+                        func_typed_body,
+                        visited,
+                    );
+                }
+            }
+        }
+        Partial::Present(Expr::Block(stmts)) => {
+            if let Some(last_stmt) = stmts.last()
+                && let Partial::Present(Stmt::Expr(inner_expr)) = last_stmt.data(db, body)
+            {
+                return selector_signature_from_expr(
+                    db,
+                    body,
+                    scope,
+                    typed_body,
+                    visited,
+                    *inner_expr,
+                );
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(signature) =
+        selector_signature_from_local_binding(db, body, scope, typed_body, visited, expr_id)
+    {
+        return Some(signature);
+    }
+
+    match typed_body.expr_const_ref(expr_id)? {
+        crate::analysis::ty::ty_check::ConstRef::Const(const_) => {
+            if !visited.consts.insert(const_) {
+                return None;
+            }
+            let (_, const_typed_body) = crate::analysis::ty::ty_check::check_const_body(db, const_);
+            let const_body = const_typed_body.body()?;
+            selector_signature_from_typed_body(
+                db,
+                const_body,
+                const_.scope(),
+                const_typed_body,
+                visited,
+            )
+        }
+        crate::analysis::ty::ty_check::ConstRef::TraitConst { .. } => None,
+    }
+}
+
+fn selector_signature_from_local_binding<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    scope: ScopeId<'db>,
+    typed_body: &crate::analysis::ty::ty_check::TypedBody<'db>,
+    visited: &mut SelectorSearchVisited<'db>,
+    expr_id: ExprId,
+) -> Option<String> {
+    let crate::analysis::ty::ty_check::LocalBinding::Local { pat, .. } =
+        typed_body.expr_binding(expr_id)?
+    else {
+        return None;
+    };
+
+    if !visited.locals.insert(pat) {
+        return None;
+    }
+
+    let init_expr = selector_local_binding_init_expr(db, body, pat)?;
+    selector_signature_from_expr(db, body, scope, typed_body, visited, init_expr)
+}
+
+fn selector_local_binding_init_expr<'db>(
+    db: &'db dyn HirAnalysisDb,
+    body: Body<'db>,
+    pat: PatId,
+) -> Option<ExprId> {
+    for (_, stmt) in body.stmts(db).iter() {
+        if let Partial::Present(Stmt::Let(stmt_pat, _, Some(init_expr))) = stmt
+            && *stmt_pat == pat
+        {
+            return Some(*init_expr);
+        }
+    }
+
+    None
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Update)]
@@ -638,11 +2486,11 @@ pub enum EffectParamOwner<'db> {
     RecvArm(RecvArmView<'db>),
 }
 impl<'db> EffectParamOwner<'db> {
-    pub fn scope(self) -> ScopeId<'db> {
+    pub fn scope(self, db: &'db dyn HirDb) -> ScopeId<'db> {
         match self {
             EffectParamOwner::Func(func) => func.scope(),
             EffectParamOwner::Contract(contract) => contract.scope(),
-            EffectParamOwner::RecvArm(arm) => arm.contract().scope(),
+            EffectParamOwner::RecvArm(arm) => arm.contract(db).scope(),
         }
     }
 }
@@ -669,7 +2517,10 @@ impl<'db> EffectParamView<'db> {
 
     /// The path identifying the effect key (trait or type).
     pub fn key_path(self, db: &'db dyn HirDb) -> Option<PathId<'db>> {
-        self.effect(db).key_path.to_opt()
+        self.effect(db)
+            .key_path
+            .to_opt()
+            .filter(|path| path.ident(db).is_present())
     }
 
     /// Whether this effect requires mutation.
@@ -710,51 +2561,10 @@ impl<'db> Func<'db> {
     }
 }
 
-impl<'db> Contract<'db> {
-    pub fn recv(self, db: &'db dyn HirDb, recv_idx: u32) -> Option<RecvView<'db>> {
-        self.recvs(db)
-            .data(db)
-            .get(recv_idx as usize)
-            .map(|_| RecvView {
-                contract: self,
-                recv_idx,
-            })
-    }
-
-    pub fn recv_views(self, db: &'db dyn HirDb) -> impl Iterator<Item = RecvView<'db>> + 'db {
-        let len = self.recvs(db).data(db).len();
-        (0..len).map(move |idx| RecvView {
-            contract: self,
-            recv_idx: idx as u32,
-        })
-    }
-
-    pub fn effect_params(
-        self,
-        db: &'db dyn HirDb,
-    ) -> impl Iterator<Item = EffectParamView<'db>> + 'db {
-        let len = self.effects(db).data(db).len();
-        let owner = EffectParamOwner::Contract(self);
-        (0..len).map(move |idx| EffectParamView { owner, idx })
-    }
-}
-
 /// Helper to check if a type's base matches a given ADT.
 fn matches_adt<'db>(db: &'db dyn HirAnalysisDb, ty: TyId<'db>, adt: AdtDef<'db>) -> bool {
     match ty.base_ty(db).data(db) {
         TyData::TyBase(TyBase::Adt(ty_adt)) => *ty_adt == adt,
-        _ => false,
-    }
-}
-
-/// Helper to check if a type's base matches a given contract.
-fn matches_contract<'db>(
-    db: &'db dyn HirAnalysisDb,
-    ty: TyId<'db>,
-    contract: Contract<'db>,
-) -> bool {
-    match ty.base_ty(db).data(db) {
-        TyData::TyBase(TyBase::Contract(c)) => *c == contract,
         _ => false,
     }
 }
@@ -856,52 +2666,6 @@ impl<'db> Struct<'db> {
             .collect()
     }
 }
-
-impl<'db> Contract<'db> {
-    /// Returns semantic types of all fields, bound to identity parameters.
-    pub fn field_tys(self, db: &'db dyn HirAnalysisDb) -> Vec<Binder<TyId<'db>>> {
-        let scope = self.scope();
-        // Contracts currently have no generic params/where-clause; use empty assumptions.
-        let assumptions = PredicateListId::empty_list(db);
-        let fields = self.fields(db);
-
-        fields
-            .data(db)
-            .iter()
-            .map(|field| {
-                let ty = match field.type_ref.to_opt() {
-                    Some(hir_ty) => lower_hir_ty(db, hir_ty, scope, assumptions),
-                    None => TyId::invalid(db, InvalidCause::ParseError),
-                };
-                Binder::bind(ty)
-            })
-            .collect()
-    }
-
-    /// Returns all inherent `impl` blocks for this contract within the same ingot.
-    pub fn all_impls(self, db: &'db dyn HirAnalysisDb) -> Vec<Impl<'db>> {
-        self.top_mod(db)
-            .ingot(db)
-            .all_impls(db)
-            .iter()
-            .copied()
-            .filter(|impl_| matches_contract(db, impl_.ty(db), self))
-            .collect()
-    }
-
-    /// Returns all `impl Trait for Contract` blocks for this contract within the same ingot.
-    pub fn all_impl_traits(self, db: &'db dyn HirAnalysisDb) -> Vec<ImplTrait<'db>> {
-        self.top_mod(db)
-            .ingot(db)
-            .all_impl_traits(db)
-            .iter()
-            .copied()
-            .filter(|impl_trait| matches_contract(db, impl_trait.ty(db), self))
-            .collect()
-    }
-}
-
-// Where-clause traversal (scaffold) -----------------------------------------
 
 #[derive(Clone, Copy, Debug)]
 pub struct WhereClauseView<'db> {
@@ -1019,7 +2783,7 @@ impl<'db> WherePredicateView<'db> {
     pub fn subject_ty(self, db: &'db dyn HirAnalysisDb) -> Option<TyId<'db>> {
         let hir_ty = self.hir_pred(db).ty.to_opt()?;
         let owner_item = ItemKind::from(self.clause.owner);
-        let assumptions = constraints_for(db, owner_item);
+        let assumptions = header_constraints_for(db, owner_item);
         Some(lower_hir_ty(db, hir_ty, owner_item.scope(), assumptions))
     }
 
@@ -1106,15 +2870,11 @@ impl<'db> WherePredicateBoundView<'db> {
     ) -> Option<TraitInstId<'db>> {
         let subject = self.pred.subject_ty(db)?;
         let owner_item = ItemKind::from(self.pred.clause.owner);
-        let assumptions = constraints_for(db, owner_item);
+        let assumptions = header_constraints_for(db, owner_item);
         let scope = owner_item.scope();
         lower_trait_ref(db, subject, self.trait_ref(db), scope, assumptions, None).ok()
     }
 }
-
-impl<'db> Contract<'db> {}
-
-// Type alias ---------------------------------------------------------------
 
 impl<'db> TypeAlias<'db> {
     /// Semantic alias target type (convenience over lower_type_alias).
@@ -1144,14 +2904,17 @@ impl<'db> TypeAlias<'db> {
         };
         let assumptions = constraints_for(db, self.into());
         let ty = lower_hir_ty(db, hir_ty, self.scope(), assumptions);
-        if let WellFormedness::IllFormed { goal, subgoal } =
-            check_ty_wf(db, self.top_mod(db).ingot(db), ty, assumptions)
-        {
+        if let WellFormedness::IllFormed { goal, subgoal } = check_ty_wf(
+            db,
+            TraitSolveCx::new(db, self.scope()).with_assumptions(assumptions),
+            ty,
+        ) {
             vec![
                 TraitConstraintDiag::TraitBoundNotSat {
                     span: self.span().ty().into(),
                     primary_goal: goal,
                     unsat_subgoal: subgoal,
+                    required_by: None,
                 }
                 .into(),
             ]
@@ -1425,7 +3188,7 @@ impl<'db> SuperTraitRefView<'db> {
     }
 
     pub fn assumptions(self, db: &'db dyn HirAnalysisDb) -> PredicateListId<'db> {
-        constraints_for(db, self.owner.into())
+        header_constraints_for(db, self.owner.into())
     }
 
     /// Lower this super-trait reference to a semantic trait instance using the trait's
@@ -1452,6 +3215,7 @@ impl<'db> SuperTraitRefView<'db> {
             Ok(v) => Ok(v),
             Err(TraitRefLowerError::PathResError(_)) => Err(SuperTraitLowerError::PathResolution),
             Err(TraitRefLowerError::InvalidDomain(_)) => Err(SuperTraitLowerError::InvalidDomain),
+            Err(TraitRefLowerError::Cycle) => Err(SuperTraitLowerError::Cycle),
             Err(TraitRefLowerError::Ignored) => Err(SuperTraitLowerError::Ignored),
         }
     }
@@ -1471,6 +3235,7 @@ impl<'db> SuperTraitRefView<'db> {
             Err(
                 TraitRefLowerError::PathResError(_)
                 | TraitRefLowerError::InvalidDomain(_)
+                | TraitRefLowerError::Cycle
                 | TraitRefLowerError::Ignored,
             ) => return None,
         };
@@ -1486,7 +3251,27 @@ impl<'db> SuperTraitRefView<'db> {
 pub enum SuperTraitLowerError {
     PathResolution,
     InvalidDomain,
+    Cycle,
     Ignored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InherentImplAdmissibility<'db> {
+    Admissible {
+        ty: TyId<'db>,
+    },
+    NotAllowed {
+        ty: TyId<'db>,
+        is_nominal: bool,
+    },
+    InvalidTy {
+        ty: TyId<'db>,
+    },
+    IllFormed {
+        ty: TyId<'db>,
+        goal: TraitInstId<'db>,
+        subgoal: Option<TraitInstId<'db>>,
+    },
 }
 
 impl<'db> Impl<'db> {
@@ -1513,6 +3298,55 @@ impl<'db> Impl<'db> {
             assumptions,
         )
     }
+
+    pub(crate) fn inherent_impl_admissibility(
+        self,
+        db: &'db dyn HirAnalysisDb,
+    ) -> InherentImplAdmissibility<'db> {
+        let ty = self.ty(db);
+        let ingot = self.top_mod(db).ingot(db);
+        if !ty.is_inherent_impl_allowed(db, ingot) {
+            let base = ty.base_ty(db);
+            return InherentImplAdmissibility::NotAllowed {
+                ty,
+                is_nominal: !base.is_param(db),
+            };
+        }
+        if ty.has_invalid(db) {
+            return InherentImplAdmissibility::InvalidTy { ty };
+        }
+
+        let assumptions = constraints_for(db, self.into());
+        match check_ty_wf(
+            db,
+            TraitSolveCx::new(db, self.scope()).with_assumptions(assumptions),
+            ty,
+        ) {
+            WellFormedness::WellFormed => InherentImplAdmissibility::Admissible { ty },
+            WellFormedness::IllFormed { goal, subgoal } => {
+                InherentImplAdmissibility::IllFormed { ty, goal, subgoal }
+            }
+        }
+    }
+
+    pub(crate) fn admissible_inherent_impl_ty(
+        self,
+        db: &'db dyn HirAnalysisDb,
+    ) -> Option<TyId<'db>> {
+        match self.inherent_impl_admissibility(db) {
+            InherentImplAdmissibility::Admissible { ty } => Some(ty),
+            InherentImplAdmissibility::NotAllowed { .. }
+            | InherentImplAdmissibility::InvalidTy { .. }
+            | InherentImplAdmissibility::IllFormed { .. } => None,
+        }
+    }
+
+    /// Returns the pretty-printed target type name from this impl block.
+    /// This is useful for documentation generation.
+    /// Returns None if the type reference is missing or malformed.
+    pub fn target_type_name(self, db: &dyn HirDb) -> Option<String> {
+        self.type_ref(db).to_opt().map(|ty| ty.pretty_print(db))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1537,6 +3371,15 @@ impl<'db> ImplTrait<'db> {
             .to_opt()
             .map(|hir_ty| lower_hir_ty(db, hir_ty, self.scope(), assumptions))
             .unwrap_or_else(|| TyId::invalid(db, InvalidCause::ParseError))
+    }
+
+    /// Type lowering errors for the implementor type.
+    pub fn ty_errors(self, db: &'db dyn HirAnalysisDb) -> Vec<TyDiagCollection<'db>> {
+        let Some(hir_ty) = self.type_ref(db).to_opt() else {
+            return Vec::new();
+        };
+        let assumptions = constraints_for(db, self.into());
+        collect_ty_lower_errors(db, self.scope(), hir_ty, self.span().ty(), assumptions)
     }
 
     /// Lowers this impl-trait to a semantic implementor view, performing
@@ -1566,7 +3409,13 @@ impl<'db> ImplTrait<'db> {
         // Build implementor view
         let params = self.impl_params(db);
         let types = self.assoc_type_bindings_for_trait_inst(db, trait_inst);
-        let implementor = Binder::bind(ImplementorId::new(db, trait_inst, params, types, self));
+        let implementor = Binder::bind(ImplementorId::new(
+            db,
+            trait_inst,
+            params,
+            types,
+            ImplementorOrigin::Hir(self),
+        ));
 
         // Conflict check
         let trait_ = implementor.skip_binder().trait_(db);
@@ -1712,6 +3561,12 @@ impl<'db> ImplTrait<'db> {
         self.trait_inst(db).map(|inst| inst.def(db))
     }
 
+    /// Returns the ADT (struct or enum) that this `impl Trait` block implements for,
+    /// if the implementor type resolves to a concrete ADT.
+    pub fn implementing_adt(self, db: &'db dyn HirAnalysisDb) -> Option<AdtRef<'db>> {
+        self.ty(db).adt_ref(db)
+    }
+
     /// Iterate associated type definitions in this impl-trait block as views.
     pub fn assoc_types(
         self,
@@ -1749,10 +3604,14 @@ impl<'db> ImplTrait<'db> {
 
         // First check implementor type
         let ty = self.ty(db);
-        if let Some(diag) = ty.emit_diag(db, self.span().ty().into()) {
-            return (None, vec![diag]);
-        }
         if ty.has_invalid(db) {
+            let diags = self.ty_errors(db);
+            if !diags.is_empty() {
+                return (None, diags);
+            }
+            if let Some(diag) = ty.emit_diag(db, self.span().ty().into()) {
+                return (None, vec![diag]);
+            }
             return (None, Vec::new());
         }
 
@@ -1788,6 +3647,9 @@ impl<'db> ImplTrait<'db> {
                                 );
                             }
                         }
+                        TraitRefLowerError::Cycle => {
+                            diags.push(TraitLowerDiag::CyclicTraitRef(self).into());
+                        }
                         TraitRefLowerError::Ignored => {
                             diags.push(TraitLowerDiag::ExternalTraitForExternalType(self).into());
                         }
@@ -1815,6 +3677,20 @@ impl<'db> ImplTrait<'db> {
                 (None, diags)
             }
         }
+    }
+
+    /// Returns the pretty-printed trait name from this impl trait block.
+    /// This is useful for documentation generation.
+    /// Returns None if the trait reference is missing or malformed.
+    pub fn trait_name(self, db: &dyn HirDb) -> Option<String> {
+        self.trait_ref(db).to_opt().map(|tr| tr.pretty_print(db))
+    }
+
+    /// Returns the pretty-printed target type name from this impl trait block.
+    /// This is useful for documentation generation.
+    /// Returns None if the type reference is missing or malformed.
+    pub fn target_type_name(self, db: &dyn HirDb) -> Option<String> {
+        self.type_ref(db).to_opt().map(|ty| ty.pretty_print(db))
     }
 }
 
@@ -1861,14 +3737,17 @@ impl<'db> ImplAssocTypeView<'db> {
         }
 
         let ty = lower_hir_ty(db, hir, self.owner.scope(), assumptions);
-        let ingot = self.owner.top_mod(db).ingot(db);
-        if let WellFormedness::IllFormed { goal, subgoal } = check_ty_wf(db, ingot, ty, assumptions)
-        {
+        if let WellFormedness::IllFormed { goal, subgoal } = check_ty_wf(
+            db,
+            TraitSolveCx::new(db, self.owner.scope()).with_assumptions(assumptions),
+            ty,
+        ) {
             return vec![
                 TraitConstraintDiag::TraitBoundNotSat {
                     span: ty_span.into(),
                     primary_goal: goal,
                     unsat_subgoal: subgoal,
+                    required_by: None,
                 }
                 .into(),
             ];
@@ -2225,6 +4104,10 @@ impl<'db> ImplAssocConstView<'db> {
         self.def(db).value.to_opt().is_some()
     }
 
+    pub fn value_body(self, db: &'db dyn HirDb) -> Option<crate::core::hir_def::Body<'db>> {
+        self.def(db).value.to_opt()
+    }
+
     /// Semantic type of this associated const implementation.
     pub fn ty(self, db: &'db dyn HirAnalysisDb) -> Option<TyId<'db>> {
         let hir = self.def(db).ty.to_opt()?;
@@ -2415,14 +4298,17 @@ impl<'db> FieldView<'db> {
         // Trait-bound well-formedness for field type.
         let owner_item = self.owner_item();
         let assumptions = constraints_for(db, owner_item);
-        if let WellFormedness::IllFormed { goal, subgoal } =
-            check_ty_wf(db, owner_item.top_mod(db).ingot(db), ty, assumptions)
-        {
+        if let WellFormedness::IllFormed { goal, subgoal } = check_ty_wf(
+            db,
+            TraitSolveCx::new(db, owner_item.scope()).with_assumptions(assumptions),
+            ty,
+        ) {
             out.push(
                 TraitConstraintDiag::TraitBoundNotSat {
                     span: span.clone(),
                     primary_goal: goal,
                     unsat_subgoal: subgoal,
+                    required_by: None,
                 }
                 .into(),
             );

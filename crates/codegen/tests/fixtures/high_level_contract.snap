@@ -5,314 +5,703 @@ input_file: tests/fixtures/high_level_contract.fe
 ---
 object "EchoContract" {
   code {
-    function calldata_byteinput_word_at(self, byte_offset) -> ret {
-      let v0 := calldataload(byte_offset)
+    function $__EchoContract_init() {
+      let v0 := callvalue()
+      let v1 := iszero(eq(v0, 0))
+      if v1 {
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+      }
+      let v2 := dataoffset("EchoContract_deployed")
+      let v3 := datasize("EchoContract_deployed")
+      let v4 := $init_field__Evm_hef0af3106e109414_Foo_h6dbce71a6ea992b8__c09e6c6fc5a7b23d(0)
+      let v5 := datasize("EchoContract")
+      let v6 := codesize()
+      let v7 := lt(v6, v5)
+      if v7 {
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+      }
+      let v8 := sub(v6, v5)
+      let v9 := mload(64)
+      if iszero(v9) {
+        v9 := 0x80
+      }
+      mstore(64, add(v9, v8))
+      codecopy(v9, v5, v8)
+      let v10 := mload(0x40)
+      if iszero(v10) {
+        v10 := 0x80
+      }
+      mstore(0x40, add(v10, 64))
+      mstore(v10, v9)
+      mstore(add(v10, 32), v8)
+      let v11 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b(v10)
+      let v12 := $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_MemoryBytes___a53dbc6192a658d6(v11)
+      let v13 := $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_MemoryBytes___a53dbc6192a658d6(v11)
+      $__EchoContract_init_contract(v12, v13, v4)
+      codecopy(0, v2, v3)
+      return(0, v3)
+    }
+    function $__EchoContract_init_contract($x, $y, $state) {
+      sstore($state, $x)
+      sstore(add($state, 1), $y)
+      leave
+    }
+    function $checked_add_u256($a, $b) -> ret {
+      let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
       ret := v0
       leave
     }
-    function cursor_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
+    function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+      let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+      let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+      let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+      let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+      let v4 := v3
+      if v4 {
+        revert(0, 0)
+      }
+      ret := v0
+      leave
+    }
+    function $cursor_i__h140a998c67d6d59c_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input) -> ret {
       let v0 := mload(0x40)
       if iszero(v0) {
         v0 := 0x80
       }
-      mstore(0x40, add(v0, 32))
-      pop(v0)
-      mstore(v0, 0)
-      let v1 := v0
-      ret := v1
-      leave
-    }
-    function cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-      pop(self)
-      let v0 := mload(self)
-      let v1 := calldata_byteinput_word_at(0, v0)
-      let v2 := mload(self)
-      mstore(self, add(v2, 32))
-      ret := v1
-      leave
-    }
-    function init() {
-      let v0 := 0
-      let v1 := soldecoder_i__new__CallData__b9ab8dc8a4b2f9e(0)
-      let v2 := calldatasize()
-      let v3 := lt(v2, add(32, 32))
-      if v3 {
-        revert(0, 0)
-      }
-      let v4 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v1)
-      let v5 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v1)
-      let v6 := v0
-      init_contract(v4, v5, v6)
-      let v7 := datasize("EchoContract_deployed")
-      let v8 := dataoffset("EchoContract_deployed")
-      codecopy(0, v8, v7)
-      return(0, v7)
-    }
-    function init_contract(x, y, state) {
-      sstore(state, x)
-      sstore(add(state, 1), y)
-      leave
-    }
-    function soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-      let v0 := cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self)
+      mstore(0x40, add(v0, 96))
+      let v1 := $input
+      mstore(v0, mload(v1))
+      mstore(add(v0, 32), mload(add(v1, 32)))
+      mstore(add(v0, 64), 0)
       ret := v0
       leave
     }
-    function soldecoder_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
-      let v0 := cursor_i__new__CallData__b9ab8dc8a4b2f9e(input)
+    function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort() {
+      revert(0, 0)
+    }
+    function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__Foo_h6dbce71a6ea992b8__21493237fe9c2c26($slot) -> ret {
+      let v0 := $stor_ptr__Evm_hef0af3106e109414_Foo_h6dbce71a6ea992b8__c09e6c6fc5a7b23d($slot)
+      ret := v0
+      leave
+    }
+    function $init_field__Evm_hef0af3106e109414_Foo_h6dbce71a6ea992b8__c09e6c6fc5a7b23d($slot) -> ret {
+      let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__Foo_h6dbce71a6ea992b8__21493237fe9c2c26($slot)
+      ret := v0
+      leave
+    }
+    function $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_len($self) -> ret {
+      let v0 := mload(add($self, 32))
+      ret := v0
+      leave
+    }
+    function $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_word_at($self, $byte_offset) -> ret {
+      let v0 := mload($self)
+      let v1 := add(v0, $byte_offset)
+      let v2 := mload(v1)
+      ret := v2
+      leave
+    }
+    function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input) -> ret {
+      let v0 := $soldecoder_i__ha12a03fcb5ba844b_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input)
+      ret := v0
+      leave
+    }
+    function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($self) -> ret {
+      let v0 := $self
+      let v1 := $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_len(v0)
+      let v2 := mload(add($self, 64))
+      let v3 := $checked_add_u256(v2, 32)
+      let v4 := v3
+      let v5 := mload(add($self, 64))
+      let v6 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v4, v5)
+      let v7 := v6
+      if v7 {
+        revert(0, 0)
+      }
+      let v8 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v4, v1)
+      let v9 := v8
+      if v9 {
+        revert(0, 0)
+      }
+      let v10 := mload(add($self, 64))
+      let v11 := $self
+      let v12 := $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_word_at(v11, v10)
+      mstore(add($self, 64), v4)
+      ret := v12
+      leave
+    }
+    function $soldecoder_i__ha12a03fcb5ba844b_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input) -> ret {
+      let v0 := $cursor_i__h140a998c67d6d59c_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input)
       let v1 := mload(0x40)
       if iszero(v1) {
         v1 := 0x80
       }
-      mstore(0x40, add(v1, 64))
+      mstore(0x40, add(v1, 128))
       let v2 := v0
       mstore(v1, mload(v2))
-      mstore(add(v1, 32), 0)
-      let v3 := v1
-      ret := v3
+      mstore(add(v1, 32), mload(add(v2, 32)))
+      mstore(add(v1, 64), mload(add(v2, 64)))
+      mstore(add(v1, 96), 0)
+      ret := v1
       leave
     }
-    function u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
-      let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
+    function $stor_ptr__Evm_hef0af3106e109414_Foo_h6dbce71a6ea992b8__c09e6c6fc5a7b23d($slot) -> ret {
+      let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__Foo_h6dbce71a6ea992b8__21493237fe9c2c26($slot)
       ret := v0
       leave
     }
-    init()
+    function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__Foo_h6dbce71a6ea992b8__21493237fe9c2c26($raw) -> ret {
+      ret := $raw
+      leave
+    }
+    function $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_MemoryBytes___a53dbc6192a658d6($d) -> ret {
+      let v0 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($d)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+      ret := $self
+      leave
+    }
+    function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+      let v0 := gt($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+      let v0 := lt($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+      let v0 := add($self, $other)
+      ret := v0
+      leave
+    }
+    $__EchoContract_init()
   }
 
   object "EchoContract_deployed" {
     code {
-      function ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) {
+      function $__EchoContract_recv_0_0() -> ret {
+        ret := 42
         leave
       }
-      function _t0__decode_decode__Sol_u256_SolDecoder_CallData___51fc2f6931ec5edc(d) -> ret {
-        let v0 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
+      function $__EchoContract_recv_0_1($args) -> ret {
+        let v0 := $args
+        ret := v0
+        leave
+      }
+      function $__EchoContract_recv_0_2($state) -> ret {
+        let v0 := sload($state)
+        ret := v0
+        leave
+      }
+      function $__EchoContract_runtime() {
+        let v0 := $runtime_selector__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v1 := eq(and(v0, 0xffffffff), and(1, 0xffffffff))
+        if v1 {
+          $__EchoContract_runtime_arm_0_0()
+        }
+        let v2 := eq(and(v0, 0xffffffff), and(2, 0xffffffff))
+        if v2 {
+          $__EchoContract_runtime_arm_0_1()
+        }
+        let v3 := eq(and(v0, 0xffffffff), and(3, 0xffffffff))
+        if v3 {
+          $__EchoContract_runtime_arm_0_2()
+        }
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+      }
+      function $__EchoContract_runtime_arm_0_0() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__Foo_h6dbce71a6ea992b8__21493237fe9c2c26(0)
+        let v1 := callvalue()
+        let v2 := iszero(eq(v1, 0))
+        if v2 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v3 := $__EchoContract_recv_0_0()
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v3)
+      }
+      function $__EchoContract_runtime_arm_0_1() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__Foo_h6dbce71a6ea992b8__21493237fe9c2c26(0)
+        let v1 := callvalue()
+        let v2 := iszero(eq(v1, 0))
+        if v2 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v3 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v4 := $echo_h9f932a87feb06bd2_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v3)
+        let v5 := $__EchoContract_recv_0_1(v4)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v5)
+      }
+      function $__EchoContract_runtime_arm_0_2() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__Foo_h6dbce71a6ea992b8__21493237fe9c2c26(0)
+        let v1 := callvalue()
+        let v2 := iszero(eq(v1, 0))
+        if v2 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v3 := $__EchoContract_recv_0_2(v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v3)
+      }
+      function $abi_root_head_size__u256__3271ca15373d4483() -> ret {
+        let v0 := 0
+        if v0 {
+          ret := 32
+          leave
+        }
+        if iszero(v0) {
+          ret := 32
+          leave
+        }
+      }
+      function $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len($self) -> ret {
+        let v0 := calldatasize()
+        let v1 := 0
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, v0)
+        let v3 := v2
+        if v3 {
+          v1 := 0
+        }
+        if iszero(v3) {
+          let v4 := $checked_sub_u256(v0, $self)
+          v1 := v4
+        }
+        ret := v1
+        leave
+      }
+      function $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at($self, $byte_offset) -> ret {
+        let v0 := add($self, $byte_offset)
+        let v1 := calldataload(v0)
+        ret := v1
+        leave
+      }
+      function $calldata_hf71d505b6ff5dc81_new() -> ret {
+        ret := 0
+        leave
+      }
+      function $checked_add_u256($a, $b) -> ret {
+        let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+        let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+        let v4 := v3
+        if v4 {
+          revert(0, 0)
+        }
+        ret := v0
+        leave
+      }
+      function $checked_sub_u256($a, $b) -> ret {
+        let v0 := $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+        let v3 := v2
+        if v3 {
+          revert(0, 0)
+        }
+        let v4 := $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($a, $b)
+        ret := v4
+        leave
+      }
+      function $cursor_i__h140a998c67d6d59c_fork__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self, $pos) -> ret {
+        let v0 := mload($self)
         let v1 := mload(0x40)
         if iszero(v1) {
           v1 := 0x80
         }
-        mstore(0x40, add(v1, 32))
+        mstore(0x40, add(v1, 64))
         mstore(v1, v0)
+        mstore(add(v1, 32), $pos)
         ret := v1
         leave
       }
-      function alloc(size) -> ret {
-        let v0 := mload(64)
-        let v1 := eq(v0, 0)
+      function $cursor_i__h140a998c67d6d59c_new__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input) -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 64))
+        mstore(v0, $input)
+        mstore(add(v0, 32), 0)
+        ret := v0
+        leave
+      }
+      function $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d) -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $d)
+        let v1 := 0
         if v1 {
-          v0 := 128
+          let v2 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v3 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v4 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v5 := $checked_add_u256(v3, v2)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v5)
+          let v6 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v6)
+          let v7 := $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98(mload(v0))
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v3)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v4)
+          ret := v7
+          leave
         }
-        mstore(64, add(v0, size))
+        if iszero(v1) {
+          let v8 := $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98($d)
+          ret := v8
+          leave
+        }
+      }
+      function $echo_h9f932a87feb06bd2_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
         ret := v0
         leave
       }
-      function calldata_byteinput_word_at(self, byte_offset) -> ret {
-        let v0 := calldataload(byte_offset)
-        ret := v0
-        leave
-      }
-      function cursor_i__fork_mem__CallData__b9ab8dc8a4b2f9e(self, pos) -> ret {
-        pop(self)
+      function $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, $e) {
         let v0 := mload(0x40)
         if iszero(v0) {
           v0 := 0x80
         }
         mstore(0x40, add(v0, 32))
-        pop(v0)
-        mstore(v0, pos)
-        let v1 := v0
-        ret := v1
-        leave
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+          let v4 := $checked_sub_u256(v3, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+          let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+          leave
+        }
+        if iszero(v1) {
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
       }
-      function cursor_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
+      function $encode_root__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, $e) {
         let v0 := mload(0x40)
         if iszero(v0) {
           v0 := 0x80
         }
         mstore(0x40, add(v0, 32))
-        pop(v0)
-        mstore(v0, 0)
-        let v1 := v0
-        ret := v1
-        leave
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, mload(v0))
+          leave
+        }
+        if iszero(v1) {
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
       }
-      function cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-        pop(self)
-        let v0 := mload(self)
-        let v1 := calldata_byteinput_word_at(0, v0)
-        let v2 := mload(self)
-        mstore(self, add(v2, 32))
-        ret := v1
-        leave
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort() {
+        revert(0, 0)
       }
-      function recv_EchoMsg_Answer_0_0(args) -> ret {
-        ret := 42
-        leave
-      }
-      function recv_EchoMsg_Echo_0_1(args) -> ret {
-        let v0 := mload(args)
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__Foo_h6dbce71a6ea992b8__21493237fe9c2c26($slot) -> ret {
+        let v0 := $stor_ptr__Evm_hef0af3106e109414_Foo_h6dbce71a6ea992b8__c09e6c6fc5a7b23d($slot)
         ret := v0
         leave
       }
-      function recv_EchoMsg_GetX_0_2(args, state) -> ret {
-        let v0 := sload(state)
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input() -> ret {
+        let v0 := $calldata_hf71d505b6ff5dc81_new()
         ret := v0
         leave
       }
-      function runtime() {
-        let v0 := 0
-        let v1 := calldatasize()
-        let v2 := lt(v1, 4)
-        if v2 {
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes($ptr, $len) {
+        return($ptr, $len)
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63($value) {
+        let v0 := iszero(0)
+        if iszero(v0) {
+          let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new()
+          let v2 := $abi_root_head_size__u256__3271ca15373d4483()
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v1, v2)
+          $encode_root__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, v1)
+          let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v1)
+          let v5 := mload(v4)
+          let v6 := v5
+          let v7 := mload(add(v4, 32))
+          let v8 := v7
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v6, v8)
+        }
+        let v9 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(32, 64)
+        let v10 := v9
+        if v10 {
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, 0)
+          return(0, 32)
+        }
+        let v11 := mload(64)
+        if iszero(v11) {
+          v11 := 0x80
+        }
+        mstore(64, add(v11, 32))
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, v11)
+        return(v11, 32)
+      }
+      function $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2() -> ret {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input()
+        let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, 4)
+        ret := v1
+        leave
+      }
+      function $runtime_selector__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2() -> ret {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input()
+        let v1 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v0)
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, 4)
+        let v3 := v2
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at(v0, 0)
+        let v5 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_selector_from_prefix(v4)
+        ret := v5
+        leave
+      }
+      function $s_h33f7c3322e562590_intdowncast_hf946d58b157999e1_downcast_unchecked__u256_u32__6e3637cd3e911b35($self) -> ret {
+        let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self)
+        let v1 := $u32_h20aa0c10687491ad_intword_h9a147c8c32b1323c_from_word(v0)
+        ret := v1
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input, $base) -> ret {
+        let v0 := $soldecoder_i__ha12a03fcb5ba844b_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input, $base)
+        ret := v0
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new() -> ret {
+        let v0 := $solencoder_h1b9228b90dad6928_new()
+        ret := v0
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_selector_from_prefix($prefix) -> ret {
+        let v0 := $s_h33f7c3322e562590_intdowncast_hf946d58b157999e1_downcast_unchecked__u256_u32__6e3637cd3e911b35(shr(224, $prefix))
+        ret := v0
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $value) {
+        mstore($ptr, $value)
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self) -> ret {
+        let v0 := mload(add($self, 64))
+        ret := v0
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self) -> ret {
+        let v0 := mload(add($self, 32))
+        ret := v0
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self) -> ret {
+        let v0 := mload($self)
+        let v1 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v0)
+        let v2 := mload(add($self, 32))
+        let v3 := $checked_add_u256(v2, 32)
+        let v4 := v3
+        let v5 := mload(add($self, 32))
+        let v6 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v4, v5)
+        let v7 := v6
+        if v7 {
           revert(0, 0)
         }
-        let v3 := calldataload(0)
-        let v4 := sol_abi_selector_from_prefix(v3)
-        switch v4
-          case 1 {
-            let v5 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v6 := calldatasize()
-            let v7 := lt(v6, add(4, 0))
-            if v7 {
-              revert(0, 0)
-            }
-            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v5)
-            let v8 := recv_EchoMsg_Answer_0_0(0)
-            let v9 := solencoder_new()
-            let v10 := solencoder_abiencoder_reserve_head(v9, 32)
-            pop(v10)
-            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v8, v9)
-            let v11 := solencoder_abiencoder_finish(v9)
-            let v12 := mload(v11)
-            let v13 := mload(add(v11, 32))
-            return(v12, v13)
-          }
-          case 2 {
-            let v14 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v15 := calldatasize()
-            let v16 := lt(v15, add(4, 32))
-            if v16 {
-              revert(0, 0)
-            }
-            let v17 := _t0__decode_decode__Sol_u256_SolDecoder_CallData___51fc2f6931ec5edc(v14)
-            let v18 := recv_EchoMsg_Echo_0_1(v17)
-            let v19 := solencoder_new()
-            let v20 := solencoder_abiencoder_reserve_head(v19, 32)
-            pop(v20)
-            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v18, v19)
-            let v21 := solencoder_abiencoder_finish(v19)
-            let v22 := mload(v21)
-            let v23 := mload(add(v21, 32))
-            return(v22, v23)
-          }
-          case 3 {
-            let v24 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v25 := calldatasize()
-            let v26 := lt(v25, add(4, 0))
-            if v26 {
-              revert(0, 0)
-            }
-            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v24)
-            let v27 := v0
-            let v28 := recv_EchoMsg_GetX_0_2(0, v27)
-            let v29 := v28
-            let v30 := solencoder_new()
-            let v31 := solencoder_abiencoder_reserve_head(v30, 32)
-            pop(v31)
-            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v29, v30)
-            let v32 := solencoder_abiencoder_finish(v30)
-            let v33 := mload(v32)
-            let v34 := mload(add(v32, 32))
-            return(v33, v34)
-          }
-          default {
-            revert(0, 0)
-          }
-      }
-      function sol_abi_selector_from_prefix(prefix) -> ret {
-        let v0 := shr(224, prefix)
-        ret := v0
+        let v8 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v4, v1)
+        let v9 := v8
+        if v9 {
+          revert(0, 0)
+        }
+        let v10 := mload($self)
+        let v11 := mload(add($self, 32))
+        let v12 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at(v10, v11)
+        mstore(add($self, 32), v4)
+        ret := v12
         leave
       }
-      function soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-        let v0 := cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self)
-        ret := v0
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self, $new_base) {
+        mstore(add($self, 64), $new_base)
         leave
       }
-      function soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(input, base) -> ret {
-        let v0 := cursor_i__new__CallData__b9ab8dc8a4b2f9e(input)
-        let v1 := cursor_i__fork_mem__CallData__b9ab8dc8a4b2f9e(v0, base)
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self, $new_pos) {
+        mstore(add($self, 32), $new_pos)
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input, $base) -> ret {
+        let v0 := $cursor_i__h140a998c67d6d59c_new__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input)
+        let v1 := $cursor_i__h140a998c67d6d59c_fork__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, $base)
         let v2 := mload(0x40)
         if iszero(v2) {
           v2 := 0x80
         }
-        mstore(0x40, add(v2, 64))
+        mstore(0x40, add(v2, 96))
         let v3 := v1
         mstore(v2, mload(v3))
-        mstore(add(v2, 32), base)
-        let v4 := v2
-        ret := v4
-        leave
-      }
-      function solencoder_abiencoder_finish(self) -> ret {
-        let v0 := mload(self)
-        let v1 := mload(add(self, 64))
-        let v2 := mload(0x40)
-        if iszero(v2) {
-          v2 := 0x80
-        }
-        mstore(0x40, add(v2, 64))
-        mstore(v2, v0)
-        mstore(add(v2, 32), sub(v1, v0))
+        mstore(add(v2, 32), mload(add(v3, 32)))
+        mstore(add(v2, 64), $base)
         ret := v2
         leave
       }
-      function solencoder_abiencoder_reserve_head(self, bytes) -> ret {
-        solencoder_ensure_init_mem(self, bytes)
-        let v0 := mload(self)
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($self, $bytes) -> ret {
+        let v0 := mload(64)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(64, add(v0, $bytes))
+        mstore(add($self, 96), add(v0, $bytes))
         ret := v0
         leave
       }
-      function solencoder_abiencoder_write_word(self, v) {
-        let v0 := mload(add(self, 32))
-        mstore(v0, v)
-        mstore(add(self, 32), add(v0, 32))
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($self) -> ret {
+        let v0 := mload(add($self, 32))
+        ret := v0
         leave
       }
-      function solencoder_ensure_init_mem(self, bytes) {
-        let v0 := mload(self)
-        let v1 := eq(v0, 0)
-        if v1 {
-          let v2 := alloc(bytes)
-          mstore(self, v2)
-          mstore(add(self, 32), v2)
-          mstore(add(self, 64), add(v2, bytes))
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish($self) -> ret {
+        let v0 := mload($self)
+        let v1 := v0
+        let v2 := mload(add($self, 96))
+        let v3 := $checked_sub_u256(v2, v1)
+        let v4 := mload(0x40)
+        if iszero(v4) {
+          v4 := 0x80
         }
+        mstore(0x40, add(v4, 64))
+        mstore(v4, v1)
+        mstore(add(v4, 32), v3)
+        ret := v4
         leave
       }
-      function solencoder_new() -> ret {
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($self) -> ret {
+        let v0 := mload(add($self, 64))
+        ret := v0
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head($self, $bytes) -> ret {
+        let v0 := mload($self)
+        let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0, 0)
+        let v2 := v1
+        if v2 {
+          let v3 := mload(64)
+          if iszero(v3) {
+            v3 := 0x80
+          }
+          mstore(64, add(v3, $bytes))
+          mstore($self, v3)
+          mstore(add($self, 32), v3)
+          mstore(add($self, 64), v3)
+          mstore(add($self, 96), add(v3, $bytes))
+        }
+        let v4 := mload(add($self, 32))
+        ret := v4
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($self, $new_base) {
+        mstore(add($self, 32), $new_base)
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($self, $new_pos) {
+        mstore(add($self, 64), $new_pos)
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($self, $v) {
+        let v0 := mload(add($self, 64))
+        let v1 := v0
+        mstore(v1, $v)
+        mstore(add($self, 64), add(v1, 32))
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_new() -> ret {
         let v0 := mload(0x40)
         if iszero(v0) {
           v0 := 0x80
         }
-        mstore(0x40, add(v0, 96))
+        mstore(0x40, add(v0, 128))
         mstore(v0, 0)
         mstore(add(v0, 32), 0)
         mstore(add(v0, 64), 0)
-        let v1 := v0
-        ret := v1
-        leave
-      }
-      function u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
-        let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
+        mstore(add(v0, 96), 0)
         ret := v0
         leave
       }
-      function u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(self, e) {
-        solencoder_abiencoder_write_word(e, self)
+      function $stor_ptr__Evm_hef0af3106e109414_Foo_h6dbce71a6ea992b8__c09e6c6fc5a7b23d($slot) -> ret {
+        let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__Foo_h6dbce71a6ea992b8__21493237fe9c2c26($slot)
+        ret := v0
         leave
       }
-      runtime()
+      function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__Foo_h6dbce71a6ea992b8__21493237fe9c2c26($raw) -> ret {
+        ret := $raw
+        leave
+      }
+      function $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98($d) -> ret {
+        let v0 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($self, $e) {
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, $self)
+        leave
+      }
+      function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr) {
+        $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $self)
+        leave
+      }
+      function $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other) -> ret {
+        let v0 := eq($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+        ret := $self
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+        let v0 := gt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le($self, $other) -> ret {
+        let v0 := iszero(gt($self, $other))
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+        let v0 := lt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+        let v0 := add($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+        let v0 := sub($self, $other)
+        ret := v0
+        leave
+      }
+      function $u32_h20aa0c10687491ad_intword_h9a147c8c32b1323c_from_word($word) -> ret {
+        ret := $word
+        leave
+      }
+      $__EchoContract_runtime()
       return(0, 0)
     }
   }

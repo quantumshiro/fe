@@ -58,14 +58,13 @@ define_lazy_span_node!(
 define_lazy_span_node!(
     LazyModSpan,
     ast::Mod,
-    @token
-    {
+    @token {
+        (pub_kw, pub_kw),
+        (unsafe_kw, unsafe_kw),
         (name, name),
     }
-    @node
-    {
+    @node {
         (attributes, attr_list, LazyAttrListSpan),
-        (modifier, modifier, LazyItemModifierSpan),
     }
 );
 impl<'db> LazyModSpan<'db> {
@@ -77,10 +76,14 @@ impl<'db> LazyModSpan<'db> {
 define_lazy_span_node!(
     LazyFuncSpan,
     ast::Func,
+    @token {
+        (pub_kw, pub_kw),
+        (unsafe_kw, unsafe_kw),
+        (const_kw, const_kw),
+    }
     @node {
         (sig, signature_opt, LazyFuncSignatureSpan),
         (attributes, attr_list, LazyAttrListSpan),
-        (modifier, modifier, LazyItemModifierSpan),
     }
 );
 impl<'db> LazyFuncSpan<'db> {
@@ -93,25 +96,13 @@ impl<'db> LazyFuncSpan<'db> {
     }
 
     pub fn effects(mut self) -> LazyUsesClauseSpan<'db> {
-        use parser::ast::prelude::*;
-
         fn f(origin: ResolvedOrigin, _: LazyArg) -> ResolvedOrigin {
-            origin
-                .map(|node| {
-                    ast::Func::cast(node)
-                        .map(|f| f.sig())
-                        .and_then(|sig| sig.uses_clause())
-                        .map(|n| n.syntax().clone().into())
-                })
-                .map_desugared(|root, desugared| match desugared {
-                    DesugaredOrigin::ContractInit(init) => init
-                        .init
-                        .to_node(&root)
-                        .uses_clause()
-                        .map(|n| ResolvedOriginKind::Node(n.syntax().clone()))
-                        .unwrap_or_else(|| ResolvedOriginKind::None),
-                    other => ResolvedOriginKind::Desugared(root, other),
-                })
+            origin.map(|node| {
+                ast::Func::cast(node)
+                    .map(|f| f.sig())
+                    .and_then(|sig| sig.uses_clause())
+                    .map(|n| n.syntax().clone().into())
+            })
         }
 
         self.0.push(LazyTransitionFn {
@@ -126,25 +117,13 @@ impl<'db> LazyFuncSpan<'db> {
     }
 
     pub fn params(mut self) -> LazyFuncParamListSpan<'db> {
-        use parser::ast::prelude::*;
-
         fn f(origin: ResolvedOrigin, _: LazyArg) -> ResolvedOrigin {
-            origin
-                .map(|node| {
-                    ast::Func::cast(node)
-                        .map(|f| f.sig())
-                        .and_then(|sig| sig.params())
-                        .map(|n| n.syntax().clone().into())
-                })
-                .map_desugared(|root, desugared| match desugared {
-                    DesugaredOrigin::ContractInit(init) => init
-                        .init
-                        .to_node(&root)
-                        .params()
-                        .map(|n| ResolvedOriginKind::Node(n.syntax().clone()))
-                        .unwrap_or_else(|| ResolvedOriginKind::None),
-                    other => ResolvedOriginKind::Desugared(root, other),
-                })
+            origin.map(|node| {
+                ast::Func::cast(node)
+                    .map(|f| f.sig())
+                    .and_then(|sig| sig.params())
+                    .map(|n| n.syntax().clone().into())
+            })
         }
 
         self.0.push(LazyTransitionFn {
@@ -167,11 +146,14 @@ define_lazy_span_node!(
     LazyStructSpan,
     ast::Struct,
     // Note: `name` is handled specially below to support msg desugared structs
+    @token {
+        (pub_kw, pub_kw),
+        (unsafe_kw, unsafe_kw),
+    }
     @node {
         (attributes, attr_list, LazyAttrListSpan),
         (generic_params, generic_params, LazyGenericParamListSpan),
         (where_clause, where_clause, LazyWhereClauseSpan),
-        (modifier, modifier, LazyItemModifierSpan),
         (fields, fields, LazyFieldDefListSpan),
     }
 );
@@ -210,11 +192,12 @@ define_lazy_span_node!(
     LazyContractSpan,
     ast::Contract,
     @token {
+        (pub_kw, pub_kw),
+        (unsafe_kw, unsafe_kw),
         (name, name),
     }
     @node {
         (attributes, attr_list, LazyAttrListSpan),
-        (modifier, modifier, LazyItemModifierSpan),
         (effects, uses_clause, LazyUsesClauseSpan),
         (fields, fields, LazyContractFieldsSpan),
         (init_block, init_block, LazyContractInitSpan),
@@ -230,13 +213,14 @@ define_lazy_span_node!(
     LazyEnumSpan,
     ast::Enum,
     @token {
+        (pub_kw, pub_kw),
+        (unsafe_kw, unsafe_kw),
         (name, name),
     }
     @node {
         (attributes, attr_list, LazyAttrListSpan),
         (generic_params, generic_params, LazyGenericParamListSpan),
         (where_clause, where_clause, LazyWhereClauseSpan),
-        (modifier, modifier, LazyItemModifierSpan),
         (variants, variants, LazyVariantDefListSpan),
     }
 );
@@ -250,12 +234,13 @@ define_lazy_span_node!(
     LazyTypeAliasSpan,
     ast::TypeAlias,
     @token {
+        (pub_kw, pub_kw),
+        (unsafe_kw, unsafe_kw),
         (alias, alias),
     }
     @node {
         (attributes, attr_list, LazyAttrListSpan),
         (generic_params, generic_params, LazyGenericParamListSpan),
-        (modifier, modifier, LazyItemModifierSpan),
         (ty, ty, LazyTySpan),
     }
 );
@@ -285,6 +270,8 @@ define_lazy_span_node!(
     LazyTraitSpan,
     ast::Trait,
     @token {
+        (pub_kw, pub_kw),
+        (unsafe_kw, unsafe_kw),
         (name, name),
     }
     @node {
@@ -292,7 +279,6 @@ define_lazy_span_node!(
         (generic_params, generic_params, LazyGenericParamListSpan),
         (super_traits, super_trait_list, LazySuperTraitListSpan),
         (where_clause, where_clause, LazyWhereClauseSpan),
-        (modifier, modifier, LazyItemModifierSpan),
         (item_list, item_list, LazyTraitItemListSpan),
     }
 );
@@ -445,7 +431,13 @@ impl<'db> LazyConstSpan<'db> {
     }
 }
 
-define_lazy_span_node!(LazyUseSpan, ast::Use);
+define_lazy_span_node!(
+    LazyUseSpan,
+    ast::Use,
+    @node {
+        (attributes, attr_list, LazyAttrListSpan),
+    }
+);
 impl<'db> LazyUseSpan<'db> {
     pub fn new(u: Use<'db>) -> Self {
         Self(crate::span::transition::SpanTransitionChain::new(u))
@@ -627,15 +619,6 @@ define_lazy_span_node!(
     }
 );
 
-define_lazy_span_node!(
-    LazyItemModifierSpan,
-    ast::ItemModifier,
-    @token {
-        (pub_kw, pub_kw),
-        (unsafe_kw, unsafe_kw),
-    }
-);
-
 #[cfg(test)]
 mod tests {
 
@@ -693,7 +676,7 @@ mod tests {
         let mut db = TestDb::default();
 
         let text = r#"
-            fn my_func<T: Debug, U, const LEN: usize>(x: u32, label y: foo::Bar<2>) -> FooResult
+            fn my_func<T: Debug, U, const LEN: usize>(x: u32, _ y: foo::Bar<2>) -> FooResult
                 where U: Add
         "#;
 
@@ -731,7 +714,7 @@ mod tests {
 
         assert_eq!("x", db.text_at(top_mod, &param_1.clone().name()));
         assert_eq!("u32", db.text_at(top_mod, &param_1.ty()));
-        assert_eq!("label", db.text_at(top_mod, &param_2.clone().label()));
+        assert_eq!("y", db.text_at(top_mod, &param_2.clone().name()));
         assert_eq!("foo::Bar<2>", db.text_at(top_mod, &param_2.ty()));
 
         assert_eq!("FooResult", db.text_at(top_mod, &fn_.span().ret_ty()));
@@ -817,7 +800,7 @@ mod tests {
         let top_mod = alias.top_mod(&db);
         assert_eq!("Foo", db.text_at(top_mod, &alias.span().alias()));
         assert_eq!("u32", db.text_at(top_mod, &alias.span().ty()));
-        assert_eq!("pub", db.text_at(top_mod, &alias.span().modifier()));
+        assert_eq!("pub", db.text_at(top_mod, &alias.span().pub_kw()));
     }
 
     #[test]
@@ -832,7 +815,7 @@ mod tests {
         let uses = db.expect_items::<Use>(file);
         let use_ = uses
             .into_iter()
-            .find(|use_| !use_.is_prelude_use(&db))
+            .find(|use_| !use_.is_synthetic_use(&db))
             .unwrap();
 
         let top_mod = use_.top_mod(&db);
@@ -856,7 +839,7 @@ mod tests {
         let uses: Vec<_> = db
             .expect_items::<Use>(file)
             .into_iter()
-            .filter(|use_| !use_.is_prelude_use(&db))
+            .filter(|use_| !use_.is_synthetic_use(&db))
             .collect();
         assert_eq!(uses.len(), 2);
 
@@ -874,5 +857,72 @@ mod tests {
         assert_eq!("qux", db.text_at(top_mod, &use_.span().path().segment(2)));
         assert_eq!("as Alias", db.text_at(top_mod, &use_.span().alias()));
         assert_eq!("Alias", db.text_at(top_mod, &use_.span().alias().name()));
+    }
+
+    /// Regression test for #1357: the LS panicked on `SyntaxNodePtr::to_node`
+    /// when resolving spans for error-recovery AST nodes in incomplete recv
+    /// arms. `ResolvedOrigin::resolve` now uses `try_to_node` so that
+    /// unresolvable pointers yield `None` instead of panicking.
+    ///
+    /// This test exercises the error-recovery code path by parsing several
+    /// variations of incomplete/malformed recv blocks and resolving every
+    /// reference span. While it may not reproduce the exact zero-length
+    /// PathPat from the original report (which depends on mid-edit parser
+    /// state), it guards against regressions if `try_to_node` is accidentally
+    /// reverted back to `to_node`.
+    #[test]
+    fn incomplete_recv_arm_span_resolve_does_not_panic() {
+        use crate::{
+            lower::{map_file_to_mod, scope_graph},
+            semantic::reference::HasReferences,
+            span::LazySpan,
+        };
+
+        let mut db = TestDb::default();
+
+        let cases = &[
+            // Incomplete recv arm with arrow but no body
+            "pub contract C { recv { Get -> u256 } }",
+            // Recv arm with unknown variant (no msg type)
+            "pub contract C { recv { GetGlobal -> } }",
+            // Completely empty recv
+            "pub contract C { recv { } }",
+            // Recv arm missing everything after variant name
+            "pub contract C { recv { Get } }",
+            // Truncated mid-arrow
+            "pub contract C { recv { Get -> } }",
+            // Simulates the fe-new template mid-edit state
+            r#"
+use std::abi::sol
+msg CounterMsg {
+    #[selector = sol("increment()")]
+    Increment,
+    #[selector = sol("get()")]
+    Get -> u256,
+}
+struct CounterStore { value: u256 }
+pub contract Counter {
+    mut store: CounterStore
+    recv CounterMsg {
+        Increment uses (mut store) { store.value = store.value + 1 }
+        GetGlobal -> u256
+        Get -> u256 uses (store) { store.value }
+    }
+}
+            "#,
+        ];
+
+        for (i, text) in cases.iter().enumerate() {
+            let file = db.standalone_file(text);
+            let top_mod = map_file_to_mod(&db, file);
+            let sg = scope_graph(&db, top_mod);
+            for item in sg.items_dfs(&db) {
+                for reference in item.references(&db) {
+                    // Must not panic — should return Some(span) or None
+                    let _ = reference.span().resolve(&db);
+                }
+            }
+            eprintln!("case {i} ok");
+        }
     }
 }

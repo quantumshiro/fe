@@ -6,14 +6,19 @@ use smol_str::SmolStr;
 use url::Url;
 
 use super::{DependencyAlias, DependencyArguments};
-use crate::{InputDb, config::Config};
+use crate::{
+    InputDb,
+    color::{ColorTarget, should_colorize},
+    config::{Config, IngotConfig},
+    ingot::Version,
+};
 
 type TreeEdge = (DependencyAlias, DependencyArguments);
 
 pub struct DependencyTree {
     root: Url,
     graph: DiGraph<Url, TreeEdge>,
-    configs: HashMap<Url, Config>,
+    configs: HashMap<Url, IngotConfig>,
     remote_edges: HashSet<(Url, Url)>,
 }
 
@@ -29,7 +34,7 @@ impl DependencyTree {
     pub fn from_parts(
         graph: DiGraph<Url, TreeEdge>,
         root: Url,
-        configs: HashMap<Url, Config>,
+        configs: HashMap<Url, IngotConfig>,
         remote_edges: HashSet<(Url, Url)>,
     ) -> Self {
         Self {
@@ -41,21 +46,53 @@ impl DependencyTree {
     }
 
     pub fn display(&self) -> String {
-        display_tree(&self.graph, &self.root, &self.configs, &self.remote_edges)
+        self.display_to(ColorTarget::Stdout)
+    }
+
+    pub fn display_to(&self, target: ColorTarget) -> String {
+        display_tree(
+            &self.graph,
+            &self.root,
+            &self.configs,
+            &self.remote_edges,
+            should_colorize(target),
+        )
     }
 }
 
-fn collect_configs(db: &dyn InputDb, graph: &DiGraph<Url, TreeEdge>) -> HashMap<Url, Config> {
+fn collect_configs(db: &dyn InputDb, graph: &DiGraph<Url, TreeEdge>) -> HashMap<Url, IngotConfig> {
     let mut configs = HashMap::new();
+    let mut workspace_versions: HashMap<Url, Option<Version>> = HashMap::new();
     for node_idx in graph.node_indices() {
         let url = &graph[node_idx];
         if let Some(ingot) = db.workspace().containing_ingot(db, url.clone())
-            && let Some(config) = ingot.config(db)
+            && let Some(mut config) = ingot.config(db)
         {
+            if config.metadata.version.is_none()
+                && let Some(workspace_url) =
+                    db.dependency_graph().workspace_root_for_member(db, url)
+            {
+                let version = workspace_versions
+                    .entry(workspace_url.clone())
+                    .or_insert_with(|| workspace_version(db, &workspace_url));
+                if let Some(version) = version.clone() {
+                    config.metadata.version = Some(version);
+                }
+            }
             configs.insert(url.clone(), config);
         }
     }
     configs
+}
+
+fn workspace_version(db: &dyn InputDb, workspace_url: &Url) -> Option<Version> {
+    let config_url = workspace_url.join("fe.toml").ok()?;
+    let file = db.workspace().get(db, &config_url)?;
+    let parsed = Config::parse(file.text(db)).ok()?;
+    match parsed {
+        Config::Workspace(config) => config.workspace.version,
+        Config::Ingot(_) => None,
+    }
 }
 
 fn collect_remote_edges(db: &dyn InputDb, graph: &DiGraph<Url, TreeEdge>) -> HashSet<(Url, Url)> {
@@ -104,8 +141,9 @@ impl TreePrefix {
 fn display_tree(
     graph: &DiGraph<Url, (SmolStr, DependencyArguments)>,
     root_url: &Url,
-    configs: &HashMap<Url, Config>,
+    configs: &HashMap<Url, IngotConfig>,
     remote_edges: &HashSet<(Url, Url)>,
+    colorize: bool,
 ) -> String {
     let mut output = String::new();
 
@@ -117,6 +155,7 @@ fn display_tree(
             configs,
             cycle_nodes: &cycle_nodes,
             remote_edges,
+            colorize,
         };
         let mut seen = HashSet::new();
         print_node_with_alias(
@@ -137,9 +176,10 @@ fn display_tree(
 
 struct TreeContext<'a> {
     graph: &'a DiGraph<Url, (SmolStr, DependencyArguments)>,
-    configs: &'a HashMap<Url, Config>,
+    configs: &'a HashMap<Url, IngotConfig>,
     cycle_nodes: &'a HashSet<NodeIndex>,
     remote_edges: &'a HashSet<(Url, Url)>,
+    colorize: bool,
 }
 
 fn print_node_with_alias(
@@ -188,15 +228,15 @@ fn print_node_with_alias(
     let mut label = base_label;
 
     if will_close_cycle {
-        label = format!("{label} 🔄 [cycle]");
+        label = format!("{label} [cycle]");
     }
 
     if is_remote_edge {
-        label = format!("{label} 🌐 [remote]");
+        label = format!("{label} [remote]");
     }
 
-    if is_in_cycle {
-        output.push_str(&format!("{}{}\n", prefix.new_prefix(), red(&label)));
+    if is_in_cycle && context.colorize {
+        output.push_str(&format!("{}{}\n", prefix.new_prefix(), red(label)));
     } else {
         output.push_str(&format!("{}{}\n", prefix.new_prefix(), label));
     }
@@ -234,7 +274,7 @@ fn print_node_with_alias(
     seen.remove(&node);
 }
 
-fn red(s: &str) -> String {
+fn red(s: String) -> String {
     format!("\x1b[31m{s}\x1b[0m")
 }
 

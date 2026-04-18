@@ -1,0 +1,9 @@
+pub contract Counter {
+    recv {
+        _ {}
+    }
+
+    recv {
+        _ {}
+    }
+}

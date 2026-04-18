@@ -1,0 +1,13 @@
+use std::abi::sol
+
+msg M {
+    #[selector = sol("ping()")]
+    Ping,
+}
+
+contract C {
+    #[payable]
+    recv M {
+        Ping {} {}
+    }
+}

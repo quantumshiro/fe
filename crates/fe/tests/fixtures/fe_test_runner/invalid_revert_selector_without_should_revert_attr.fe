@@ -1,0 +1,2 @@
+#[test(selector = 0x4e487b71)]
+fn test_selector_without_should_revert() {}

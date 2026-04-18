@@ -1,0 +1,71 @@
+---
+source: crates/hir/tests/ty_check.rs
+expression: res
+input_file: test_files/ty_check/trait_assoc_const_method_cmp.fe
+---
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:12:60
+   │  
+12 │       fn as_bytes<T: Copy>(self, prefix: T) -> [u8; Self::N] {
+   │ ╭────────────────────────────────────────────────────────────^
+13 │ │         [0, 1]
+14 │ │     }
+   │ ╰─────^ [u8; 2]
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:13:9
+   │
+13 │         [0, 1]
+   │         ^^^^^^ [u8; 2]
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:13:10
+   │
+13 │         [0, 1]
+   │          ^ u8
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:13:13
+   │
+13 │         [0, 1]
+   │             ^ u8
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:17:35
+   │  
+17 │   fn call_bytes(x: Pair) -> [u8; 2] {
+   │ ╭───────────────────────────────────^
+18 │ │     let prefix: u8 = 0
+19 │ │     x.as_bytes(prefix)
+20 │ │ }
+   │ ╰─^ [u8; 2]
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:18:9
+   │
+18 │     let prefix: u8 = 0
+   │         ^^^^^^ u8
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:18:22
+   │
+18 │     let prefix: u8 = 0
+   │                      ^ u8
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:19:5
+   │
+19 │     x.as_bytes(prefix)
+   │     ^ Pair
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:19:5
+   │
+19 │     x.as_bytes(prefix)
+   │     ^^^^^^^^^^^^^^^^^^ [u8; 2]
+
+note: 
+   ┌─ trait_assoc_const_method_cmp.fe:19:16
+   │
+19 │     x.as_bytes(prefix)
+   │                ^^^^^^ u8

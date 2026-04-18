@@ -5,1136 +5,2467 @@ input_file: tests/fixtures/erc20.fe
 ---
 object "CoolCoin" {
   code {
-    function _a__b__storagekey_write_key__u256_Address__1ae3ad2a1b729a8b(ptr, self) -> ret {
-      let v0 := mload(self)
-      let v1 := add(self, 32)
-      let v2 := u256_storagekey_write_key(ptr, v0)
-      let v3 := address_storagekey_write_key(add(ptr, v2), v1)
-      ret := add(v2, v3)
+    function $__CoolCoin_init() {
+      let v0 := callvalue()
+      let v1 := iszero(eq(v0, 0))
+      if v1 {
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+      }
+      let v2 := dataoffset("CoolCoin_deployed")
+      let v3 := datasize("CoolCoin_deployed")
+      let v4 := $init_field__Evm_hef0af3106e109414_TokenStore_0__1___db7d7c067dc14cc5(0)
+      let v5 := $init_field__Evm_hef0af3106e109414_AccessControl_3___1911f7c438797961(3)
+      let v6 := datasize("CoolCoin")
+      let v7 := codesize()
+      let v8 := lt(v7, v6)
+      if v8 {
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+      }
+      let v9 := sub(v7, v6)
+      let v10 := mload(64)
+      if iszero(v10) {
+        v10 := 0x80
+      }
+      mstore(64, add(v10, v9))
+      codecopy(v10, v6, v9)
+      let v11 := mload(0x40)
+      if iszero(v11) {
+        v11 := 0x80
+      }
+      mstore(0x40, add(v11, 64))
+      mstore(v11, v10)
+      mstore(add(v11, 32), v9)
+      let v12 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b(v11)
+      let v13 := $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_MemoryBytes___a53dbc6192a658d6(v12)
+      let v14 := $address_h257056268eac7027_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_MemoryBytes___a53dbc6192a658d6(v12)
+      $__CoolCoin_init_contract(v13, v14, v4)
+      codecopy(0, v2, v3)
+      return(0, v3)
+    }
+    function $__CoolCoin_init_contract($initial_supply, $owner, $store) {
+      $accesscontrol____h4c85da5bbb505ade_grant_stor_arg0_root_stor__3__577ab43c73dd3cef(1, $owner)
+      $accesscontrol____h4c85da5bbb505ade_grant_stor_arg0_root_stor__3__577ab43c73dd3cef(2, $owner)
+      let v0 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($initial_supply, 0)
+      let v1 := v0
+      if v1 {
+        $mint_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec($owner, $initial_supply, $store)
+      }
       leave
     }
-    function accesscontrol_grant_stor(self, role, to) {
+    function $_a__b__h47f120de72304a2d_storagekey_hf9e3d38a13ff4409_write_key__u256_Address_h257056268eac7027__802280feae02d9df($ptr, $self) -> ret {
+      let v0 := mload($self)
+      let v1 := $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key($ptr, v0)
+      let v2 := $checked_add_u256($ptr, v1)
+      let v3 := mload(add($self, 32))
+      let v4 := $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key(v2, v3)
+      let v5 := $checked_add_u256(v1, v4)
+      ret := v5
+      leave
+    }
+    function $accesscontrol____h4c85da5bbb505ade_grant_stor_arg0_root_stor__3__577ab43c73dd3cef($role, $to) {
       let v0 := mload(0x40)
       if iszero(v0) {
         v0 := 0x80
       }
       mstore(0x40, add(v0, 64))
-      mstore(v0, role)
-      let v1 := to
-      mstore(add(v0, 32), mload(v1))
-      storagemap_k__v__set_stor___u256__Address__bool__ac1f217814dd9c46(self, v0, 1)
+      mstore(v0, $role)
+      mstore(add(v0, 32), $to)
+      $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor___u256__Address__bool_3__5e1c6d4e3f4fb7e8(v0, 1)
       leave
     }
-    function address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
-      let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
-      let v1 := mload(0x40)
-      if iszero(v1) {
-        v1 := 0x80
-      }
-      mstore(0x40, add(v1, 32))
-      mstore(v1, v0)
-      ret := v1
-      leave
-    }
-    function address_storagekey_write_key(ptr, self) -> ret {
-      let v0 := mload(self)
-      mstore(ptr, v0)
-      ret := 32
-      leave
-    }
-    function address_zero() -> ret {
-      let v0 := mload(0x40)
-      if iszero(v0) {
-        v0 := 0x80
-      }
-      mstore(0x40, add(v0, 32))
-      mstore(v0, 0)
-      ret := v0
-      leave
-    }
-    function assert(b) {
-      let v0 := iszero(b)
-      if v0 {
+    function $address_h257056268eac7027_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_MemoryBytes___a53dbc6192a658d6($d) -> ret {
+      let v0 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($d)
+      let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(shr(160, v0), 0)
+      let v2 := v1
+      if v2 {
         revert(0, 0)
       }
+      ret := v0
       leave
     }
-    function bool_storablescalar_to_word(self) -> ret {
+    function $address_h257056268eac7027_eq_h14b330e44530c410_eq($self, $other) -> ret {
+      let v0 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other)
+      ret := v0
+      leave
+    }
+    function $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key($ptr, $self) -> ret {
+      let v0 := $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key($ptr, $self)
+      ret := v0
+      leave
+    }
+    function $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic($self) -> ret {
+      ret := $self
+      leave
+    }
+    function $address_h257056268eac7027_zero() -> ret {
+      ret := 0
+      leave
+    }
+    function $assert($b) {
+      let v0 := iszero($b)
+      if v0 {
+        $revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1)
+      }
+      leave
+    }
+    function $bool_h947c0c03c59c6f07_wordrepr_h7483d41ac8178d88_to_word($self) -> ret {
       let v0 := 0
-      switch self
-        case 1 {
-          v0 := 1
-        }
-        case 0 {
-          v0 := 0
-        }
-        default {
-          v0 := 0
-        }
+      let v1 := $self
+      if v1 {
+        v0 := 1
+      }
+      if iszero(v1) {
+        v0 := 0
+      }
       ret := v0
       leave
     }
-    function calldata_byteinput_word_at(self, byte_offset) -> ret {
-      let v0 := calldataload(byte_offset)
+    function $checked_add_u256($a, $b) -> ret {
+      let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
       ret := v0
       leave
     }
-    function cursor_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
+    function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+      let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+      let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+      let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+      let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+      let v4 := v3
+      if v4 {
+        revert(0, 0)
+      }
+      ret := v0
+      leave
+    }
+    function $checked_sub_u256($a, $b) -> ret {
+      let v0 := $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b)
+      ret := v0
+      leave
+    }
+    function $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+      let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+      let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+      let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+      let v3 := v2
+      if v3 {
+        revert(0, 0)
+      }
+      let v4 := $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($a, $b)
+      ret := v4
+      leave
+    }
+    function $cursor_i__h140a998c67d6d59c_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input) -> ret {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(0x40, add(v0, 96))
+      let v1 := $input
+      mstore(v0, mload(v1))
+      mstore(add(v0, 32), mload(add(v1, 32)))
+      mstore(add(v0, 64), 0)
+      ret := v0
+      leave
+    }
+    function $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_TransferEvent_h1c9ba82714a4a1f0__6ee531292f5eff63($event) {
+      $transferevent_h1c9ba82714a4a1f0_event_hd33e4481d4a34b05_emit_arg1_root_stor__Evm_hef0af3106e109414__3af54274b2985741($event)
+      leave
+    }
+    function $encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd($selector, $message) -> ret {
+      let v0 := 4
+      let v1 := shl(224, $selector)
+      let v2 := iszero(0)
+      if v2 {
+        let v3 := $checked_add_u256(v0, 32)
+        let v4 := v3
+        let v5 := mload(64)
+        if iszero(v5) {
+          v5 := 0x80
+        }
+        mstore(64, add(v5, v4))
+        mstore(v5, v1)
+        let v6 := $checked_add_u256(v5, v0)
+        $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr($message, v6)
+        let v7 := mload(0x40)
+        if iszero(v7) {
+          v7 := 0x80
+        }
+        mstore(0x40, add(v7, 64))
+        mstore(v7, v5)
+        mstore(add(v7, 32), v4)
+        ret := v7
+        leave
+      }
+      if iszero(v2) {
+        let v8 := $checked_add_u256(v0, 32)
+        let v9 := v8
+        let v10 := $solencoder_h1b9228b90dad6928_new()
+        let v11 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v10, v9)
+        mstore(v11, v1)
+        let v12 := $checked_add_u256(v11, v0)
+        mstore(add(v10, 32), v12)
+        let v13 := $checked_add_u256(v11, v0)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v10, v13)
+        $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd($message, v10)
+        let v14 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v10)
+        ret := v14
+        leave
+      }
+    }
+    function $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, $e) {
       let v0 := mload(0x40)
       if iszero(v0) {
         v0 := 0x80
       }
       mstore(0x40, add(v0, 32))
-      pop(v0)
-      mstore(v0, 0)
-      let v1 := v0
-      ret := v1
-      leave
-    }
-    function cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-      pop(self)
-      let v0 := mload(self)
-      let v1 := calldata_byteinput_word_at(0, v0)
-      let v2 := mload(self)
-      mstore(self, add(v2, 32))
-      ret := v1
-      leave
-    }
-    function init() {
-      let v0 := 0
+      mstore(v0, $e)
       let v1 := 0
-      let v2 := 0
-      let v3 := 3
-      let v4 := soldecoder_i__new__CallData__b9ab8dc8a4b2f9e(0)
-      let v5 := calldatasize()
-      let v6 := lt(v5, add(32, 32))
-      if v6 {
-        revert(0, 0)
+      if v1 {
+        let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+        let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+        let v4 := $checked_sub_u256(v3, v2)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+        let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+        leave
       }
-      let v7 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v4)
-      let v8 := address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v4)
-      let v9 := v2
-      let v10 := v3
-      init_contract(v7, v8, v9, v10, v0, v1)
-      let v11 := datasize("CoolCoin_deployed")
-      let v12 := dataoffset("CoolCoin_deployed")
-      codecopy(0, v12, v11)
-      return(0, v11)
-    }
-    function init_contract(initial_supply, owner, store, auth, ctx, log) {
-      accesscontrol_grant_stor(auth, 1, owner)
-      accesscontrol_grant_stor(auth, 2, owner)
-      let v0 := gt(initial_supply, 0)
-      if v0 {
-        mint(owner, initial_supply, store, log)
+      if iszero(v1) {
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+        leave
       }
-      leave
     }
-    function log_emit_stor__TransferEvent__3286f1804ad8a121(self, event) {
-      todo()
-      leave
+    function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort() {
+      revert(0, 0)
     }
-    function mint(to, amount, store, log) {
-      let v0 := address_zero()
-      assert(iszero(eq(to, v0)))
-      let v1 := storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), to)
-      storagemap_k__v__set_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), to, add(v1, amount))
-      let v2 := address_zero()
-      let v3 := mload(0x40)
-      if iszero(v3) {
-        v3 := 0x80
-      }
-      mstore(0x40, add(v3, 96))
-      let v4 := v2
-      mstore(v3, mload(v4))
-      let v5 := to
-      mstore(add(v3, 32), mload(v5))
-      mstore(add(v3, 64), amount)
-      log_emit_stor__TransferEvent__3286f1804ad8a121(log, v3)
-      leave
-    }
-    function soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-      let v0 := cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self)
+    function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f($slot) -> ret {
+      let v0 := $stor_ptr__Evm_hef0af3106e109414_AccessControl_3___1911f7c438797961($slot)
       ret := v0
       leave
     }
-    function soldecoder_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
-      let v0 := cursor_i__new__CallData__b9ab8dc8a4b2f9e(input)
+    function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde($slot) -> ret {
+      let v0 := $stor_ptr__Evm_hef0af3106e109414_TokenStore_0__1___db7d7c067dc14cc5($slot)
+      ret := v0
+      leave
+    }
+    function $evm_hef0af3106e109414_log_h22d1a10952034bae_log3_stor_arg0_root_stor($offset, $len, $topic0, $topic1, $topic2) {
+      log3($offset, $len, $topic0, $topic1, $topic2)
+      leave
+    }
+    function $init_field__Evm_hef0af3106e109414_AccessControl_3___1911f7c438797961($slot) -> ret {
+      let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f($slot)
+      ret := v0
+      leave
+    }
+    function $init_field__Evm_hef0af3106e109414_TokenStore_0__1___db7d7c067dc14cc5($slot) -> ret {
+      let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde($slot)
+      ret := v0
+      leave
+    }
+    function $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_len($self) -> ret {
+      let v0 := mload(add($self, 32))
+      ret := v0
+      leave
+    }
+    function $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_word_at($self, $byte_offset) -> ret {
+      let v0 := mload($self)
+      let v1 := add(v0, $byte_offset)
+      let v2 := mload(v1)
+      ret := v2
+      leave
+    }
+    function $mint_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec($to, $amount, $store) {
+      let v0 := $address_h257056268eac7027_zero()
+      let v1 := $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($to, v0)
+      $assert(v1)
+      let v2 := sload($store)
+      let v3 := $checked_add_u256(v2, $amount)
+      sstore($store, v3)
+      let v4 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($to)
+      let v5 := $checked_add_u256(v4, $amount)
+      $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($to, v5)
+      let v6 := $address_h257056268eac7027_zero()
+      let v7 := mload(0x40)
+      if iszero(v7) {
+        v7 := 0x80
+      }
+      mstore(0x40, add(v7, 96))
+      mstore(v7, v6)
+      mstore(add(v7, 32), $to)
+      mstore(add(v7, 64), $amount)
+      $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_TransferEvent_h1c9ba82714a4a1f0__6ee531292f5eff63(v7)
+      leave
+    }
+    function $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($self, $other) -> ret {
+      let v0 := $address_h257056268eac7027_eq_h14b330e44530c410_eq($self, $other)
+      ret := iszero(v0)
+      leave
+    }
+    function $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd($self, $e) {
+      $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($self, $e)
+      leave
+    }
+    function $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr($self, $ptr) {
+      $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr)
+      leave
+    }
+    function $revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd($error) {
+      let v0 := $encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1313373041, $error)
+      let v1 := mload(v0)
+      let v2 := v1
+      let v3 := mload(add(v0, 32))
+      let v4 := v3
+      revert(v2, v4)
+    }
+    function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input) -> ret {
+      let v0 := $soldecoder_i__ha12a03fcb5ba844b_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input)
+      ret := v0
+      leave
+    }
+    function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $value) {
+      mstore($ptr, $value)
+      leave
+    }
+    function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($self) -> ret {
+      let v0 := $self
+      let v1 := $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_len(v0)
+      let v2 := mload(add($self, 64))
+      let v3 := $checked_add_u256(v2, 32)
+      let v4 := v3
+      let v5 := mload(add($self, 64))
+      let v6 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v4, v5)
+      let v7 := v6
+      if v7 {
+        revert(0, 0)
+      }
+      let v8 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v4, v1)
+      let v9 := v8
+      if v9 {
+        revert(0, 0)
+      }
+      let v10 := mload(add($self, 64))
+      let v11 := $self
+      let v12 := $memorybytes_h1e381015a9b0111b_byteinput_hc4c2cb44299530ae_word_at(v11, v10)
+      mstore(add($self, 64), v4)
+      ret := v12
+      leave
+    }
+    function $soldecoder_i__ha12a03fcb5ba844b_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input) -> ret {
+      let v0 := $cursor_i__h140a998c67d6d59c_new__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($input)
       let v1 := mload(0x40)
       if iszero(v1) {
         v1 := 0x80
       }
-      mstore(0x40, add(v1, 64))
+      mstore(0x40, add(v1, 128))
       let v2 := v0
       mstore(v1, mload(v2))
-      mstore(add(v1, 32), 0)
-      let v3 := v1
-      ret := v3
+      mstore(add(v1, 32), mload(add(v2, 32)))
+      mstore(add(v1, 64), mload(add(v2, 64)))
+      mstore(add(v1, 96), 0)
+      ret := v1
       leave
     }
-    function storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(self, key) -> ret {
-      let v0 := storagemap_k__v__storage_slot_stor__Address_u256__cdd966cb4c9acb9d(self, key)
-      let v1 := sload(v0)
-      let v2 := u256_loadablescalar_from_word(v1)
-      ret := v2
-      leave
-    }
-    function storagemap_k__v__set_stor__Address_u256__cdd966cb4c9acb9d(self, key, value) {
-      let v0 := storagemap_k__v__storage_slot_stor__Address_u256__cdd966cb4c9acb9d(self, key)
-      let v1 := u256_loadablescalar_from_word(value)
-      sstore(v0, v1)
-      leave
-    }
-    function storagemap_k__v__set_stor___u256__Address__bool__ac1f217814dd9c46(self, key, value) {
-      let v0 := storagemap_k__v__storage_slot_stor___u256__Address__bool__ac1f217814dd9c46(self, key)
-      let v1 := bool_storablescalar_to_word(value)
-      sstore(v0, v1)
-      leave
-    }
-    function storagemap_k__v__storage_slot_stor__Address_u256__cdd966cb4c9acb9d(self, key) -> ret {
-      let v0 := address_storagekey_write_key(0, key)
-      let v1 := self
-      mstore(v0, v1)
-      let v2 := keccak256(0, add(v0, 32))
-      ret := v2
-      leave
-    }
-    function storagemap_k__v__storage_slot_stor___u256__Address__bool__ac1f217814dd9c46(self, key) -> ret {
-      let v0 := _a__b__storagekey_write_key__u256_Address__1ae3ad2a1b729a8b(0, key)
-      let v1 := self
-      mstore(v0, v1)
-      let v2 := keccak256(0, add(v0, 32))
-      ret := v2
-      leave
-    }
-    function u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
-      let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($self, $bytes) -> ret {
+      let v0 := mload(64)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(64, add(v0, $bytes))
+      mstore(add($self, 96), add(v0, $bytes))
       ret := v0
       leave
     }
-    function u256_loadablescalar_from_word(word) -> ret {
-      ret := word
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($self) -> ret {
+      let v0 := mload(add($self, 32))
+      ret := v0
       leave
     }
-    function u256_storagekey_write_key(ptr, self) -> ret {
-      mstore(ptr, self)
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish($self) -> ret {
+      let v0 := mload($self)
+      let v1 := v0
+      let v2 := mload(add($self, 96))
+      let v3 := $checked_sub_u256(v2, v1)
+      let v4 := mload(0x40)
+      if iszero(v4) {
+        v4 := 0x80
+      }
+      mstore(0x40, add(v4, 64))
+      mstore(v4, v1)
+      mstore(add(v4, 32), v3)
+      ret := v4
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($self) -> ret {
+      let v0 := mload(add($self, 64))
+      ret := v0
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head($self, $bytes) -> ret {
+      let v0 := mload($self)
+      let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0, 0)
+      let v2 := v1
+      if v2 {
+        let v3 := mload(64)
+        if iszero(v3) {
+          v3 := 0x80
+        }
+        mstore(64, add(v3, $bytes))
+        mstore($self, v3)
+        mstore(add($self, 32), v3)
+        mstore(add($self, 64), v3)
+        mstore(add($self, 96), add(v3, $bytes))
+      }
+      let v4 := mload(add($self, 32))
+      ret := v4
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($self, $new_base) {
+      mstore(add($self, 32), $new_base)
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($self, $new_pos) {
+      mstore(add($self, 64), $new_pos)
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($self, $v) {
+      let v0 := mload(add($self, 64))
+      let v1 := v0
+      mstore(v1, $v)
+      mstore(add($self, 64), add(v1, 32))
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_new() -> ret {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(0x40, add(v0, 128))
+      mstore(v0, 0)
+      mstore(add(v0, 32), 0)
+      mstore(add(v0, 64), 0)
+      mstore(add(v0, 96), 0)
+      ret := v0
+      leave
+    }
+    function $stor_ptr__Evm_hef0af3106e109414_AccessControl_3___1911f7c438797961($slot) -> ret {
+      let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__AccessControl_3___3633e113b859df5f($slot)
+      ret := v0
+      leave
+    }
+    function $stor_ptr__Evm_hef0af3106e109414_TokenStore_0__1___db7d7c067dc14cc5($slot) -> ret {
+      let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__TokenStore_0__1___175215aa56127bde($slot)
+      ret := v0
+      leave
+    }
+    function $storagemap_get_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt) -> ret {
+      let v0 := $storagemap_storage_slot_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt)
+      let v1 := sload(v0)
+      ret := v1
+      leave
+    }
+    function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($key) -> ret {
+      let v0 := $storagemap_get_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, 0)
+      let v1 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v0)
+      ret := v1
+      leave
+    }
+    function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($key, $value) {
+      let v0 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($value)
+      $storagemap_set_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, 0, v0)
+      leave
+    }
+    function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor___u256__Address__bool_3__5e1c6d4e3f4fb7e8($key, $value) {
+      let v0 := $bool_h947c0c03c59c6f07_wordrepr_h7483d41ac8178d88_to_word($value)
+      $storagemap_set_word_with_salt___u256__Address___c7c570db20cdd393($key, 3, v0)
+      leave
+    }
+    function $storagemap_set_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt, $word) {
+      let v0 := $storagemap_storage_slot_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt)
+      sstore(v0, $word)
+      leave
+    }
+    function $storagemap_set_word_with_salt___u256__Address___c7c570db20cdd393($key, $salt, $word) {
+      let v0 := $storagemap_storage_slot_with_salt___u256__Address___c7c570db20cdd393($key, $salt)
+      sstore(v0, $word)
+      leave
+    }
+    function $storagemap_storage_slot_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt) -> ret {
+      let v0 := mload(64)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(64, add(v0, 0))
+      let v1 := $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key(v0, $key)
+      let v2 := $checked_add_u256(v0, v1)
+      mstore(v2, $salt)
+      let v3 := $checked_add_u256(v1, 32)
+      let v4 := keccak256(v0, v3)
+      ret := v4
+      leave
+    }
+    function $storagemap_storage_slot_with_salt___u256__Address___c7c570db20cdd393($key, $salt) -> ret {
+      let v0 := mload(64)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(64, add(v0, 0))
+      let v1 := $_a__b__h47f120de72304a2d_storagekey_hf9e3d38a13ff4409_write_key__u256_Address_h257056268eac7027__802280feae02d9df(v0, $key)
+      let v2 := $checked_add_u256(v0, v1)
+      mstore(v2, $salt)
+      let v3 := $checked_add_u256(v1, 32)
+      let v4 := keccak256(v0, v3)
+      ret := v4
+      leave
+    }
+    function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__AccessControl_3___3633e113b859df5f($raw) -> ret {
+      ret := $raw
+      leave
+    }
+    function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__TokenStore_0__1___175215aa56127bde($raw) -> ret {
+      ret := $raw
+      leave
+    }
+    function $transferevent_h1c9ba82714a4a1f0_event_hd33e4481d4a34b05_emit_arg1_root_stor__Evm_hef0af3106e109414__3af54274b2985741($self) {
+      let v0 := $solencoder_h1b9228b90dad6928_new()
+      let v1 := 32
+      let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v0, v1)
+      let v3 := mload(add($self, 64))
+      $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v3, v0)
+      let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v0)
+      let v5 := mload(v4)
+      let v6 := v5
+      let v7 := mload(add(v4, 32))
+      let v8 := v7
+      let v9 := mload($self)
+      let v10 := $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic(v9)
+      let v11 := mload(add($self, 32))
+      let v12 := $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic(v11)
+      $evm_hef0af3106e109414_log_h22d1a10952034bae_log3_stor_arg0_root_stor(v6, v8, 106268374300910980166318620624040158066582587003704178075307865084173350203760, v10, v12)
+      leave
+    }
+    function $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_MemoryBytes___a53dbc6192a658d6($d) -> ret {
+      let v0 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__MemoryBytes_h1e381015a9b0111b__59e0d528d54cca1b($d)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($self, $e) {
+      $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, $self)
+      leave
+    }
+    function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr) {
+      $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $self)
+      leave
+    }
+    function $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other) -> ret {
+      let v0 := eq($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_eq_he50383edd273619f_ne($self, $other) -> ret {
+      let v0 := iszero(eq($self, $other))
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+      ret := $self
+      leave
+    }
+    function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+      let v0 := gt($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+      let v0 := lt($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key($ptr, $self) -> ret {
+      mstore($ptr, $self)
       ret := 32
       leave
     }
-    init()
+    function $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word($word) -> ret {
+      ret := $word
+      leave
+    }
+    function $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($self) -> ret {
+      ret := $self
+      leave
+    }
+    function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+      let v0 := add($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+      let v0 := sub($self, $other)
+      ret := v0
+      leave
+    }
+    $__CoolCoin_init()
   }
 
   object "CoolCoin_deployed" {
     code {
-      function ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) {
+      function $__CoolCoin_recv_0_0($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        let v4 := caller()
+        $transfer_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v4, v1, v3, $store)
+        ret := 1
         leave
       }
-      function _a__b__storagekey_write_key__Address_Address__397b9a625a435b6f(ptr, self) -> ret {
-        let v0 := self
-        let v1 := add(self, 32)
-        let v2 := address_storagekey_write_key(ptr, v0)
-        let v3 := address_storagekey_write_key(add(ptr, v2), v1)
-        ret := add(v2, v3)
+      function $__CoolCoin_recv_0_1($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        let v4 := caller()
+        $approve_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v4, v1, v3, $store)
+        ret := 1
         leave
       }
-      function _a__b__storagekey_write_key__u256_Address__1ae3ad2a1b729a8b(ptr, self) -> ret {
-        let v0 := mload(self)
-        let v1 := add(self, 32)
-        let v2 := u256_storagekey_write_key(ptr, v0)
-        let v3 := address_storagekey_write_key(add(ptr, v2), v1)
-        ret := add(v2, v3)
+      function $__CoolCoin_recv_0_2($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        let v4 := mload(add($args, 64))
+        let v5 := v4
+        let v6 := caller()
+        $spend_allowance_eff0_stor__0_1_TokenStore_0__1___2d6f91026cd3e364(v1, v6, v5, $store)
+        $transfer_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v1, v3, v5, $store)
+        ret := 1
         leave
       }
-      function _t0__decode_decode__Sol_Address_SolDecoder_CallData___c3cd70daebc6e8b9(d) -> ret {
-        let v0 := address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v1 := mload(0x40)
-        if iszero(v1) {
-          v1 := 0x80
-        }
-        mstore(0x40, add(v1, 32))
-        let v2 := v0
-        mstore(v1, mload(v2))
+      function $__CoolCoin_recv_0_3($args, $store) -> ret {
+        let v0 := $args
+        let v1 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3(v0)
         ret := v1
         leave
       }
-      function _t0__decode_decode__Sol_u256_SolDecoder_CallData___51fc2f6931ec5edc(d) -> ret {
-        let v0 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v1 := mload(0x40)
-        if iszero(v1) {
-          v1 := 0x80
+      function $__CoolCoin_recv_0_4($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        let v4 := mload(0x40)
+        if iszero(v4) {
+          v4 := 0x80
         }
-        mstore(0x40, add(v1, 32))
-        mstore(v1, v0)
-        ret := v1
+        mstore(0x40, add(v4, 64))
+        mstore(v4, v1)
+        mstore(add(v4, 32), v3)
+        let v5 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor___Address__Address__u256_1__12414c27d5bfff1f(v4)
+        ret := v5
         leave
       }
-      function _t0__t1__decode_decode__Sol_Address_Address_SolDecoder_CallData___7ed19c3f9fd70917(d) -> ret {
-        let v0 := address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v1 := address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v2 := mload(0x40)
-        if iszero(v2) {
-          v2 := 0x80
-        }
-        mstore(0x40, add(v2, 64))
-        let v3 := v0
-        mstore(v2, mload(v3))
-        let v4 := v1
-        mstore(add(v2, 32), mload(v4))
-        ret := v2
-        leave
-      }
-      function _t0__t1__decode_decode__Sol_Address_u256_SolDecoder_CallData___25b1373fd1f61181(d) -> ret {
-        let v0 := address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v1 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v2 := mload(0x40)
-        if iszero(v2) {
-          v2 := 0x80
-        }
-        mstore(0x40, add(v2, 64))
-        let v3 := v0
-        mstore(v2, mload(v3))
-        mstore(add(v2, 32), v1)
-        ret := v2
-        leave
-      }
-      function _t0__t1__t2__decode_decode__Sol_Address_Address_u256_SolDecoder_CallData___da321e92055b22cd(d) -> ret {
-        let v0 := address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v1 := address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v2 := u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d)
-        let v3 := mload(0x40)
-        if iszero(v3) {
-          v3 := 0x80
-        }
-        mstore(0x40, add(v3, 96))
-        let v4 := v0
-        mstore(v3, mload(v4))
-        let v5 := v1
-        mstore(add(v3, 32), mload(v5))
-        mstore(add(v3, 64), v2)
-        ret := v3
-        leave
-      }
-      function accesscontrol_require_stor(self, role, ctx) {
-        let v0 := ctx_caller_stor(ctx)
-        let v1 := mload(0x40)
-        if iszero(v1) {
-          v1 := 0x80
-        }
-        mstore(0x40, add(v1, 64))
-        mstore(v1, role)
-        let v2 := v0
-        mstore(add(v1, 32), mload(v2))
-        let v3 := storagemap_k__v__get_stor___u256__Address__bool__ac1f217814dd9c46(self, v1)
-        assert(eq(v3, 1))
-        leave
-      }
-      function address_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
-        let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
-        let v1 := mload(0x40)
-        if iszero(v1) {
-          v1 := 0x80
-        }
-        mstore(0x40, add(v1, 32))
-        mstore(v1, v0)
-        ret := v1
-        leave
-      }
-      function address_storagekey_write_key(ptr, self) -> ret {
-        let v0 := mload(self)
-        mstore(ptr, v0)
-        ret := 32
-        leave
-      }
-      function address_zero() -> ret {
-        let v0 := mload(0x40)
-        if iszero(v0) {
-          v0 := 0x80
-        }
-        mstore(0x40, add(v0, 32))
-        mstore(v0, 0)
+      function $__CoolCoin_recv_0_5($store) -> ret {
+        let v0 := sload($store)
         ret := v0
         leave
       }
-      function alloc(size) -> ret {
-        let v0 := mload(64)
-        let v1 := eq(v0, 0)
-        if v1 {
-          v0 := 128
-        }
-        mstore(64, add(v0, size))
-        ret := v0
+      function $__CoolCoin_recv_0_6() -> ret {
+        ret := 0x436f6f6c436f696e
         leave
       }
-      function approve(owner, spender, amount, store, log) {
-        let v0 := address_zero()
-        assert(iszero(eq(owner, v0)))
-        let v1 := address_zero()
-        assert(iszero(eq(spender, v1)))
-        let v2 := mload(0x40)
-        if iszero(v2) {
-          v2 := 0x80
-        }
-        mstore(0x40, add(v2, 64))
-        let v3 := owner
-        mstore(v2, mload(v3))
-        let v4 := spender
-        mstore(add(v2, 32), mload(v4))
-        storagemap_k__v__set_stor___Address__Address__u256__380d6b10c386a4ee(add(store, 2), v2, amount)
+      function $__CoolCoin_recv_0_7() -> ret {
+        ret := 0x434f4f4c
+        leave
+      }
+      function $__CoolCoin_recv_0_8() -> ret {
+        ret := 18
+        leave
+      }
+      function $__CoolCoin_recv_1_0($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        $accesscontrol____h4c85da5bbb505ade_require_stor__3_Evm_hef0af3106e109414__5baaa260f0d18873(1)
+        $mint_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v1, v3, $store)
+        ret := 1
+        leave
+      }
+      function $__CoolCoin_recv_1_1($args, $store) -> ret {
+        let v0 := $args
+        let v1 := caller()
+        $burn_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v1, v0, $store)
+        ret := 1
+        leave
+      }
+      function $__CoolCoin_recv_1_2($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        let v4 := caller()
+        $spend_allowance_eff0_stor__0_1_TokenStore_0__1___2d6f91026cd3e364(v1, v4, v3, $store)
+        $burn_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v1, v3, $store)
+        ret := 1
+        leave
+      }
+      function $__CoolCoin_recv_1_3($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        let v4 := caller()
         let v5 := mload(0x40)
         if iszero(v5) {
           v5 := 0x80
         }
-        mstore(0x40, add(v5, 96))
-        let v6 := owner
-        mstore(v5, mload(v6))
-        let v7 := spender
-        mstore(add(v5, 32), mload(v7))
-        mstore(add(v5, 64), amount)
-        log_emit_stor__ApprovalEvent__6cbed5fbaac6c5ee(log, v5)
+        mstore(0x40, add(v5, 64))
+        mstore(v5, v4)
+        mstore(add(v5, 32), v1)
+        let v6 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor___Address__Address__u256_1__12414c27d5bfff1f(v5)
+        let v7 := $checked_add_u256(v6, v3)
+        $approve_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v4, v1, v7, $store)
+        ret := 1
         leave
       }
-      function assert(b) {
-        let v0 := iszero(b)
-        if v0 {
-          revert(0, 0)
+      function $__CoolCoin_recv_1_4($args, $store) -> ret {
+        let v0 := mload($args)
+        let v1 := v0
+        let v2 := mload(add($args, 32))
+        let v3 := v2
+        let v4 := caller()
+        let v5 := mload(0x40)
+        if iszero(v5) {
+          v5 := 0x80
         }
+        mstore(0x40, add(v5, 64))
+        mstore(v5, v4)
+        mstore(add(v5, 32), v1)
+        let v6 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor___Address__Address__u256_1__12414c27d5bfff1f(v5)
+        let v7 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_ge(v6, v3)
+        $assert(v7)
+        let v8 := $checked_sub_u256(v6, v3)
+        $approve_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec(v4, v1, v8, $store)
+        ret := 1
         leave
       }
-      function bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(self, e) {
-        let v0 := self
+      function $__CoolCoin_runtime() {
+        let v0 := $runtime_selector__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v1 := eq(and(v0, 0xffffffff), and(2835717307, 0xffffffff))
+        if v1 {
+          $__CoolCoin_runtime_arm_0_0()
+        }
+        let v2 := eq(and(v0, 0xffffffff), and(157198259, 0xffffffff))
+        if v2 {
+          $__CoolCoin_runtime_arm_0_1()
+        }
+        let v3 := eq(and(v0, 0xffffffff), and(599290589, 0xffffffff))
+        if v3 {
+          $__CoolCoin_runtime_arm_0_2()
+        }
+        let v4 := eq(and(v0, 0xffffffff), and(1889567281, 0xffffffff))
+        if v4 {
+          $__CoolCoin_runtime_arm_0_3()
+        }
+        let v5 := eq(and(v0, 0xffffffff), and(3714247998, 0xffffffff))
+        if v5 {
+          $__CoolCoin_runtime_arm_0_4()
+        }
+        let v6 := eq(and(v0, 0xffffffff), and(404098525, 0xffffffff))
+        if v6 {
+          $__CoolCoin_runtime_arm_0_5()
+        }
+        let v7 := eq(and(v0, 0xffffffff), and(117300739, 0xffffffff))
+        if v7 {
+          $__CoolCoin_runtime_arm_0_6()
+        }
+        let v8 := eq(and(v0, 0xffffffff), and(2514000705, 0xffffffff))
+        if v8 {
+          $__CoolCoin_runtime_arm_0_7()
+        }
+        let v9 := eq(and(v0, 0xffffffff), and(826074471, 0xffffffff))
+        if v9 {
+          $__CoolCoin_runtime_arm_0_8()
+        }
+        let v10 := eq(and(v0, 0xffffffff), and(1086394137, 0xffffffff))
+        if v10 {
+          $__CoolCoin_runtime_arm_1_0()
+        }
+        let v11 := eq(and(v0, 0xffffffff), and(1117154408, 0xffffffff))
+        if v11 {
+          $__CoolCoin_runtime_arm_1_1()
+        }
+        let v12 := eq(and(v0, 0xffffffff), and(2043438992, 0xffffffff))
+        if v12 {
+          $__CoolCoin_runtime_arm_1_2()
+        }
+        let v13 := eq(and(v0, 0xffffffff), and(961581905, 0xffffffff))
+        if v13 {
+          $__CoolCoin_runtime_arm_1_3()
+        }
+        let v14 := eq(and(v0, 0xffffffff), and(2757214935, 0xffffffff))
+        if v14 {
+          $__CoolCoin_runtime_arm_1_4()
+        }
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+      }
+      function $__CoolCoin_runtime_arm_0_0() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $transfer_h13f5ec5985ebba60_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_0_0(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $__CoolCoin_runtime_arm_0_1() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $approve_h90175fc19dafde67_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_0_1(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $__CoolCoin_runtime_arm_0_2() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $transferfrom_h939549e4bad999e8_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_0_2(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $__CoolCoin_runtime_arm_0_3() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $balanceof_hf830ebedc81244a7_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_0_3(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v6)
+      }
+      function $__CoolCoin_runtime_arm_0_4() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $allowance_h4bb1267f662bd2a8_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_0_4(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v6)
+      }
+      function $__CoolCoin_runtime_arm_0_5() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $__CoolCoin_recv_0_5(v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63(v4)
+      }
+      function $__CoolCoin_runtime_arm_0_6() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $__CoolCoin_recv_0_6()
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_String_32___e9bd76e6664882d4(v4)
+      }
+      function $__CoolCoin_runtime_arm_0_7() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $__CoolCoin_recv_0_7()
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_String_8___1834cf55196eb0a5(v4)
+      }
+      function $__CoolCoin_runtime_arm_0_8() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $__CoolCoin_recv_0_8()
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u8__c96affccb17b69db(v4)
+      }
+      function $__CoolCoin_runtime_arm_1_0() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $mint_ha2f94817be433a2e_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_1_0(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $__CoolCoin_runtime_arm_1_1() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $burn_h25a61f4466d20eed_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_1_1(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $__CoolCoin_runtime_arm_1_2() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $burnfrom_ha9fb0972f143e40c_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_1_2(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $__CoolCoin_runtime_arm_1_3() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $increaseallowance_h9840135eaea36633_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_1_3(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $__CoolCoin_runtime_arm_1_4() {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde(0)
+        let v1 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f(3)
+        let v2 := callvalue()
+        let v3 := iszero(eq(v2, 0))
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2()
+        let v5 := $decreaseallowance_h635474f45639c83d_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966(v4)
+        let v6 := $__CoolCoin_recv_1_4(v5, v0)
+        $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb(v6)
+      }
+      function $_a__b__h47f120de72304a2d_storagekey_hf9e3d38a13ff4409_write_key__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($ptr, $self) -> ret {
+        let v0 := mload($self)
+        let v1 := $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key($ptr, v0)
+        let v2 := $checked_add_u256($ptr, v1)
+        let v3 := mload(add($self, 32))
+        let v4 := $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key(v2, v3)
+        let v5 := $checked_add_u256(v1, v4)
+        ret := v5
+        leave
+      }
+      function $_a__b__h47f120de72304a2d_storagekey_hf9e3d38a13ff4409_write_key__u256_Address_h257056268eac7027__802280feae02d9df($ptr, $self) -> ret {
+        let v0 := mload($self)
+        let v1 := $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key($ptr, v0)
+        let v2 := $checked_add_u256($ptr, v1)
+        let v3 := mload(add($self, 32))
+        let v4 := $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key(v2, v3)
+        let v5 := $checked_add_u256(v1, v4)
+        ret := v5
+        leave
+      }
+      function $abi_root_head_size__u256__3271ca15373d4483() -> ret {
+        let v0 := 0
         if v0 {
-          solencoder_abiencoder_write_word(e, 1)
+          ret := 32
+          leave
         }
         if iszero(v0) {
-          solencoder_abiencoder_write_word(e, 0)
+          ret := 32
+          leave
         }
-        leave
       }
-      function bool_loadablescalar_from_word(word) -> ret {
-        ret := iszero(eq(word, 0))
-        leave
-      }
-      function burn(from, amount, store, log) {
-        let v0 := address_zero()
-        assert(iszero(eq(from, v0)))
-        let v1 := storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), from)
-        assert(iszero(lt(v1, amount)))
-        storagemap_k__v__set_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), from, sub(v1, amount))
-        let v2 := address_zero()
-        let v3 := mload(0x40)
-        if iszero(v3) {
-          v3 := 0x80
-        }
-        mstore(0x40, add(v3, 96))
-        let v4 := from
-        mstore(v3, mload(v4))
-        let v5 := v2
-        mstore(add(v3, 32), mload(v5))
-        mstore(add(v3, 64), amount)
-        log_emit_stor__TransferEvent__3286f1804ad8a121(log, v3)
-        leave
-      }
-      function calldata_byteinput_word_at(self, byte_offset) -> ret {
-        let v0 := calldataload(byte_offset)
-        ret := v0
-        leave
-      }
-      function ctx_caller_stor(self) -> ret {
+      function $accesscontrol____h4c85da5bbb505ade_require_stor__3_Evm_hef0af3106e109414__5baaa260f0d18873($role) {
         let v0 := caller()
         let v1 := mload(0x40)
         if iszero(v1) {
           v1 := 0x80
         }
-        mstore(0x40, add(v1, 32))
-        mstore(v1, v0)
-        ret := v1
+        mstore(0x40, add(v1, 64))
+        mstore(v1, $role)
+        mstore(add(v1, 32), v0)
+        let v2 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor___u256__Address__bool_3__5e1c6d4e3f4fb7e8(v1)
+        let v3 := $bool_h947c0c03c59c6f07_eq_he50383edd273619f_eq(v2, 1)
+        $assert(v3)
         leave
       }
-      function cursor_i__fork_mem__CallData__b9ab8dc8a4b2f9e(self, pos) -> ret {
-        pop(self)
-        let v0 := mload(0x40)
-        if iszero(v0) {
-          v0 := 0x80
-        }
-        mstore(0x40, add(v0, 32))
-        pop(v0)
-        mstore(v0, pos)
-        let v1 := v0
-        ret := v1
-        leave
-      }
-      function cursor_i__new__CallData__b9ab8dc8a4b2f9e(input) -> ret {
-        let v0 := mload(0x40)
-        if iszero(v0) {
-          v0 := 0x80
-        }
-        mstore(0x40, add(v0, 32))
-        pop(v0)
-        mstore(v0, 0)
-        let v1 := v0
-        ret := v1
-        leave
-      }
-      function cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-        pop(self)
-        let v0 := mload(self)
-        let v1 := calldata_byteinput_word_at(0, v0)
-        let v2 := mload(self)
-        mstore(self, add(v2, 32))
-        ret := v1
-        leave
-      }
-      function log_emit_stor__ApprovalEvent__6cbed5fbaac6c5ee(self, event) {
-        todo()
-        leave
-      }
-      function log_emit_stor__TransferEvent__3286f1804ad8a121(self, event) {
-        todo()
-        leave
-      }
-      function mint(to, amount, store, log) {
-        let v0 := address_zero()
-        assert(iszero(eq(to, v0)))
-        let v1 := storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), to)
-        storagemap_k__v__set_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), to, add(v1, amount))
-        let v2 := address_zero()
-        let v3 := mload(0x40)
-        if iszero(v3) {
-          v3 := 0x80
-        }
-        mstore(0x40, add(v3, 96))
-        let v4 := v2
-        mstore(v3, mload(v4))
-        let v5 := to
-        mstore(add(v3, 32), mload(v5))
-        mstore(add(v3, 64), amount)
-        log_emit_stor__TransferEvent__3286f1804ad8a121(log, v3)
-        leave
-      }
-      function recv_Erc20Extended_BurnFrom_1_2(args, ctx, store, log) -> ret {
-        let v0 := args
-        let v1 := mload(add(args, 32))
-        let v2 := ctx_caller_stor(ctx)
-        spend_allowance(v0, v2, v1, store)
-        burn(v0, v1, store, log)
-        ret := 1
-        leave
-      }
-      function recv_Erc20Extended_Burn_1_1(args, ctx, store, log) -> ret {
-        let v0 := mload(args)
-        let v1 := ctx_caller_stor(ctx)
-        burn(v1, v0, store, log)
-        ret := 1
-        leave
-      }
-      function recv_Erc20Extended_DecreaseAllowance_1_4(args, ctx, store, log) -> ret {
-        let v0 := args
-        let v1 := mload(add(args, 32))
-        let v2 := ctx_caller_stor(ctx)
-        let v3 := mload(0x40)
-        if iszero(v3) {
-          v3 := 0x80
-        }
-        mstore(0x40, add(v3, 64))
-        let v4 := v2
-        mstore(v3, mload(v4))
-        let v5 := v0
-        mstore(add(v3, 32), mload(v5))
-        let v6 := storagemap_k__v__get_stor___Address__Address__u256__380d6b10c386a4ee(add(store, 2), v3)
-        assert(iszero(lt(v6, v1)))
-        approve(v2, v0, sub(v6, v1), store, log)
-        ret := 1
-        leave
-      }
-      function recv_Erc20Extended_IncreaseAllowance_1_3(args, ctx, store, log) -> ret {
-        let v0 := args
-        let v1 := mload(add(args, 32))
-        let v2 := ctx_caller_stor(ctx)
-        let v3 := mload(0x40)
-        if iszero(v3) {
-          v3 := 0x80
-        }
-        mstore(0x40, add(v3, 64))
-        let v4 := v2
-        mstore(v3, mload(v4))
-        let v5 := v0
-        mstore(add(v3, 32), mload(v5))
-        let v6 := storagemap_k__v__get_stor___Address__Address__u256__380d6b10c386a4ee(add(store, 2), v3)
-        approve(v2, v0, add(v6, v1), store, log)
-        ret := 1
-        leave
-      }
-      function recv_Erc20Extended_Mint_1_0(args, ctx, store, log, auth) -> ret {
-        let v0 := args
-        let v1 := mload(add(args, 32))
-        accesscontrol_require_stor(auth, 1, ctx)
-        mint(v0, v1, store, log)
-        ret := 1
-        leave
-      }
-      function recv_Erc20_Allowance_0_4(args, store) -> ret {
-        let v0 := args
-        let v1 := add(args, 32)
-        let v2 := mload(0x40)
-        if iszero(v2) {
-          v2 := 0x80
-        }
-        mstore(0x40, add(v2, 64))
-        let v3 := v0
-        mstore(v2, mload(v3))
-        let v4 := v1
-        mstore(add(v2, 32), mload(v4))
-        let v5 := storagemap_k__v__get_stor___Address__Address__u256__380d6b10c386a4ee(add(store, 2), v2)
-        ret := v5
-        leave
-      }
-      function recv_Erc20_Approve_0_1(args, ctx, store, log) -> ret {
-        let v0 := args
-        let v1 := mload(add(args, 32))
-        let v2 := ctx_caller_stor(ctx)
-        approve(v2, v0, v1, store, log)
-        ret := 1
-        leave
-      }
-      function recv_Erc20_BalanceOf_0_3(args, store) -> ret {
-        let v0 := args
-        let v1 := storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), v0)
-        ret := v1
-        leave
-      }
-      function recv_Erc20_Decimals_0_8(args) -> ret {
-        ret := 18
-        leave
-      }
-      function recv_Erc20_Name_0_6(args) -> ret {
-        ret := 0x436f6f6c436f696e
-        leave
-      }
-      function recv_Erc20_Symbol_0_7(args) -> ret {
-        ret := 0x434f4f4c
-        leave
-      }
-      function recv_Erc20_TotalSupply_0_5(args, store) -> ret {
-        let v0 := sload(store)
-        ret := v0
-        leave
-      }
-      function recv_Erc20_TransferFrom_0_2(args, ctx, store, log) -> ret {
-        let v0 := args
-        let v1 := add(args, 32)
-        let v2 := mload(add(args, 64))
-        let v3 := ctx_caller_stor(ctx)
-        spend_allowance(v0, v3, v2, store)
-        transfer(v0, v1, v2, store, log)
-        ret := 1
-        leave
-      }
-      function recv_Erc20_Transfer_0_0(args, ctx, store, log) -> ret {
-        let v0 := args
-        let v1 := mload(add(args, 32))
-        let v2 := ctx_caller_stor(ctx)
-        transfer(v2, v0, v1, store, log)
-        ret := 1
-        leave
-      }
-      function runtime() {
-        let v0 := 0
-        let v1 := 0
-        let v2 := 0
-        let v3 := 3
-        let v4 := calldatasize()
-        let v5 := lt(v4, 4)
-        if v5 {
+      function $address_h257056268eac7027_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98($d) -> ret {
+        let v0 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+        let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(shr(160, v0), 0)
+        let v2 := v1
+        if v2 {
           revert(0, 0)
         }
-        let v6 := calldataload(0)
-        let v7 := sol_abi_selector_from_prefix(v6)
-        switch v7
-          case 2835717307 {
-            let v8 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v9 := calldatasize()
-            let v10 := lt(v9, add(4, 64))
-            if v10 {
-              revert(0, 0)
-            }
-            let v11 := _t0__t1__decode_decode__Sol_Address_u256_SolDecoder_CallData___25b1373fd1f61181(v8)
-            let v12 := v2
-            let v13 := recv_Erc20_Transfer_0_0(v11, v0, v12, v1)
-            let v14 := v13
-            let v15 := solencoder_new()
-            let v16 := solencoder_abiencoder_reserve_head(v15, 32)
-            pop(v16)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v14, v15)
-            let v17 := solencoder_abiencoder_finish(v15)
-            let v18 := mload(v17)
-            let v19 := mload(add(v17, 32))
-            return(v18, v19)
-          }
-          case 157198259 {
-            let v20 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v21 := calldatasize()
-            let v22 := lt(v21, add(4, 64))
-            if v22 {
-              revert(0, 0)
-            }
-            let v23 := _t0__t1__decode_decode__Sol_Address_u256_SolDecoder_CallData___25b1373fd1f61181(v20)
-            let v24 := v2
-            let v25 := recv_Erc20_Approve_0_1(v23, v0, v24, v1)
-            let v26 := v25
-            let v27 := solencoder_new()
-            let v28 := solencoder_abiencoder_reserve_head(v27, 32)
-            pop(v28)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v26, v27)
-            let v29 := solencoder_abiencoder_finish(v27)
-            let v30 := mload(v29)
-            let v31 := mload(add(v29, 32))
-            return(v30, v31)
-          }
-          case 599290589 {
-            let v32 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v33 := calldatasize()
-            let v34 := lt(v33, add(4, 96))
-            if v34 {
-              revert(0, 0)
-            }
-            let v35 := _t0__t1__t2__decode_decode__Sol_Address_Address_u256_SolDecoder_CallData___da321e92055b22cd(v32)
-            let v36 := v2
-            let v37 := recv_Erc20_TransferFrom_0_2(v35, v0, v36, v1)
-            let v38 := v37
-            let v39 := solencoder_new()
-            let v40 := solencoder_abiencoder_reserve_head(v39, 32)
-            pop(v40)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v38, v39)
-            let v41 := solencoder_abiencoder_finish(v39)
-            let v42 := mload(v41)
-            let v43 := mload(add(v41, 32))
-            return(v42, v43)
-          }
-          case 1889567281 {
-            let v44 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v45 := calldatasize()
-            let v46 := lt(v45, add(4, 32))
-            if v46 {
-              revert(0, 0)
-            }
-            let v47 := _t0__decode_decode__Sol_Address_SolDecoder_CallData___c3cd70daebc6e8b9(v44)
-            let v48 := v2
-            let v49 := recv_Erc20_BalanceOf_0_3(v47, v48)
-            let v50 := v49
-            let v51 := solencoder_new()
-            let v52 := solencoder_abiencoder_reserve_head(v51, 32)
-            pop(v52)
-            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v50, v51)
-            let v53 := solencoder_abiencoder_finish(v51)
-            let v54 := mload(v53)
-            let v55 := mload(add(v53, 32))
-            return(v54, v55)
-          }
-          case 3714247998 {
-            let v56 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v57 := calldatasize()
-            let v58 := lt(v57, add(4, 64))
-            if v58 {
-              revert(0, 0)
-            }
-            let v59 := _t0__t1__decode_decode__Sol_Address_Address_SolDecoder_CallData___7ed19c3f9fd70917(v56)
-            let v60 := v2
-            let v61 := recv_Erc20_Allowance_0_4(v59, v60)
-            let v62 := v61
-            let v63 := solencoder_new()
-            let v64 := solencoder_abiencoder_reserve_head(v63, 32)
-            pop(v64)
-            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v62, v63)
-            let v65 := solencoder_abiencoder_finish(v63)
-            let v66 := mload(v65)
-            let v67 := mload(add(v65, 32))
-            return(v66, v67)
-          }
-          case 404098525 {
-            let v68 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v69 := calldatasize()
-            let v70 := lt(v69, add(4, 0))
-            if v70 {
-              revert(0, 0)
-            }
-            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v68)
-            let v71 := v2
-            let v72 := recv_Erc20_TotalSupply_0_5(0, v71)
-            let v73 := v72
-            let v74 := solencoder_new()
-            let v75 := solencoder_abiencoder_reserve_head(v74, 32)
-            pop(v75)
-            u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v73, v74)
-            let v76 := solencoder_abiencoder_finish(v74)
-            let v77 := mload(v76)
-            let v78 := mload(add(v76, 32))
-            return(v77, v78)
-          }
-          case 117300739 {
-            let v79 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v80 := calldatasize()
-            let v81 := lt(v80, add(4, 0))
-            if v81 {
-              revert(0, 0)
-            }
-            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v79)
-            let v82 := recv_Erc20_Name_0_6(0)
-            let v83 := solencoder_new()
-            let v84 := solencoder_abiencoder_reserve_head(v83, 32)
-            pop(v84)
-            string_const_n__usize__encode_encode__Sol_32_SolEncoder__85bcb27fa2f25e8f(v82, v83)
-            let v85 := solencoder_abiencoder_finish(v83)
-            let v86 := mload(v85)
-            let v87 := mload(add(v85, 32))
-            return(v86, v87)
-          }
-          case 2514000705 {
-            let v88 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v89 := calldatasize()
-            let v90 := lt(v89, add(4, 0))
-            if v90 {
-              revert(0, 0)
-            }
-            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v88)
-            let v91 := recv_Erc20_Symbol_0_7(0)
-            let v92 := solencoder_new()
-            let v93 := solencoder_abiencoder_reserve_head(v92, 32)
-            pop(v93)
-            string_const_n__usize__encode_encode__Sol_32_SolEncoder__85bcb27fa2f25e8f(v91, v92)
-            let v94 := solencoder_abiencoder_finish(v92)
-            let v95 := mload(v94)
-            let v96 := mload(add(v94, 32))
-            return(v95, v96)
-          }
-          case 826074471 {
-            let v97 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v98 := calldatasize()
-            let v99 := lt(v98, add(4, 0))
-            if v99 {
-              revert(0, 0)
-            }
-            ___decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(v97)
-            let v100 := recv_Erc20_Decimals_0_8(0)
-            let v101 := solencoder_new()
-            let v102 := solencoder_abiencoder_reserve_head(v101, 32)
-            pop(v102)
-            u8_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v100, v101)
-            let v103 := solencoder_abiencoder_finish(v101)
-            let v104 := mload(v103)
-            let v105 := mload(add(v103, 32))
-            return(v104, v105)
-          }
-          case 1086394137 {
-            let v106 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v107 := calldatasize()
-            let v108 := lt(v107, add(4, 64))
-            if v108 {
-              revert(0, 0)
-            }
-            let v109 := _t0__t1__decode_decode__Sol_Address_u256_SolDecoder_CallData___25b1373fd1f61181(v106)
-            let v110 := v2
-            let v111 := v3
-            let v112 := recv_Erc20Extended_Mint_1_0(v109, v0, v110, v1, v111)
-            let v113 := v112
-            let v114 := solencoder_new()
-            let v115 := solencoder_abiencoder_reserve_head(v114, 32)
-            pop(v115)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v113, v114)
-            let v116 := solencoder_abiencoder_finish(v114)
-            let v117 := mload(v116)
-            let v118 := mload(add(v116, 32))
-            return(v117, v118)
-          }
-          case 1117154408 {
-            let v119 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v120 := calldatasize()
-            let v121 := lt(v120, add(4, 32))
-            if v121 {
-              revert(0, 0)
-            }
-            let v122 := _t0__decode_decode__Sol_u256_SolDecoder_CallData___51fc2f6931ec5edc(v119)
-            let v123 := v2
-            let v124 := recv_Erc20Extended_Burn_1_1(v122, v0, v123, v1)
-            let v125 := v124
-            let v126 := solencoder_new()
-            let v127 := solencoder_abiencoder_reserve_head(v126, 32)
-            pop(v127)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v125, v126)
-            let v128 := solencoder_abiencoder_finish(v126)
-            let v129 := mload(v128)
-            let v130 := mload(add(v128, 32))
-            return(v129, v130)
-          }
-          case 2043438992 {
-            let v131 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v132 := calldatasize()
-            let v133 := lt(v132, add(4, 64))
-            if v133 {
-              revert(0, 0)
-            }
-            let v134 := _t0__t1__decode_decode__Sol_Address_u256_SolDecoder_CallData___25b1373fd1f61181(v131)
-            let v135 := v2
-            let v136 := recv_Erc20Extended_BurnFrom_1_2(v134, v0, v135, v1)
-            let v137 := v136
-            let v138 := solencoder_new()
-            let v139 := solencoder_abiencoder_reserve_head(v138, 32)
-            pop(v139)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v137, v138)
-            let v140 := solencoder_abiencoder_finish(v138)
-            let v141 := mload(v140)
-            let v142 := mload(add(v140, 32))
-            return(v141, v142)
-          }
-          case 961581905 {
-            let v143 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v144 := calldatasize()
-            let v145 := lt(v144, add(4, 64))
-            if v145 {
-              revert(0, 0)
-            }
-            let v146 := _t0__t1__decode_decode__Sol_Address_u256_SolDecoder_CallData___25b1373fd1f61181(v143)
-            let v147 := v2
-            let v148 := recv_Erc20Extended_IncreaseAllowance_1_3(v146, v0, v147, v1)
-            let v149 := v148
-            let v150 := solencoder_new()
-            let v151 := solencoder_abiencoder_reserve_head(v150, 32)
-            pop(v151)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v149, v150)
-            let v152 := solencoder_abiencoder_finish(v150)
-            let v153 := mload(v152)
-            let v154 := mload(add(v152, 32))
-            return(v153, v154)
-          }
-          case 2757214935 {
-            let v155 := soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(0, 4)
-            let v156 := calldatasize()
-            let v157 := lt(v156, add(4, 64))
-            if v157 {
-              revert(0, 0)
-            }
-            let v158 := _t0__t1__decode_decode__Sol_Address_u256_SolDecoder_CallData___25b1373fd1f61181(v155)
-            let v159 := v2
-            let v160 := recv_Erc20Extended_DecreaseAllowance_1_4(v158, v0, v159, v1)
-            let v161 := v160
-            let v162 := solencoder_new()
-            let v163 := solencoder_abiencoder_reserve_head(v162, 32)
-            pop(v163)
-            bool_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(v161, v162)
-            let v164 := solencoder_abiencoder_finish(v162)
-            let v165 := mload(v164)
-            let v166 := mload(add(v164, 32))
-            return(v165, v166)
-          }
-          default {
-            revert(0, 0)
-          }
-      }
-      function sol_abi_selector_from_prefix(prefix) -> ret {
-        let v0 := shr(224, prefix)
         ret := v0
         leave
       }
-      function soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(self) -> ret {
-        let v0 := cursor_i__read_word_mem__CallData__b9ab8dc8a4b2f9e(self)
+      function $address_h257056268eac7027_eq_h14b330e44530c410_eq($self, $other) -> ret {
+        let v0 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other)
         ret := v0
         leave
       }
-      function soldecoder_i__with_base__CallData__b9ab8dc8a4b2f9e(input, base) -> ret {
-        let v0 := cursor_i__new__CallData__b9ab8dc8a4b2f9e(input)
-        let v1 := cursor_i__fork_mem__CallData__b9ab8dc8a4b2f9e(v0, base)
-        let v2 := mload(0x40)
-        if iszero(v2) {
-          v2 := 0x80
-        }
-        mstore(0x40, add(v2, 64))
-        let v3 := v1
-        mstore(v2, mload(v3))
-        mstore(add(v2, 32), base)
-        let v4 := v2
-        ret := v4
+      function $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key($ptr, $self) -> ret {
+        let v0 := $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key($ptr, $self)
+        ret := v0
         leave
       }
-      function solencoder_abiencoder_finish(self) -> ret {
-        let v0 := mload(self)
-        let v1 := mload(add(self, 64))
+      function $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic($self) -> ret {
+        ret := $self
+        leave
+      }
+      function $address_h257056268eac7027_zero() -> ret {
+        ret := 0
+        leave
+      }
+      function $allowance_h4bb1267f662bd2a8_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
         let v2 := mload(0x40)
         if iszero(v2) {
           v2 := 0x80
         }
         mstore(0x40, add(v2, 64))
         mstore(v2, v0)
-        mstore(add(v2, 32), sub(v1, v0))
+        mstore(add(v2, 32), v1)
         ret := v2
         leave
       }
-      function solencoder_abiencoder_reserve_head(self, bytes) -> ret {
-        solencoder_ensure_init_mem(self, bytes)
-        let v0 := mload(self)
-        ret := v0
+      function $approvalevent_h313d94630b6580e5_event_hd33e4481d4a34b05_emit_arg1_root_stor__Evm_hef0af3106e109414__3af54274b2985741($self) {
+        let v0 := $solencoder_h1b9228b90dad6928_new()
+        let v1 := 32
+        let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v0, v1)
+        let v3 := mload(add($self, 64))
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v3, v0)
+        let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v0)
+        let v5 := mload(v4)
+        let v6 := v5
+        let v7 := mload(add(v4, 32))
+        let v8 := v7
+        let v9 := mload($self)
+        let v10 := $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic(v9)
+        let v11 := mload(add($self, 32))
+        let v12 := $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic(v11)
+        $evm_hef0af3106e109414_log_h22d1a10952034bae_log3_stor_arg0_root_stor(v6, v8, 3682740849240848158437977969522068712009226744993583420104789809440898259342, v10, v12)
         leave
       }
-      function solencoder_abiencoder_write_word(self, v) {
-        let v0 := mload(add(self, 32))
-        mstore(v0, v)
-        mstore(add(self, 32), add(v0, 32))
-        leave
-      }
-      function solencoder_ensure_init_mem(self, bytes) {
-        let v0 := mload(self)
-        let v1 := eq(v0, 0)
-        if v1 {
-          let v2 := alloc(bytes)
-          mstore(self, v2)
-          mstore(add(self, 32), v2)
-          mstore(add(self, 64), add(v2, bytes))
-        }
-        leave
-      }
-      function solencoder_new() -> ret {
-        let v0 := mload(0x40)
-        if iszero(v0) {
-          v0 := 0x80
-        }
-        mstore(0x40, add(v0, 96))
-        mstore(v0, 0)
-        mstore(add(v0, 32), 0)
-        mstore(add(v0, 64), 0)
-        let v1 := v0
-        ret := v1
-        leave
-      }
-      function spend_allowance(owner, spender, amount, store) {
-        let v0 := mload(0x40)
-        if iszero(v0) {
-          v0 := 0x80
-        }
-        mstore(0x40, add(v0, 64))
-        let v1 := owner
-        mstore(v0, mload(v1))
-        let v2 := spender
-        mstore(add(v0, 32), mload(v2))
-        let v3 := storagemap_k__v__get_stor___Address__Address__u256__380d6b10c386a4ee(add(store, 2), v0)
-        assert(iszero(lt(v3, amount)))
+      function $approve_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec($owner, $spender, $amount, $store) {
+        let v0 := $address_h257056268eac7027_zero()
+        let v1 := $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($owner, v0)
+        $assert(v1)
+        let v2 := $address_h257056268eac7027_zero()
+        let v3 := $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($spender, v2)
+        $assert(v3)
         let v4 := mload(0x40)
         if iszero(v4) {
           v4 := 0x80
         }
         mstore(0x40, add(v4, 64))
-        let v5 := owner
-        mstore(v4, mload(v5))
-        let v6 := spender
-        mstore(add(v4, 32), mload(v6))
-        storagemap_k__v__set_stor___Address__Address__u256__380d6b10c386a4ee(add(store, 2), v4, sub(v3, amount))
+        mstore(v4, $owner)
+        mstore(add(v4, 32), $spender)
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor___Address__Address__u256_1__12414c27d5bfff1f(v4, $amount)
+        let v5 := mload(0x40)
+        if iszero(v5) {
+          v5 := 0x80
+        }
+        mstore(0x40, add(v5, 96))
+        mstore(v5, $owner)
+        mstore(add(v5, 32), $spender)
+        mstore(add(v5, 64), $amount)
+        $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_ApprovalEvent_h313d94630b6580e5__2946163026d92694(v5)
         leave
       }
-      function storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(self, key) -> ret {
-        let v0 := storagemap_k__v__storage_slot_stor__Address_u256__cdd966cb4c9acb9d(self, key)
-        let v1 := sload(v0)
-        let v2 := u256_loadablescalar_from_word(v1)
+      function $approve_h90175fc19dafde67_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        mstore(v2, v0)
+        mstore(add(v2, 32), v1)
         ret := v2
         leave
       }
-      function storagemap_k__v__get_stor___Address__Address__u256__380d6b10c386a4ee(self, key) -> ret {
-        let v0 := storagemap_k__v__storage_slot_stor___Address__Address__u256__380d6b10c386a4ee(self, key)
-        let v1 := sload(v0)
-        let v2 := u256_loadablescalar_from_word(v1)
+      function $assert($b) {
+        let v0 := iszero($b)
+        if v0 {
+          $revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1)
+        }
+        leave
+      }
+      function $balanceof_hf830ebedc81244a7_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        ret := v0
+        leave
+      }
+      function $bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($self, $e) {
+        let v0 := $self
+        if v0 {
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, 1)
+        }
+        if iszero(v0) {
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, 0)
+        }
+        leave
+      }
+      function $bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr) {
+        let v0 := $self
+        if v0 {
+          $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, 1)
+        }
+        if iszero(v0) {
+          $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, 0)
+        }
+        leave
+      }
+      function $bool_h947c0c03c59c6f07_eq_he50383edd273619f_eq($self, $other) -> ret {
+        let v0 := eq(iszero(iszero($self)), iszero(iszero($other)))
+        ret := v0
+        leave
+      }
+      function $bool_h947c0c03c59c6f07_wordrepr_h7483d41ac8178d88_from_word($word) -> ret {
+        let v0 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne($word, 0)
+        ret := v0
+        leave
+      }
+      function $burn_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec($from, $amount, $store) {
+        let v0 := $address_h257056268eac7027_zero()
+        let v1 := $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($from, v0)
+        $assert(v1)
+        let v2 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($from)
+        let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_ge(v2, $amount)
+        $assert(v3)
+        let v4 := $checked_sub_u256(v2, $amount)
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($from, v4)
+        let v5 := sload($store)
+        let v6 := $checked_sub_u256(v5, $amount)
+        sstore($store, v6)
+        let v7 := $address_h257056268eac7027_zero()
+        let v8 := mload(0x40)
+        if iszero(v8) {
+          v8 := 0x80
+        }
+        mstore(0x40, add(v8, 96))
+        mstore(v8, $from)
+        mstore(add(v8, 32), v7)
+        mstore(add(v8, 64), $amount)
+        $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_TransferEvent_h1c9ba82714a4a1f0__6ee531292f5eff63(v8)
+        leave
+      }
+      function $burn_h25a61f4466d20eed_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        ret := v0
+        leave
+      }
+      function $burnfrom_ha9fb0972f143e40c_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        mstore(v2, v0)
+        mstore(add(v2, 32), v1)
         ret := v2
         leave
       }
-      function storagemap_k__v__get_stor___u256__Address__bool__ac1f217814dd9c46(self, key) -> ret {
-        let v0 := storagemap_k__v__storage_slot_stor___u256__Address__bool__ac1f217814dd9c46(self, key)
-        let v1 := sload(v0)
-        let v2 := bool_loadablescalar_from_word(v1)
+      function $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len($self) -> ret {
+        let v0 := calldatasize()
+        let v1 := 0
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, v0)
+        let v3 := v2
+        if v3 {
+          v1 := 0
+        }
+        if iszero(v3) {
+          let v4 := $checked_sub_u256(v0, $self)
+          v1 := v4
+        }
+        ret := v1
+        leave
+      }
+      function $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at($self, $byte_offset) -> ret {
+        let v0 := add($self, $byte_offset)
+        let v1 := calldataload(v0)
+        ret := v1
+        leave
+      }
+      function $calldata_hf71d505b6ff5dc81_new() -> ret {
+        ret := 0
+        leave
+      }
+      function $checked_add_u256($a, $b) -> ret {
+        let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+        let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+        let v4 := v3
+        if v4 {
+          revert(0, 0)
+        }
+        ret := v0
+        leave
+      }
+      function $checked_div_u256($a, $b) -> ret {
+        $ensure_nonzero_divisor__u256__3271ca15373d4483($b)
+        let v0 := div($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_mul_u256($a, $b) -> ret {
+        let v0 := $checked_mul_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_mul_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_wrappingmul_h64e6b83610cda761_wrapping_mul($a, $b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v2 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v1, 0)
+        let v3 := v2
+        if v3 {
+          let v4 := $checked_div_u256(v0, $a)
+          let v5 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v4)
+          let v6 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+          let v7 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v5, v6)
+          let v8 := v7
+          if v8 {
+            revert(0, 0)
+          }
+          ret := v0
+          leave
+        }
+        if iszero(v3) {
+          ret := v0
+          leave
+        }
+      }
+      function $checked_sub_u256($a, $b) -> ret {
+        let v0 := $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b)
+        ret := v0
+        leave
+      }
+      function $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+        let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+        let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+        let v3 := v2
+        if v3 {
+          revert(0, 0)
+        }
+        let v4 := $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($a, $b)
+        ret := v4
+        leave
+      }
+      function $cursor_i__h140a998c67d6d59c_fork__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self, $pos) -> ret {
+        let v0 := mload($self)
+        let v1 := mload(0x40)
+        if iszero(v1) {
+          v1 := 0x80
+        }
+        mstore(0x40, add(v1, 64))
+        mstore(v1, v0)
+        mstore(add(v1, 32), $pos)
+        ret := v1
+        leave
+      }
+      function $cursor_i__h140a998c67d6d59c_new__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input) -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 64))
+        mstore(v0, $input)
+        mstore(add(v0, 32), 0)
+        ret := v0
+        leave
+      }
+      function $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d) -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $d)
+        let v1 := 0
+        if v1 {
+          let v2 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v3 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v4 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v5 := $checked_add_u256(v3, v2)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v5)
+          let v6 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v6)
+          let v7 := $address_h257056268eac7027_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98(mload(v0))
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v3)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v4)
+          ret := v7
+          leave
+        }
+        if iszero(v1) {
+          let v8 := $address_h257056268eac7027_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98($d)
+          ret := v8
+          leave
+        }
+      }
+      function $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d) -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $d)
+        let v1 := 0
+        if v1 {
+          let v2 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v3 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v4 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          let v5 := $checked_add_u256(v3, v2)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v5)
+          let v6 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v6)
+          let v7 := $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98(mload(v0))
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v3)
+          $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d, v4)
+          ret := v7
+          leave
+        }
+        if iszero(v1) {
+          let v8 := $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98($d)
+          ret := v8
+          leave
+        }
+      }
+      function $decreaseallowance_h635474f45639c83d_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        mstore(v2, v0)
+        mstore(add(v2, 32), v1)
         ret := v2
         leave
       }
-      function storagemap_k__v__set_stor__Address_u256__cdd966cb4c9acb9d(self, key, value) {
-        let v0 := storagemap_k__v__storage_slot_stor__Address_u256__cdd966cb4c9acb9d(self, key)
-        let v1 := u256_loadablescalar_from_word(value)
-        sstore(v0, v1)
+      function $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_ApprovalEvent_h313d94630b6580e5__2946163026d92694($event) {
+        $approvalevent_h313d94630b6580e5_event_hd33e4481d4a34b05_emit_arg1_root_stor__Evm_hef0af3106e109414__3af54274b2985741($event)
         leave
       }
-      function storagemap_k__v__set_stor___Address__Address__u256__380d6b10c386a4ee(self, key, value) {
-        let v0 := storagemap_k__v__storage_slot_stor___Address__Address__u256__380d6b10c386a4ee(self, key)
-        let v1 := u256_loadablescalar_from_word(value)
-        sstore(v0, v1)
+      function $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_TransferEvent_h1c9ba82714a4a1f0__6ee531292f5eff63($event) {
+        $transferevent_h1c9ba82714a4a1f0_event_hd33e4481d4a34b05_emit_arg1_root_stor__Evm_hef0af3106e109414__3af54274b2985741($event)
         leave
       }
-      function storagemap_k__v__storage_slot_stor__Address_u256__cdd966cb4c9acb9d(self, key) -> ret {
-        let v0 := address_storagekey_write_key(0, key)
-        let v1 := self
-        mstore(v0, v1)
-        let v2 := keccak256(0, add(v0, 32))
+      function $encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd($selector, $message) -> ret {
+        let v0 := 4
+        let v1 := shl(224, $selector)
+        let v2 := iszero(0)
+        if v2 {
+          let v3 := $checked_add_u256(v0, 32)
+          let v4 := v3
+          let v5 := mload(64)
+          if iszero(v5) {
+            v5 := 0x80
+          }
+          mstore(64, add(v5, v4))
+          mstore(v5, v1)
+          let v6 := $checked_add_u256(v5, v0)
+          $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr($message, v6)
+          let v7 := mload(0x40)
+          if iszero(v7) {
+            v7 := 0x80
+          }
+          mstore(0x40, add(v7, 64))
+          mstore(v7, v5)
+          mstore(add(v7, 32), v4)
+          ret := v7
+          leave
+        }
+        if iszero(v2) {
+          let v8 := $checked_add_u256(v0, 32)
+          let v9 := v8
+          let v10 := $solencoder_h1b9228b90dad6928_new()
+          let v11 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v10, v9)
+          mstore(v11, v1)
+          let v12 := $checked_add_u256(v11, v0)
+          mstore(add(v10, 32), v12)
+          let v13 := $checked_add_u256(v11, v0)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v10, v13)
+          $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd($message, v10)
+          let v14 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v10)
+          ret := v14
+          leave
+        }
+      }
+      function $encode_field__Sol_hfd482bb803ad8c5f_String_32__SolEncoder_h1b9228b90dad6928__68b3570335d45d1c($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+          let v4 := $checked_sub_u256(v3, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+          let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_32_SolEncoder_h1b9228b90dad6928__562228df2278c1ed($value, mload(v0))
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+          leave
+        }
+        if iszero(v1) {
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_32_SolEncoder_h1b9228b90dad6928__562228df2278c1ed($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_field__Sol_hfd482bb803ad8c5f_String_8__SolEncoder_h1b9228b90dad6928__51347bbb9e3bb9d4($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+          let v4 := $checked_sub_u256(v3, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+          let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_8_SolEncoder_h1b9228b90dad6928__1811d65564ab2650($value, mload(v0))
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+          leave
+        }
+        if iszero(v1) {
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_8_SolEncoder_h1b9228b90dad6928__1811d65564ab2650($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_field__Sol_hfd482bb803ad8c5f_bool_SolEncoder_h1b9228b90dad6928__ff0def932f0b945b($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+          let v4 := $checked_sub_u256(v3, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+          let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+          $bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+          leave
+        }
+        if iszero(v1) {
+          $bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+          let v4 := $checked_sub_u256(v3, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+          let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+          leave
+        }
+        if iszero(v1) {
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_field__Sol_hfd482bb803ad8c5f_u8_SolEncoder_h1b9228b90dad6928__5bb32446b2b3bbd1($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+          let v4 := $checked_sub_u256(v3, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+          let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+          $u8_hbc9d6eeaea22ffb5_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+          leave
+        }
+        if iszero(v1) {
+          $u8_hbc9d6eeaea22ffb5_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_root__Sol_hfd482bb803ad8c5f_String_32__SolEncoder_h1b9228b90dad6928__68b3570335d45d1c($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          $encode_field__Sol_hfd482bb803ad8c5f_String_32__SolEncoder_h1b9228b90dad6928__68b3570335d45d1c($value, mload(v0))
+          leave
+        }
+        if iszero(v1) {
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_32_SolEncoder_h1b9228b90dad6928__562228df2278c1ed($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_root__Sol_hfd482bb803ad8c5f_String_8__SolEncoder_h1b9228b90dad6928__51347bbb9e3bb9d4($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          $encode_field__Sol_hfd482bb803ad8c5f_String_8__SolEncoder_h1b9228b90dad6928__51347bbb9e3bb9d4($value, mload(v0))
+          leave
+        }
+        if iszero(v1) {
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_8_SolEncoder_h1b9228b90dad6928__1811d65564ab2650($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_root__Sol_hfd482bb803ad8c5f_bool_SolEncoder_h1b9228b90dad6928__ff0def932f0b945b($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          $encode_field__Sol_hfd482bb803ad8c5f_bool_SolEncoder_h1b9228b90dad6928__ff0def932f0b945b($value, mload(v0))
+          leave
+        }
+        if iszero(v1) {
+          $bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_root__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, mload(v0))
+          leave
+        }
+        if iszero(v1) {
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
+      }
+      function $encode_root__Sol_hfd482bb803ad8c5f_u8_SolEncoder_h1b9228b90dad6928__5bb32446b2b3bbd1($value, $e) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 32))
+        mstore(v0, $e)
+        let v1 := 0
+        if v1 {
+          $encode_field__Sol_hfd482bb803ad8c5f_u8_SolEncoder_h1b9228b90dad6928__5bb32446b2b3bbd1($value, mload(v0))
+          leave
+        }
+        if iszero(v1) {
+          $u8_hbc9d6eeaea22ffb5_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+          leave
+        }
+      }
+      function $ensure_nonzero_divisor__u256__3271ca15373d4483($b) {
+        let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+        let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0, 0)
+        let v2 := v1
+        if v2 {
+          revert(0, 0)
+        }
+        leave
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort() {
+        revert(0, 0)
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__AccessControl_3___3633e113b859df5f($slot) -> ret {
+        let v0 := $stor_ptr__Evm_hef0af3106e109414_AccessControl_3___1911f7c438797961($slot)
+        ret := v0
+        leave
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_field__TokenStore_0__1___175215aa56127bde($slot) -> ret {
+        let v0 := $stor_ptr__Evm_hef0af3106e109414_TokenStore_0__1___db7d7c067dc14cc5($slot)
+        ret := v0
+        leave
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input() -> ret {
+        let v0 := $calldata_hf71d505b6ff5dc81_new()
+        ret := v0
+        leave
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes($ptr, $len) {
+        return($ptr, $len)
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_String_32___e9bd76e6664882d4($value) {
+        let v0 := iszero(1)
+        if iszero(v0) {
+          let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new()
+          let v2 := $abi_root_head_size__u256__3271ca15373d4483()
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v1, v2)
+          $encode_root__Sol_hfd482bb803ad8c5f_String_32__SolEncoder_h1b9228b90dad6928__68b3570335d45d1c($value, v1)
+          let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v1)
+          let v5 := mload(v4)
+          let v6 := v5
+          let v7 := mload(add(v4, 32))
+          let v8 := v7
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v6, v8)
+        }
+        let v9 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(32, 64)
+        let v10 := v9
+        if v10 {
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f_32__f597d64bb224049()
+          return(0, 32)
+        }
+        let v11 := mload(64)
+        if iszero(v11) {
+          v11 := 0x80
+        }
+        mstore(64, add(v11, 32))
+        $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f_32__f597d64bb224049()
+        return(v11, 32)
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_String_8___1834cf55196eb0a5($value) {
+        let v0 := iszero(1)
+        if iszero(v0) {
+          let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new()
+          let v2 := $abi_root_head_size__u256__3271ca15373d4483()
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v1, v2)
+          $encode_root__Sol_hfd482bb803ad8c5f_String_8__SolEncoder_h1b9228b90dad6928__51347bbb9e3bb9d4($value, v1)
+          let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v1)
+          let v5 := mload(v4)
+          let v6 := v5
+          let v7 := mload(add(v4, 32))
+          let v8 := v7
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v6, v8)
+        }
+        let v9 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(32, 64)
+        let v10 := v9
+        if v10 {
+          $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f_32__f597d64bb224049()
+          return(0, 32)
+        }
+        let v11 := mload(64)
+        if iszero(v11) {
+          v11 := 0x80
+        }
+        mstore(64, add(v11, 32))
+        $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f_32__f597d64bb224049()
+        return(v11, 32)
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_bool__37232ead2a7830cb($value) {
+        let v0 := iszero(0)
+        if iszero(v0) {
+          let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new()
+          let v2 := $abi_root_head_size__u256__3271ca15373d4483()
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v1, v2)
+          $encode_root__Sol_hfd482bb803ad8c5f_bool_SolEncoder_h1b9228b90dad6928__ff0def932f0b945b($value, v1)
+          let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v1)
+          let v5 := mload(v4)
+          let v6 := v5
+          let v7 := mload(add(v4, 32))
+          let v8 := v7
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v6, v8)
+        }
+        let v9 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(32, 64)
+        let v10 := v9
+        if v10 {
+          $bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, 0)
+          return(0, 32)
+        }
+        let v11 := mload(64)
+        if iszero(v11) {
+          v11 := 0x80
+        }
+        mstore(64, add(v11, 32))
+        $bool_h947c0c03c59c6f07_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, v11)
+        return(v11, 32)
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u256__851a35d37fea63($value) {
+        let v0 := iszero(0)
+        if iszero(v0) {
+          let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new()
+          let v2 := $abi_root_head_size__u256__3271ca15373d4483()
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v1, v2)
+          $encode_root__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, v1)
+          let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v1)
+          let v5 := mload(v4)
+          let v6 := v5
+          let v7 := mload(add(v4, 32))
+          let v8 := v7
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v6, v8)
+        }
+        let v9 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(32, 64)
+        let v10 := v9
+        if v10 {
+          $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, 0)
+          return(0, 32)
+        }
+        let v11 := mload(64)
+        if iszero(v11) {
+          v11 := 0x80
+        }
+        mstore(64, add(v11, 32))
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, v11)
+        return(v11, 32)
+      }
+      function $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_value__Sol_hfd482bb803ad8c5f_u8__c96affccb17b69db($value) {
+        let v0 := iszero(0)
+        if iszero(v0) {
+          let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new()
+          let v2 := $abi_root_head_size__u256__3271ca15373d4483()
+          let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v1, v2)
+          $encode_root__Sol_hfd482bb803ad8c5f_u8_SolEncoder_h1b9228b90dad6928__5bb32446b2b3bbd1($value, v1)
+          let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v1)
+          let v5 := mload(v4)
+          let v6 := v5
+          let v7 := mload(add(v4, 32))
+          let v8 := v7
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_return_bytes(v6, v8)
+        }
+        let v9 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(32, 64)
+        let v10 := v9
+        if v10 {
+          $u8_hbc9d6eeaea22ffb5_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, 0)
+          return(0, 32)
+        }
+        let v11 := mload(64)
+        if iszero(v11) {
+          v11 := 0x80
+        }
+        mstore(64, add(v11, 32))
+        $u8_hbc9d6eeaea22ffb5_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($value, v11)
+        return(v11, 32)
+      }
+      function $evm_hef0af3106e109414_log_h22d1a10952034bae_log3_stor_arg0_root_stor($offset, $len, $topic0, $topic1, $topic2) {
+        log3($offset, $len, $topic0, $topic1, $topic2)
+        leave
+      }
+      function $increaseallowance_h9840135eaea36633_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        mstore(v2, v0)
+        mstore(add(v2, 32), v1)
         ret := v2
         leave
       }
-      function storagemap_k__v__storage_slot_stor___Address__Address__u256__380d6b10c386a4ee(self, key) -> ret {
-        let v0 := _a__b__storagekey_write_key__Address_Address__397b9a625a435b6f(0, key)
-        let v1 := self
-        mstore(v0, v1)
-        let v2 := keccak256(0, add(v0, 32))
+      function $mint_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec($to, $amount, $store) {
+        let v0 := $address_h257056268eac7027_zero()
+        let v1 := $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($to, v0)
+        $assert(v1)
+        let v2 := sload($store)
+        let v3 := $checked_add_u256(v2, $amount)
+        sstore($store, v3)
+        let v4 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($to)
+        let v5 := $checked_add_u256(v4, $amount)
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($to, v5)
+        let v6 := $address_h257056268eac7027_zero()
+        let v7 := mload(0x40)
+        if iszero(v7) {
+          v7 := 0x80
+        }
+        mstore(0x40, add(v7, 96))
+        mstore(v7, v6)
+        mstore(add(v7, 32), $to)
+        mstore(add(v7, 64), $amount)
+        $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_TransferEvent_h1c9ba82714a4a1f0__6ee531292f5eff63(v7)
+        leave
+      }
+      function $mint_ha2f94817be433a2e_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        mstore(v2, v0)
+        mstore(add(v2, 32), v1)
         ret := v2
         leave
       }
-      function storagemap_k__v__storage_slot_stor___u256__Address__bool__ac1f217814dd9c46(self, key) -> ret {
-        let v0 := _a__b__storagekey_write_key__u256_Address__1ae3ad2a1b729a8b(0, key)
-        let v1 := self
-        mstore(v0, v1)
-        let v2 := keccak256(0, add(v0, 32))
+      function $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($self, $other) -> ret {
+        let v0 := $address_h257056268eac7027_eq_h14b330e44530c410_eq($self, $other)
+        ret := iszero(v0)
+        leave
+      }
+      function $packed_string_len($word) -> ret {
+        let v0 := 0
+        let v1 := $word
+        for { } 1 { } {
+          let v2 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v1, 0)
+          if iszero(v2) {
+            break
+          }
+          let v3 := $checked_add_u256(v0, 1)
+          v0 := v3
+          v1 := shr(8, v1)
+        }
+        ret := v0
+        leave
+      }
+      function $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd($self, $e) {
+        $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($self, $e)
+        leave
+      }
+      function $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr($self, $ptr) {
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr)
+        leave
+      }
+      function $revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd($error) {
+        let v0 := $encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1313373041, $error)
+        let v1 := mload(v0)
+        let v2 := v1
+        let v3 := mload(add(v0, 32))
+        let v4 := v3
+        revert(v2, v4)
+      }
+      function $round_up_words($len) -> ret {
+        let v0 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($len, 0)
+        let v1 := v0
+        if v1 {
+          ret := 0
+          leave
+        }
+        if iszero(v1) {
+          let v2 := $checked_sub_u256($len, 1)
+          let v3 := $checked_div_u256(v2, 32)
+          let v4 := $checked_add_u256(v3, 1)
+          let v5 := $checked_mul_u256(v4, 32)
+          ret := v5
+          leave
+        }
+      }
+      function $runtime_decoder__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2() -> ret {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input()
+        let v1 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, 4)
+        ret := v1
+        leave
+      }
+      function $runtime_selector__Evm_hef0af3106e109414_Sol_hfd482bb803ad8c5f__e4e3f8d20b3805a2() -> ret {
+        let v0 := $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_input()
+        let v1 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v0)
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, 4)
+        let v3 := v2
+        if v3 {
+          $evm_hef0af3106e109414_contracthost_h57111e7eb283a125_abort()
+        }
+        let v4 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at(v0, 0)
+        let v5 := $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_selector_from_prefix(v4)
+        ret := v5
+        leave
+      }
+      function $s_h33f7c3322e562590_intdowncast_hf946d58b157999e1_downcast_unchecked__u256_u32__6e3637cd3e911b35($self) -> ret {
+        let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self)
+        let v1 := $u32_h20aa0c10687491ad_intword_h9a147c8c32b1323c_from_word(v0)
+        ret := v1
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_decoder_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input, $base) -> ret {
+        let v0 := $soldecoder_i__ha12a03fcb5ba844b_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input, $base)
+        ret := v0
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_encoder_new() -> ret {
+        let v0 := $solencoder_h1b9228b90dad6928_new()
+        ret := v0
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_selector_from_prefix($prefix) -> ret {
+        let v0 := $s_h33f7c3322e562590_intdowncast_hf946d58b157999e1_downcast_unchecked__u256_u32__6e3637cd3e911b35(shr(224, $prefix))
+        ret := v0
+        leave
+      }
+      function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $value) {
+        mstore($ptr, $value)
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self) -> ret {
+        let v0 := mload(add($self, 64))
+        ret := v0
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self) -> ret {
+        let v0 := mload(add($self, 32))
+        ret := v0
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self) -> ret {
+        let v0 := mload($self)
+        let v1 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_len(v0)
+        let v2 := mload(add($self, 32))
+        let v3 := $checked_add_u256(v2, 32)
+        let v4 := v3
+        let v5 := mload(add($self, 32))
+        let v6 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v4, v5)
+        let v7 := v6
+        if v7 {
+          revert(0, 0)
+        }
+        let v8 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v4, v1)
+        let v9 := v8
+        if v9 {
+          revert(0, 0)
+        }
+        let v10 := mload($self)
+        let v11 := mload(add($self, 32))
+        let v12 := $calldata_hf71d505b6ff5dc81_byteinput_hc4c2cb44299530ae_word_at(v10, v11)
+        mstore(add($self, 32), v4)
+        ret := v12
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self, $new_base) {
+        mstore(add($self, 64), $new_base)
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_set_pos__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($self, $new_pos) {
+        mstore(add($self, 32), $new_pos)
+        leave
+      }
+      function $soldecoder_i__ha12a03fcb5ba844b_with_base__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input, $base) -> ret {
+        let v0 := $cursor_i__h140a998c67d6d59c_new__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($input)
+        let v1 := $cursor_i__h140a998c67d6d59c_fork__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563(v0, $base)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 96))
+        let v3 := v1
+        mstore(v2, mload(v3))
+        mstore(add(v2, 32), mload(add(v3, 32)))
+        mstore(add(v2, 64), $base)
         ret := v2
         leave
       }
-      function string_const_n__usize__encode_encode__Sol_32_SolEncoder__85bcb27fa2f25e8f(self, e) {
-        todo()
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($self, $bytes) -> ret {
+        let v0 := mload(64)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(64, add(v0, $bytes))
+        mstore(add($self, 96), add(v0, $bytes))
+        ret := v0
         leave
       }
-      function transfer(from, to, amount, store, log) {
-        let v0 := address_zero()
-        assert(iszero(eq(from, v0)))
-        let v1 := address_zero()
-        assert(iszero(eq(to, v1)))
-        let v2 := storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), from)
-        assert(iszero(lt(v2, amount)))
-        storagemap_k__v__set_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), from, sub(v2, amount))
-        let v3 := storagemap_k__v__get_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), to)
-        storagemap_k__v__set_stor__Address_u256__cdd966cb4c9acb9d(add(store, 1), to, add(v3, amount))
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($self) -> ret {
+        let v0 := mload(add($self, 32))
+        ret := v0
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish($self) -> ret {
+        let v0 := mload($self)
+        let v1 := v0
+        let v2 := mload(add($self, 96))
+        let v3 := $checked_sub_u256(v2, v1)
         let v4 := mload(0x40)
         if iszero(v4) {
           v4 := 0x80
         }
-        mstore(0x40, add(v4, 96))
-        let v5 := from
-        mstore(v4, mload(v5))
-        let v6 := to
-        mstore(add(v4, 32), mload(v6))
-        mstore(add(v4, 64), amount)
-        log_emit_stor__TransferEvent__3286f1804ad8a121(log, v4)
+        mstore(0x40, add(v4, 64))
+        mstore(v4, v1)
+        mstore(add(v4, 32), v3)
+        ret := v4
         leave
       }
-      function u256_decode_decode__Sol_SolDecoder_CallData___828c6f2e3bda3cab(d) -> ret {
-        let v0 := soldecoder_i__abidecoder_read_word__CallData__b9ab8dc8a4b2f9e(d)
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($self) -> ret {
+        let v0 := mload(add($self, 64))
         ret := v0
         leave
       }
-      function u256_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(self, e) {
-        solencoder_abiencoder_write_word(e, self)
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head($self, $bytes) -> ret {
+        let v0 := mload($self)
+        let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0, 0)
+        let v2 := v1
+        if v2 {
+          let v3 := mload(64)
+          if iszero(v3) {
+            v3 := 0x80
+          }
+          mstore(64, add(v3, $bytes))
+          mstore($self, v3)
+          mstore(add($self, 32), v3)
+          mstore(add($self, 64), v3)
+          mstore(add($self, 96), add(v3, $bytes))
+        }
+        let v4 := mload(add($self, 32))
+        ret := v4
         leave
       }
-      function u256_loadablescalar_from_word(word) -> ret {
-        ret := word
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($self, $new_base) {
+        mstore(add($self, 32), $new_base)
         leave
       }
-      function u256_storagekey_write_key(ptr, self) -> ret {
-        mstore(ptr, self)
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($self, $new_pos) {
+        mstore(add($self, 64), $new_pos)
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($self, $v) {
+        let v0 := mload(add($self, 64))
+        let v1 := v0
+        mstore(v1, $v)
+        mstore(add($self, 64), add(v1, 32))
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word_at($at, $value) {
+        mstore($at, $value)
+        leave
+      }
+      function $solencoder_h1b9228b90dad6928_new() -> ret {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 128))
+        mstore(v0, 0)
+        mstore(add(v0, 32), 0)
+        mstore(add(v0, 64), 0)
+        mstore(add(v0, 96), 0)
+        ret := v0
+        leave
+      }
+      function $spend_allowance_eff0_stor__0_1_TokenStore_0__1___2d6f91026cd3e364($owner, $spender, $amount, $store) {
+        let v0 := mload(0x40)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(0x40, add(v0, 64))
+        mstore(v0, $owner)
+        mstore(add(v0, 32), $spender)
+        let v1 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor___Address__Address__u256_1__12414c27d5bfff1f(v0)
+        let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_ge(v1, $amount)
+        $assert(v2)
+        let v3 := mload(0x40)
+        if iszero(v3) {
+          v3 := 0x80
+        }
+        mstore(0x40, add(v3, 64))
+        mstore(v3, $owner)
+        mstore(add(v3, 32), $spender)
+        let v4 := $checked_sub_u256(v1, $amount)
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor___Address__Address__u256_1__12414c27d5bfff1f(v3, v4)
+        leave
+      }
+      function $stor_ptr__Evm_hef0af3106e109414_AccessControl_3___1911f7c438797961($slot) -> ret {
+        let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__AccessControl_3___3633e113b859df5f($slot)
+        ret := v0
+        leave
+      }
+      function $stor_ptr__Evm_hef0af3106e109414_TokenStore_0__1___db7d7c067dc14cc5($slot) -> ret {
+        let v0 := $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__TokenStore_0__1___175215aa56127bde($slot)
+        ret := v0
+        leave
+      }
+      function $storagemap_get_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt) -> ret {
+        let v0 := $storagemap_storage_slot_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt)
+        let v1 := sload(v0)
+        ret := v1
+        leave
+      }
+      function $storagemap_get_word_with_salt___Address__Address___c32d499da259c78e($key, $salt) -> ret {
+        let v0 := $storagemap_storage_slot_with_salt___Address__Address___c32d499da259c78e($key, $salt)
+        let v1 := sload(v0)
+        ret := v1
+        leave
+      }
+      function $storagemap_get_word_with_salt___u256__Address___c7c570db20cdd393($key, $salt) -> ret {
+        let v0 := $storagemap_storage_slot_with_salt___u256__Address___c7c570db20cdd393($key, $salt)
+        let v1 := sload(v0)
+        ret := v1
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($key) -> ret {
+        let v0 := $storagemap_get_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, 0)
+        let v1 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v0)
+        ret := v1
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor___Address__Address__u256_1__12414c27d5bfff1f($key) -> ret {
+        let v0 := $storagemap_get_word_with_salt___Address__Address___c32d499da259c78e($key, 1)
+        let v1 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word(v0)
+        ret := v1
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor___u256__Address__bool_3__5e1c6d4e3f4fb7e8($key) -> ret {
+        let v0 := $storagemap_get_word_with_salt___u256__Address___c7c570db20cdd393($key, 3)
+        let v1 := $bool_h947c0c03c59c6f07_wordrepr_h7483d41ac8178d88_from_word(v0)
+        ret := v1
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($key, $value) {
+        let v0 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($value)
+        $storagemap_set_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, 0, v0)
+        leave
+      }
+      function $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor___Address__Address__u256_1__12414c27d5bfff1f($key, $value) {
+        let v0 := $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($value)
+        $storagemap_set_word_with_salt___Address__Address___c32d499da259c78e($key, 1, v0)
+        leave
+      }
+      function $storagemap_set_word_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt, $word) {
+        let v0 := $storagemap_storage_slot_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt)
+        sstore(v0, $word)
+        leave
+      }
+      function $storagemap_set_word_with_salt___Address__Address___c32d499da259c78e($key, $salt, $word) {
+        let v0 := $storagemap_storage_slot_with_salt___Address__Address___c32d499da259c78e($key, $salt)
+        sstore(v0, $word)
+        leave
+      }
+      function $storagemap_storage_slot_with_salt__Address_h257056268eac7027__5ab99f7153cdba29($key, $salt) -> ret {
+        let v0 := mload(64)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(64, add(v0, 0))
+        let v1 := $address_h257056268eac7027_storagekey_hf9e3d38a13ff4409_write_key(v0, $key)
+        let v2 := $checked_add_u256(v0, v1)
+        mstore(v2, $salt)
+        let v3 := $checked_add_u256(v1, 32)
+        let v4 := keccak256(v0, v3)
+        ret := v4
+        leave
+      }
+      function $storagemap_storage_slot_with_salt___Address__Address___c32d499da259c78e($key, $salt) -> ret {
+        let v0 := mload(64)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(64, add(v0, 0))
+        let v1 := $_a__b__h47f120de72304a2d_storagekey_hf9e3d38a13ff4409_write_key__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2(v0, $key)
+        let v2 := $checked_add_u256(v0, v1)
+        mstore(v2, $salt)
+        let v3 := $checked_add_u256(v1, 32)
+        let v4 := keccak256(v0, v3)
+        ret := v4
+        leave
+      }
+      function $storagemap_storage_slot_with_salt___u256__Address___c7c570db20cdd393($key, $salt) -> ret {
+        let v0 := mload(64)
+        if iszero(v0) {
+          v0 := 0x80
+        }
+        mstore(64, add(v0, 0))
+        let v1 := $_a__b__h47f120de72304a2d_storagekey_hf9e3d38a13ff4409_write_key__u256_Address_h257056268eac7027__802280feae02d9df(v0, $key)
+        let v2 := $checked_add_u256(v0, v1)
+        mstore(v2, $salt)
+        let v3 := $checked_add_u256(v1, 32)
+        let v4 := keccak256(v0, v3)
+        ret := v4
+        leave
+      }
+      function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__AccessControl_3___3633e113b859df5f($raw) -> ret {
+        ret := $raw
+        leave
+      }
+      function $storptr_t__hc45dea9607fd5340_effecthandle_hfc52f915596f993a_from_raw__TokenStore_0__1___175215aa56127bde($raw) -> ret {
+        ret := $raw
+        leave
+      }
+      function $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_32_SolEncoder_h1b9228b90dad6928__562228df2278c1ed($self, $e) {
+        let v0 := $self
+        let v1 := $packed_string_len(v0)
+        let v2 := $round_up_words(v1)
+        let v3 := $checked_add_u256(32, v2)
+        let v4 := v3
+        let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, v4)
+        let v6 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+        let v7 := $checked_sub_u256(v5, v6)
+        let v8 := v7
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v8)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word_at(v5, v1)
+        let v9 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v1, 0)
+        let v10 := v9
+        if v10 {
+          let v11 := $checked_add_u256(v5, 32)
+          let v12 := $checked_sub_u256(32, v1)
+          let v13 := $checked_mul_u256(v12, 8)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word_at(v11, shl(v13, v0))
+        }
+        leave
+      }
+      function $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_8_SolEncoder_h1b9228b90dad6928__1811d65564ab2650($self, $e) {
+        let v0 := $self
+        let v1 := $packed_string_len(v0)
+        let v2 := $round_up_words(v1)
+        let v3 := $checked_add_u256(32, v2)
+        let v4 := v3
+        let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, v4)
+        let v6 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+        let v7 := $checked_sub_u256(v5, v6)
+        let v8 := v7
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v8)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word_at(v5, v1)
+        let v9 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v1, 0)
+        let v10 := v9
+        if v10 {
+          let v11 := $checked_add_u256(v5, 32)
+          let v12 := $checked_sub_u256(32, v1)
+          let v13 := $checked_mul_u256(v12, 8)
+          $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word_at(v11, shl(v13, v0))
+        }
+        leave
+      }
+      function $string_const_n__usize__h78b9b185054e88a2_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f_32__f597d64bb224049() {
+        revert(0, 0)
+      }
+      function $transfer_eff0_stor__0_1_TokenStore_0__1__Evm_hef0af3106e109414__23ea53994a8fbaec($from, $to, $amount, $store) {
+        let v0 := $address_h257056268eac7027_zero()
+        let v1 := $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($from, v0)
+        $assert(v1)
+        let v2 := $address_h257056268eac7027_zero()
+        let v3 := $ne__Address_h257056268eac7027_Address_h257056268eac7027__af929e62fa4c68f2($to, v2)
+        $assert(v3)
+        let v4 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($from)
+        let v5 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_ge(v4, $amount)
+        $assert(v5)
+        let v6 := $checked_sub_u256(v4, $amount)
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($from, v6)
+        let v7 := $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_get_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($to)
+        let v8 := $checked_add_u256(v7, $amount)
+        $storagemap_k__v__const_salt__u256__h5955888dd44c2a19_set_stor__Address_h257056268eac7027_u256_0__6e989e4cb63e64c3($to, v8)
+        let v9 := mload(0x40)
+        if iszero(v9) {
+          v9 := 0x80
+        }
+        mstore(0x40, add(v9, 96))
+        mstore(v9, $from)
+        mstore(add(v9, 32), $to)
+        mstore(add(v9, 64), $amount)
+        $emit_stor_arg0_root_stor__Evm_hef0af3106e109414_TransferEvent_h1c9ba82714a4a1f0__6ee531292f5eff63(v9)
+        leave
+      }
+      function $transfer_h13f5ec5985ebba60_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        let v2 := mload(0x40)
+        if iszero(v2) {
+          v2 := 0x80
+        }
+        mstore(0x40, add(v2, 64))
+        mstore(v2, v0)
+        mstore(add(v2, 32), v1)
+        ret := v2
+        leave
+      }
+      function $transferevent_h1c9ba82714a4a1f0_event_hd33e4481d4a34b05_emit_arg1_root_stor__Evm_hef0af3106e109414__3af54274b2985741($self) {
+        let v0 := $solencoder_h1b9228b90dad6928_new()
+        let v1 := 32
+        let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v0, v1)
+        let v3 := mload(add($self, 64))
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383(v3, v0)
+        let v4 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v0)
+        let v5 := mload(v4)
+        let v6 := v5
+        let v7 := mload(add(v4, 32))
+        let v8 := v7
+        let v9 := mload($self)
+        let v10 := $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic(v9)
+        let v11 := mload(add($self, 32))
+        let v12 := $address_h257056268eac7027_topicvalue_hc8981c1d4c24e77d_as_topic(v11)
+        $evm_hef0af3106e109414_log_h22d1a10952034bae_log3_stor_arg0_root_stor(v6, v8, 106268374300910980166318620624040158066582587003704178075307865084173350203760, v10, v12)
+        leave
+      }
+      function $transferfrom_h939549e4bad999e8_decode_h624c3cd8c996d995_decode__SolDecoder_CallData___c1e4510fd444b966($d) -> ret {
+        let v0 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v1 := $decode_field__Sol_hfd482bb803ad8c5f_Address_h257056268eac7027_SolDecoder_CallData___dc56815d0588c9d4($d)
+        let v2 := $decode_field__Sol_hfd482bb803ad8c5f_u256_SolDecoder_CallData___6480d5da5e36cc2c($d)
+        let v3 := mload(0x40)
+        if iszero(v3) {
+          v3 := 0x80
+        }
+        mstore(0x40, add(v3, 96))
+        mstore(v3, v0)
+        mstore(add(v3, 32), v1)
+        mstore(add(v3, 64), v2)
+        ret := v3
+        leave
+      }
+      function $u256_h3271ca15373d4483_decode_hb2fe2bf528775e55_decode__Sol_hfd482bb803ad8c5f_SolDecoder_CallData___fe17857f71623b98($d) -> ret {
+        let v0 := $soldecoder_i__ha12a03fcb5ba844b_abidecoder_h638151350e80a086_read_word__CallData_hf71d505b6ff5dc81__e6d5f05c3478f563($d)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($self, $e) {
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, $self)
+        leave
+      }
+      function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr) {
+        $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $self)
+        leave
+      }
+      function $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other) -> ret {
+        let v0 := eq($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_eq_he50383edd273619f_ne($self, $other) -> ret {
+        let v0 := iszero(eq($self, $other))
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+        ret := $self
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_ge($self, $other) -> ret {
+        let v0 := iszero(lt($self, $other))
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+        let v0 := gt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_le($self, $other) -> ret {
+        let v0 := iszero(gt($self, $other))
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+        let v0 := lt($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_storagekey_hf9e3d38a13ff4409_write_key($ptr, $self) -> ret {
+        mstore($ptr, $self)
         ret := 32
         leave
       }
-      function u8_encode_encode__Sol_SolEncoder__dce63ad1a1fe4ae2(self, e) {
-        let v0 := self
-        solencoder_abiencoder_write_word(e, v0)
+      function $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_from_word($word) -> ret {
+        ret := $word
         leave
       }
-      runtime()
+      function $u256_h3271ca15373d4483_wordrepr_h7483d41ac8178d88_to_word($self) -> ret {
+        ret := $self
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+        let v0 := add($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingmul_h64e6b83610cda761_wrapping_mul($self, $other) -> ret {
+        let v0 := mul($self, $other)
+        ret := v0
+        leave
+      }
+      function $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+        let v0 := sub($self, $other)
+        ret := v0
+        leave
+      }
+      function $u32_h20aa0c10687491ad_intword_h9a147c8c32b1323c_from_word($word) -> ret {
+        ret := $word
+        leave
+      }
+      function $u8_hbc9d6eeaea22ffb5_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($self, $e) {
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, $self)
+        leave
+      }
+      function $u8_hbc9d6eeaea22ffb5_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr) {
+        $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $self)
+        leave
+      }
+      $__CoolCoin_runtime()
       return(0, 0)
     }
   }

@@ -1,0 +1,26 @@
+---
+source: crates/codegen/tests/yul.rs
+expression: output
+input_file: tests/fixtures/code_region_qualified.fe
+---
+object "Foo" {
+  code {
+    function $init__Evm_hef0af3106e109414__3af54274b2985741() {
+      let v0 := datasize("Foo_deployed")
+      let v1 := dataoffset("Foo_deployed")
+      codecopy(0, v1, v0)
+      return(0, v0)
+    }
+    $init__Evm_hef0af3106e109414__3af54274b2985741()
+  }
+
+  object "Foo_deployed" {
+    code {
+      function $runtime__Evm_hef0af3106e109414__3af54274b2985741() {
+        return(0, 0)
+      }
+      $runtime__Evm_hef0af3106e109414__3af54274b2985741()
+      return(0, 0)
+    }
+  }
+}

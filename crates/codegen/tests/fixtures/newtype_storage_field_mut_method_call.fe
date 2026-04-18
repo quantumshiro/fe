@@ -1,0 +1,28 @@
+msg Msg {
+    #[selector = 1]
+    Bump -> u256
+}
+
+struct Wrap {
+    inner: u256,
+}
+
+impl Wrap {
+    fn bump(mut self) {
+        self.inner += 1
+    }
+}
+
+pub contract NewtypeStorageFieldMutMethodCall {
+    pad: u256
+    w: Wrap
+
+    init() {}
+
+    recv Msg {
+        Bump -> u256 uses (mut w) {
+            w.bump()
+            w.inner
+        }
+    }
+}

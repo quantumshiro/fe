@@ -1,0 +1,83 @@
+use super::abi::{Bytes, DynArray, DynString}
+
+pub trait Default {
+    fn default() -> Self
+}
+
+impl Default for () {
+    fn default() -> Self {
+        ()
+    }
+}
+
+impl<const N: usize> Default for String<N> {
+    fn default() -> Self {
+        ""
+    }
+}
+
+impl Default for Bytes {
+    fn default() -> Self {
+        Bytes::empty()
+    }
+}
+
+impl Default for DynString {
+    fn default() -> Self {
+        DynString::empty()
+    }
+}
+
+impl<T> Default for DynArray<T> {
+    fn default() -> Self {
+        DynArray::empty()
+    }
+}
+
+impl<T0> Default for (T0,)
+    where T0: Default
+{
+    fn default() -> Self {
+        (T0::default(),)
+    }
+}
+
+impl<T0, T1> Default for (T0, T1)
+    where T0: Default, T1: Default
+{
+    fn default() -> Self {
+        (T0::default(), T1::default())
+    }
+}
+
+impl<T0, T1, T2> Default for (T0, T1, T2)
+    where T0: Default, T1: Default, T2: Default
+{
+    fn default() -> Self {
+        (T0::default(), T1::default(), T2::default())
+    }
+}
+
+impl<T0, T1, T2, T3> Default for (T0, T1, T2, T3)
+    where T0: Default, T1: Default, T2: Default, T3: Default
+{
+    fn default() -> Self {
+        (T0::default(), T1::default(), T2::default(), T3::default())
+    }
+}
+
+impl<T0, T1, T2, T3, T4> Default for (T0, T1, T2, T3, T4)
+    where T0: Default, T1: Default, T2: Default, T3: Default, T4: Default
+{
+    fn default() -> Self {
+        (T0::default(), T1::default(), T2::default(), T3::default(), T4::default())
+    }
+}
+
+impl<T0, T1, T2, T3, T4, T5> Default for (T0, T1, T2, T3, T4, T5)
+    where T0: Default, T1: Default, T2: Default, T3: Default, T4: Default, T5: Default
+{
+    fn default() -> Self {
+        (T0::default(), T1::default(), T2::default(), T3::default(), T4::default(), T5::default())
+    }
+}

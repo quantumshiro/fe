@@ -1,0 +1,84 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/comparison_ops.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_tuple_0 = {i1, i1, i1, i1, i1, i1};
+
+func private %comparison_ops() -> objref<@__fe_obj_tuple_0> {
+    block0:
+        v3.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_eq 1.i256 1.i256;
+        v4.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_ne 1.i256 2.i256;
+        v5.i1 = call %u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt 1.i256 2.i256;
+        v6.i1 = call %u256_h3271ca15373d4483_ord_h264f6d6d75097a_le 2.i256 2.i256;
+        v7.i1 = call %u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt 3.i256 2.i256;
+        v8.i1 = call %u256_h3271ca15373d4483_ord_h264f6d6d75097a_ge 3.i256 3.i256;
+        v9.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v11.objref<i1> = obj.proj v9 0.i256;
+        obj.store v11 v3;
+        v12.objref<i1> = obj.proj v9 1.i256;
+        obj.store v12 v4;
+        v13.objref<i1> = obj.proj v9 2.i256;
+        obj.store v13 v5;
+        v14.objref<i1> = obj.proj v9 3.i256;
+        obj.store v14 v6;
+        v16.objref<i1> = obj.proj v9 4.i256;
+        obj.store v16 v7;
+        v18.objref<i1> = obj.proj v9 5.i256;
+        obj.store v18 v8;
+        return v9;
+}
+
+func private %u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = eq v0 v1;
+        return v2;
+}
+
+func private %u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = eq v0 v1;
+        v3.i1 = is_zero v2;
+        return v3;
+}
+
+func private %u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = lt v0 v1;
+        return v2;
+}
+
+func private %u256_h3271ca15373d4483_ord_h264f6d6d75097a_le(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = gt v0 v1;
+        v3.i1 = is_zero v2;
+        return v3;
+}
+
+func private %u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = gt v0 v1;
+        return v2;
+}
+
+func private %u256_h3271ca15373d4483_ord_h264f6d6d75097a_ge(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = lt v0 v1;
+        v3.i1 = is_zero v2;
+        return v3;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v0.objref<@__fe_obj_tuple_0> = call %comparison_ops;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

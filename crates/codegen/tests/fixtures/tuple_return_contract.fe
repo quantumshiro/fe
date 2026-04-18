@@ -1,0 +1,14 @@
+use std::evm::Address
+
+msg TupleMsg {
+    #[selector = 1]
+    Pair -> (u256, Address),
+}
+
+pub contract TupleReturnContract {
+    recv TupleMsg {
+        Pair -> (u256, Address) {
+            (42, Address::zero())
+        }
+    }
+}

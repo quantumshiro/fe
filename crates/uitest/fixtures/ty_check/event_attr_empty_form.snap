@@ -1,0 +1,20 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/event_attr_empty_form.fe
+---
+error[10-0002]: invalid `#[event]` attribute form
+  ┌─ event_attr_empty_form.fe:1:1
+  │
+1 │ #[event()]
+  │ ^^^^^^^^^^ expected `#[event]` without arguments
+  │
+  = remove arguments and use `#[event]`
+
+error[10-0005]: invalid `#[indexed]` attribute form
+  ┌─ event_attr_empty_form.fe:3:5
+  │
+3 │     #[indexed()]
+  │     ^^^^^^^^^^^^ expected `#[indexed]` without arguments
+  │
+  = remove arguments and use `#[indexed]`

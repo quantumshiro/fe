@@ -3,7 +3,105 @@ source: crates/codegen/tests/yul.rs
 expression: output
 input_file: tests/fixtures/math_ops.fe
 ---
-function math_ops() -> ret {
-  ret := mod(div(mul(sub(10, 3), 2), 7), 3)
+function $math_ops() -> ret {
+  let v0 := $checked_sub_u64(10, 3)
+  let v1 := $checked_mul_u64(v0, 2)
+  let v2 := $checked_div_u64(v1, 7)
+  let v3 := $checked_rem_u64(v2, 3)
+  ret := v3
+  leave
+}
+function $checked_div_u64($a, $b) -> ret {
+  $ensure_nonzero_divisor__u64__aee7f05a097ffa16($b)
+  let v0 := and(div(and($a, 0xffffffffffffffff), and($b, 0xffffffffffffffff)), 0xffffffffffffffff)
+  ret := v0
+  leave
+}
+function $checked_mul_u64($a, $b) -> ret {
+  let v0 := $checked_mul_unsigned_impl__u64__aee7f05a097ffa16($a, $b)
+  ret := v0
+  leave
+}
+function $checked_mul_unsigned_impl__u64__aee7f05a097ffa16($a, $b) -> ret {
+  let v0 := $u64_haee7f05a097ffa16_wrappingmul_h64e6b83610cda761_wrapping_mul($a, $b)
+  let v1 := $u64_haee7f05a097ffa16_intword_h9a147c8c32b1323c_to_word($a)
+  let v2 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v1, 0)
+  let v3 := v2
+  if v3 {
+    let v4 := $checked_div_u64(v0, $a)
+    let v5 := $u64_haee7f05a097ffa16_intword_h9a147c8c32b1323c_to_word(v4)
+    let v6 := $u64_haee7f05a097ffa16_intword_h9a147c8c32b1323c_to_word($b)
+    let v7 := $u256_h3271ca15373d4483_eq_he50383edd273619f_ne(v5, v6)
+    let v8 := v7
+    if v8 {
+      revert(0, 0)
+    }
+    ret := v0
+    leave
+  }
+  if iszero(v3) {
+    ret := v0
+    leave
+  }
+}
+function $checked_rem_u64($a, $b) -> ret {
+  $ensure_nonzero_divisor__u64__aee7f05a097ffa16($b)
+  let v0 := and(mod(and($a, 0xffffffffffffffff), and($b, 0xffffffffffffffff)), 0xffffffffffffffff)
+  ret := v0
+  leave
+}
+function $checked_sub_u64($a, $b) -> ret {
+  let v0 := $checked_sub_unsigned_impl__u64__aee7f05a097ffa16($a, $b)
+  ret := v0
+  leave
+}
+function $checked_sub_unsigned_impl__u64__aee7f05a097ffa16($a, $b) -> ret {
+  let v0 := $u64_haee7f05a097ffa16_intword_h9a147c8c32b1323c_to_word($b)
+  let v1 := $u64_haee7f05a097ffa16_intword_h9a147c8c32b1323c_to_word($a)
+  let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+  let v3 := v2
+  if v3 {
+    revert(0, 0)
+  }
+  let v4 := $u64_haee7f05a097ffa16_wrappingsub_h6880d1ff91f0a556_wrapping_sub($a, $b)
+  ret := v4
+  leave
+}
+function $ensure_nonzero_divisor__u64__aee7f05a097ffa16($b) {
+  let v0 := $u64_haee7f05a097ffa16_intword_h9a147c8c32b1323c_to_word($b)
+  let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0, 0)
+  let v2 := v1
+  if v2 {
+    revert(0, 0)
+  }
+  leave
+}
+function $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other) -> ret {
+  let v0 := eq($self, $other)
+  ret := v0
+  leave
+}
+function $u256_h3271ca15373d4483_eq_he50383edd273619f_ne($self, $other) -> ret {
+  let v0 := iszero(eq($self, $other))
+  ret := v0
+  leave
+}
+function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+  let v0 := gt($self, $other)
+  ret := v0
+  leave
+}
+function $u64_haee7f05a097ffa16_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+  ret := $self
+  leave
+}
+function $u64_haee7f05a097ffa16_wrappingmul_h64e6b83610cda761_wrapping_mul($self, $other) -> ret {
+  let v0 := and(mul(and($self, 0xffffffffffffffff), and($other, 0xffffffffffffffff)), 0xffffffffffffffff)
+  ret := v0
+  leave
+}
+function $u64_haee7f05a097ffa16_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+  let v0 := and(sub(and($self, 0xffffffffffffffff), and($other, 0xffffffffffffffff)), 0xffffffffffffffff)
+  ret := v0
   leave
 }

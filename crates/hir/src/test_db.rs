@@ -9,12 +9,16 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 
 use crate::analysis::{
-    analysis_pass::{AnalysisPassManager, MsgLowerPass, ParsingPass},
+    analysis_pass::{
+        AnalysisPassManager, ArithmeticAttrPass, ErrorLowerPass, EventLowerPass, InlineAttrPass,
+        LoopUnrollAttrPass, MsgLowerPass, ParsingPass, PayableAttrPass,
+    },
     diagnostics::{DiagnosticVoucher, SpannedHirAnalysisDb},
     name_resolution::ImportAnalysisPass,
     ty::{
         AdtDefAnalysisPass, BodyAnalysisPass, DefConflictAnalysisPass, FuncAnalysisPass,
-        ImplAnalysisPass, ImplTraitAnalysisPass, TraitAnalysisPass, TypeAliasAnalysisPass,
+        ImplAnalysisPass, ImplTraitAnalysisPass, MsgSelectorAnalysisPass, TraitAnalysisPass,
+        TypeAliasAnalysisPass,
     },
 };
 use crate::{
@@ -36,10 +40,9 @@ use codespan_reporting::{
 };
 use common::{
     InputDb, define_input_db,
-    diagnostics::{LabelStyle, Severity, Span},
+    diagnostics::{LabelStyle, Severity, cmp_complete_diagnostics},
     file::File,
     indexmap::IndexMap,
-    stdlib::{HasBuiltinCore, HasBuiltinStd},
 };
 use derive_more::TryIntoError;
 use rustc_hash::FxHashMap;
@@ -170,20 +173,16 @@ define_input_db!(HirAnalysisTestDb);
 #[allow(dead_code)]
 impl HirAnalysisTestDb {
     pub fn new_stand_alone(&mut self, file_path: Utf8PathBuf, text: &str) -> File {
-        let file_name = if file_path.is_relative() {
-            format!("/{file_path}")
+        let file_url = if file_path.is_absolute() {
+            <Url as UrlExt>::from_file_path_lossy(file_path.as_std_path())
         } else {
-            file_path.to_string()
+            Url::parse("file:///hir_test/")
+                .unwrap()
+                .join(file_path.as_str())
+                .expect("join synthetic standalone path")
         };
-        // Use the index from the database and reinitialize it with core files
         let index = self.workspace();
-        self.initialize_builtin_core();
-        self.initialize_builtin_std();
-        index.touch(
-            self,
-            <Url as UrlExt>::from_file_path_lossy(&file_name),
-            Some(text.to_string()),
-        )
+        index.touch(self, file_url, Some(text.to_string()))
     }
 
     pub fn top_mod(&self, input: File) -> (TopLevelMod<'_>, HirPropertyFormatter<'_>) {
@@ -196,67 +195,13 @@ impl HirAnalysisTestDb {
         let mut manager = initialize_analysis_pass();
         let diags = manager.run_on_module(self, top_mod);
 
-        // Filter diagnostics based on file paths found in the diagnostic spans
-        let filtered_diags: Vec<_> = diags
-            .into_iter()
-            .filter(|diag_box| {
-                let complete_diag = diag_box.to_complete(self);
-
-                // If it's not an unreachable pattern warning, keep it
-                if complete_diag.error_code.pass != common::diagnostics::DiagnosticPass::TyCheck
-                    || complete_diag.error_code.local_code != 35
-                {
-                    return true;
-                }
-
-                // Extract the file path from the primary span's file
-                let span = complete_diag.primary_span();
-                let file_path = span
-                    .file
-                    .path(self)
-                    .as_ref()
-                    .map(|p| p.as_str().to_string());
-
-                // Define problematic files where we filter unreachable patterns
-                let problematic_ty_check_files = [
-                    "minimal_variant_paths.fe",
-                    "custom_imported_variants.fe",
-                    "patterns_comparison.fe",
-                    "ret.fe",
-                ];
-
-                // Check if this is a file where we should filter the warning
-                if let Some(path) = file_path {
-                    // Don't filter warnings from match_stmt.fe as those are intentional test cases
-                    // unless they're in a directory specifically testing unreachability
-                    if path.contains("match_stmt.fe") && !path.contains("unreachable/") {
-                        return true;
-                    }
-
-                    let should_filter = problematic_ty_check_files
-                        .iter()
-                        .any(|name| path.contains(name))
-                        && !path.contains("unreachable/");
-
-                    // If it's a problematic file, filter out the unreachable pattern warning
-                    return !should_filter;
-                }
-
-                true
-            })
-            .collect();
-
-        if !filtered_diags.is_empty() {
+        if !diags.is_empty() {
             let writer = BufferWriter::stderr(ColorChoice::Auto);
             let mut buffer = writer.buffer();
             let config = term::Config::default();
 
-            // copied from driver
-            let mut diags: Vec<_> = filtered_diags.iter().map(|d| d.to_complete(self)).collect();
-            diags.sort_by(|lhs, rhs| match lhs.error_code.cmp(&rhs.error_code) {
-                std::cmp::Ordering::Equal => lhs.primary_span().cmp(&rhs.primary_span()),
-                ord => ord,
-            });
+            let mut diags: Vec<_> = diags.iter().map(|d| d.to_complete(self)).collect();
+            diags.sort_by(cmp_complete_diagnostics);
 
             for diag in diags {
                 let cs_diag = &diag.to_cs(self);
@@ -313,16 +258,24 @@ impl<'db> HirPropertyFormatter<'db> {
                 continue;
             }
 
-            let diags = self.properties[top_mod]
-                .iter()
-                .map(|(prop, span)| {
-                    let (span, diag) = self.property_to_diag(db, *top_mod, prop, span.clone());
-                    ((span.file, (span.range.start(), span.range.end())), diag)
-                })
-                .collect::<BTreeMap<_, _>>();
+            let diags =
+                self.properties[top_mod]
+                    .iter()
+                    .fold(BTreeMap::new(), |mut diags, (prop, span)| {
+                        let span = span.resolve(db).unwrap();
+                        diags
+                            .entry((span.file, span.range.start(), span.range.end()))
+                            .or_insert_with(Vec::new)
+                            .push(prop.clone());
+                        diags
+                    });
 
-            for diag in diags.values() {
-                term::emit(&mut buffer, &config, &self.code_span_files, diag).unwrap();
+            for ((_, start, end), mut props) in diags {
+                props.sort_unstable();
+                props.dedup();
+                let diag =
+                    self.property_to_diag(*top_mod, &props.join(" | "), start.into()..end.into());
+                term::emit(&mut buffer, &config, &self.code_span_files, &diag).unwrap();
             }
         }
 
@@ -331,16 +284,12 @@ impl<'db> HirPropertyFormatter<'db> {
 
     fn property_to_diag(
         &self,
-        db: &'db dyn SpannedHirDb,
         top_mod: TopLevelMod<'db>,
         prop: &str,
-        span: DynLazySpan<'db>,
-    ) -> (Span, Diagnostic<usize>) {
+        range: Range<usize>,
+    ) -> Diagnostic<usize> {
         let file_id = self.top_mod_to_file[&top_mod];
-        let span = span.resolve(db).unwrap();
-        let diag = Diagnostic::note()
-            .with_labels(vec![Label::primary(file_id, span.range).with_message(prop)]);
-        (span, diag)
+        Diagnostic::note().with_labels(vec![Label::primary(file_id, range).with_message(prop)])
     }
 
     pub fn register_top_mod(&mut self, path: &str, text: &str, top_mod: TopLevelMod<'db>) {
@@ -361,17 +310,24 @@ impl Default for HirPropertyFormatter<'_> {
 
 pub fn initialize_analysis_pass() -> AnalysisPassManager {
     let mut pass_manager = AnalysisPassManager::new();
-    pass_manager.add_module_pass(Box::new(ParsingPass {}));
-    pass_manager.add_module_pass(Box::new(MsgLowerPass {}));
-    pass_manager.add_module_pass(Box::new(DefConflictAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(ImportAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(AdtDefAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(TypeAliasAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(TraitAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(ImplAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(ImplTraitAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(FuncAnalysisPass {}));
-    pass_manager.add_module_pass(Box::new(BodyAnalysisPass {}));
+    pass_manager.add_module_pass("Parsing", Box::new(ParsingPass {}));
+    pass_manager.add_module_pass("ArithmeticAttr", Box::new(ArithmeticAttrPass {}));
+    pass_manager.add_module_pass("PayableAttr", Box::new(PayableAttrPass {}));
+    pass_manager.add_module_pass("MsgLower", Box::new(MsgLowerPass {}));
+    pass_manager.add_module_pass("EventLower", Box::new(EventLowerPass {}));
+    pass_manager.add_module_pass("ErrorLower", Box::new(ErrorLowerPass {}));
+    pass_manager.add_module_pass("InlineAttr", Box::new(InlineAttrPass {}));
+    pass_manager.add_module_pass("LoopUnrollAttr", Box::new(LoopUnrollAttrPass {}));
+    pass_manager.add_module_pass("MsgSelector", Box::new(MsgSelectorAnalysisPass {}));
+    pass_manager.add_module_pass("DefConflict", Box::new(DefConflictAnalysisPass {}));
+    pass_manager.add_module_pass("Import", Box::new(ImportAnalysisPass {}));
+    pass_manager.add_module_pass("AdtDef", Box::new(AdtDefAnalysisPass {}));
+    pass_manager.add_module_pass("TypeAlias", Box::new(TypeAliasAnalysisPass {}));
+    pass_manager.add_module_pass("Trait", Box::new(TraitAnalysisPass {}));
+    pass_manager.add_module_pass("Impl", Box::new(ImplAnalysisPass {}));
+    pass_manager.add_module_pass("ImplTrait", Box::new(ImplTraitAnalysisPass {}));
+    pass_manager.add_module_pass("Func", Box::new(FuncAnalysisPass {}));
+    pass_manager.add_module_pass("Body", Box::new(BodyAnalysisPass {}));
     pass_manager
 }
 

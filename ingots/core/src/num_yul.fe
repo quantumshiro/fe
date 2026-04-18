@@ -1,0 +1,466 @@
+use super::ops::*
+use super::num::{IntWord, sign_extend}
+use super::panic
+
+extern {
+    fn __div_u8(_: u8, _: u8) -> u8
+    fn __rem_u8(_: u8, _: u8) -> u8
+    fn __div_i8(_: i8, _: i8) -> i8
+    fn __rem_i8(_: i8, _: i8) -> i8
+    fn __div_i16(_: i16, _: i16) -> i16
+    fn __rem_i16(_: i16, _: i16) -> i16
+    fn __div_u16(_: u16, _: u16) -> u16
+    fn __rem_u16(_: u16, _: u16) -> u16
+    fn __div_i32(_: i32, _: i32) -> i32
+    fn __rem_i32(_: i32, _: i32) -> i32
+    fn __div_u32(_: u32, _: u32) -> u32
+    fn __rem_u32(_: u32, _: u32) -> u32
+    fn __div_i64(_: i64, _: i64) -> i64
+    fn __rem_i64(_: i64, _: i64) -> i64
+    fn __div_i128(_: i128, _: i128) -> i128
+    fn __rem_i128(_: i128, _: i128) -> i128
+    fn __div_u64(_: u64, _: u64) -> u64
+    fn __rem_u64(_: u64, _: u64) -> u64
+    fn __div_u128(_: u128, _: u128) -> u128
+    fn __rem_u128(_: u128, _: u128) -> u128
+    fn __div_usize(_: usize, _: usize) -> usize
+    fn __rem_usize(_: usize, _: usize) -> usize
+    fn __div_i256(_: i256, _: i256) -> i256
+    fn __rem_i256(_: i256, _: i256) -> i256
+    fn __div_u256(_: u256, _: u256) -> u256
+    fn __rem_u256(_: u256, _: u256) -> u256
+    fn __div_isize(_: isize, _: isize) -> isize
+    fn __rem_isize(_: isize, _: isize) -> isize
+}
+
+// ---------- generic checked-arithmetic helpers ----------
+
+fn checked_add_unsigned_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingAdd<Output = T>
+{
+    let result = a.wrapping_add(b)
+    if result.to_word() < a.to_word() { panic() }
+    result
+}
+
+fn checked_sub_unsigned_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingSub<Output = T>
+{
+    if b.to_word() > a.to_word() { panic() }
+    a.wrapping_sub(b)
+}
+
+fn checked_mul_unsigned_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingMul<Output = T> + Div<Output = T>
+{
+    let result = a.wrapping_mul(b)
+    if a.to_word() != 0 && (result / a).to_word() != b.to_word() { panic() }
+    result
+}
+
+fn checked_add_signed_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingAdd<Output = T>
+{
+    let result = a.wrapping_add(b)
+    let sign = T::SIGN_BIT
+    let a_neg = (a.to_word() & sign) != 0
+    let b_neg = (b.to_word() & sign) != 0
+    let r_neg = (result.to_word() & sign) != 0
+    if a_neg == b_neg && a_neg != r_neg { panic() }
+    result
+}
+
+fn checked_sub_signed_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingSub<Output = T>
+{
+    let result = a.wrapping_sub(b)
+    let sign = T::SIGN_BIT
+    let a_neg = (a.to_word() & sign) != 0
+    let b_neg = (b.to_word() & sign) != 0
+    let r_neg = (result.to_word() & sign) != 0
+    if a_neg != b_neg && a_neg != r_neg { panic() }
+    result
+}
+
+fn checked_mul_signed_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingMul<Output = T> + Div<Output = T>
+{
+    let result = a.wrapping_mul(b)
+    if a.to_word() != 0 && (result / a).to_word() != b.to_word() { panic() }
+    result
+}
+
+fn checked_neg_signed_impl<T>(x: T) -> T
+    where T: IntWord + WrappingSub<Output = T>
+{
+    let zero = T::from_word(0)
+    let result = zero.wrapping_sub(x)
+    if x.to_word() != 0 && result.to_word() == x.to_word() { panic() }
+    result
+}
+
+fn signed_min_word<T>() -> u256
+    where T: IntWord
+{
+    sign_extend(word: T::SIGN_BIT, mask: T::MASK, sign_bit: T::SIGN_BIT)
+}
+
+fn signed_max_word<T>() -> u256
+    where T: IntWord
+{
+    T::SIGN_BIT - 1
+}
+
+fn saturating_add_unsigned_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingAdd<Output = T>
+{
+    let result = a.wrapping_add(b)
+    if result.to_word() < a.to_word() { T::from_word(T::MASK) } else { result }
+}
+
+fn saturating_sub_unsigned_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingSub<Output = T>
+{
+    if b.to_word() > a.to_word() { T::from_word(0) } else { a.wrapping_sub(b) }
+}
+
+fn saturating_mul_unsigned_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingMul<Output = T> + Div<Output = T>
+{
+    if a.to_word() == 0 || b.to_word() == 0 {
+        T::from_word(0)
+    } else {
+        let result = a.wrapping_mul(b)
+        if (result / a).to_word() != b.to_word() {
+            T::from_word(T::MASK)
+        } else {
+            result
+        }
+    }
+}
+
+fn saturating_add_signed_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingAdd<Output = T>
+{
+    let result = a.wrapping_add(b)
+    let sign = T::SIGN_BIT
+    let a_neg = (a.to_word() & sign) != 0
+    let b_neg = (b.to_word() & sign) != 0
+    let r_neg = (result.to_word() & sign) != 0
+    if a_neg == b_neg && a_neg != r_neg {
+        if a_neg { T::from_word(signed_min_word<T>()) } else { T::from_word(signed_max_word<T>()) }
+    } else {
+        result
+    }
+}
+
+fn saturating_sub_signed_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingSub<Output = T>
+{
+    let result = a.wrapping_sub(b)
+    let sign = T::SIGN_BIT
+    let a_neg = (a.to_word() & sign) != 0
+    let b_neg = (b.to_word() & sign) != 0
+    let r_neg = (result.to_word() & sign) != 0
+    if a_neg != b_neg && a_neg != r_neg {
+        if a_neg { T::from_word(signed_min_word<T>()) } else { T::from_word(signed_max_word<T>()) }
+    } else {
+        result
+    }
+}
+
+fn saturating_mul_signed_impl<T>(a: T, b: T) -> T
+    where T: IntWord + WrappingMul<Output = T> + Div<Output = T>
+{
+    if a.to_word() == 0 || b.to_word() == 0 {
+        T::from_word(0)
+    } else {
+        let min = signed_min_word<T>()
+        let neg_one = sign_extend(word: T::MASK, mask: T::MASK, sign_bit: T::SIGN_BIT)
+        if (a.to_word() == min && b.to_word() == neg_one)
+            || (b.to_word() == min && a.to_word() == neg_one)
+        {
+            T::from_word(signed_max_word<T>())
+        } else {
+            let result = a.wrapping_mul(b)
+            if (result / a).to_word() != b.to_word() {
+                let negative = ((a.to_word() ^ b.to_word()) & T::SIGN_BIT) != 0
+                if negative {
+                    T::from_word(signed_min_word<T>())
+                } else {
+                    T::from_word(signed_max_word<T>())
+                }
+            } else {
+                result
+            }
+        }
+    }
+}
+
+fn ensure_nonzero_divisor<T>(b: T)
+    where T: IntWord
+{
+    if b.to_word() == 0 { panic() }
+}
+
+fn ensure_signed_div_no_overflow<T>(a: T, b: T)
+    where T: IntWord
+{
+    ensure_nonzero_divisor(b)
+    let min_word = sign_extend(word: T::SIGN_BIT, mask: T::MASK, sign_bit: T::SIGN_BIT)
+    let neg_one_word = sign_extend(word: T::MASK, mask: T::MASK, sign_bit: T::SIGN_BIT)
+    if a.to_word() == min_word && b.to_word() == neg_one_word { panic() }
+}
+
+// ---------- unsigned thin wrappers ----------
+
+// u8
+pub fn checked_add_u8(a: u8, b: u8) -> u8 { checked_add_unsigned_impl(a, b) }
+pub fn checked_sub_u8(a: u8, b: u8) -> u8 { checked_sub_unsigned_impl(a, b) }
+pub fn checked_mul_u8(a: u8, b: u8) -> u8 { checked_mul_unsigned_impl(a, b) }
+pub fn checked_div_u8(a: u8, b: u8) -> u8 {
+    ensure_nonzero_divisor(b)
+    __div_u8(a, b)
+}
+pub fn checked_rem_u8(a: u8, b: u8) -> u8 {
+    ensure_nonzero_divisor(b)
+    __rem_u8(a, b)
+}
+
+// u16
+pub fn checked_add_u16(a: u16, b: u16) -> u16 { checked_add_unsigned_impl(a, b) }
+pub fn checked_sub_u16(a: u16, b: u16) -> u16 { checked_sub_unsigned_impl(a, b) }
+pub fn checked_mul_u16(a: u16, b: u16) -> u16 { checked_mul_unsigned_impl(a, b) }
+pub fn checked_div_u16(a: u16, b: u16) -> u16 {
+    ensure_nonzero_divisor(b)
+    __div_u16(a, b)
+}
+pub fn checked_rem_u16(a: u16, b: u16) -> u16 {
+    ensure_nonzero_divisor(b)
+    __rem_u16(a, b)
+}
+
+// u32
+pub fn checked_add_u32(a: u32, b: u32) -> u32 { checked_add_unsigned_impl(a, b) }
+pub fn checked_sub_u32(a: u32, b: u32) -> u32 { checked_sub_unsigned_impl(a, b) }
+pub fn checked_mul_u32(a: u32, b: u32) -> u32 { checked_mul_unsigned_impl(a, b) }
+pub fn checked_div_u32(a: u32, b: u32) -> u32 {
+    ensure_nonzero_divisor(b)
+    __div_u32(a, b)
+}
+pub fn checked_rem_u32(a: u32, b: u32) -> u32 {
+    ensure_nonzero_divisor(b)
+    __rem_u32(a, b)
+}
+
+// u64
+pub fn checked_add_u64(a: u64, b: u64) -> u64 { checked_add_unsigned_impl(a, b) }
+pub fn checked_sub_u64(a: u64, b: u64) -> u64 { checked_sub_unsigned_impl(a, b) }
+pub fn checked_mul_u64(a: u64, b: u64) -> u64 { checked_mul_unsigned_impl(a, b) }
+pub fn checked_div_u64(a: u64, b: u64) -> u64 {
+    ensure_nonzero_divisor(b)
+    __div_u64(a, b)
+}
+pub fn checked_rem_u64(a: u64, b: u64) -> u64 {
+    ensure_nonzero_divisor(b)
+    __rem_u64(a, b)
+}
+
+// u128
+pub fn checked_add_u128(a: u128, b: u128) -> u128 { checked_add_unsigned_impl(a, b) }
+pub fn checked_sub_u128(a: u128, b: u128) -> u128 { checked_sub_unsigned_impl(a, b) }
+pub fn checked_mul_u128(a: u128, b: u128) -> u128 { checked_mul_unsigned_impl(a, b) }
+pub fn checked_div_u128(a: u128, b: u128) -> u128 {
+    ensure_nonzero_divisor(b)
+    __div_u128(a, b)
+}
+pub fn checked_rem_u128(a: u128, b: u128) -> u128 {
+    ensure_nonzero_divisor(b)
+    __rem_u128(a, b)
+}
+
+// u256
+pub fn checked_add_u256(a: u256, b: u256) -> u256 { checked_add_unsigned_impl(a, b) }
+pub fn checked_sub_u256(a: u256, b: u256) -> u256 { checked_sub_unsigned_impl(a, b) }
+pub fn checked_mul_u256(a: u256, b: u256) -> u256 { checked_mul_unsigned_impl(a, b) }
+pub fn checked_div_u256(a: u256, b: u256) -> u256 {
+    ensure_nonzero_divisor(b)
+    __div_u256(a, b)
+}
+pub fn checked_rem_u256(a: u256, b: u256) -> u256 {
+    ensure_nonzero_divisor(b)
+    __rem_u256(a, b)
+}
+
+// usize
+pub fn checked_add_usize(a: usize, b: usize) -> usize { checked_add_unsigned_impl(a, b) }
+pub fn checked_sub_usize(a: usize, b: usize) -> usize { checked_sub_unsigned_impl(a, b) }
+pub fn checked_mul_usize(a: usize, b: usize) -> usize { checked_mul_unsigned_impl(a, b) }
+pub fn checked_div_usize(a: usize, b: usize) -> usize {
+    ensure_nonzero_divisor(b)
+    __div_usize(a, b)
+}
+pub fn checked_rem_usize(a: usize, b: usize) -> usize {
+    ensure_nonzero_divisor(b)
+    __rem_usize(a, b)
+}
+
+// ---------- signed thin wrappers ----------
+
+// i8
+pub fn checked_add_i8(a: i8, b: i8) -> i8 { checked_add_signed_impl(a, b) }
+pub fn checked_sub_i8(a: i8, b: i8) -> i8 { checked_sub_signed_impl(a, b) }
+pub fn checked_mul_i8(a: i8, b: i8) -> i8 { checked_mul_signed_impl(a, b) }
+pub fn checked_div_i8(a: i8, b: i8) -> i8 {
+    ensure_signed_div_no_overflow(a, b)
+    __div_i8(a, b)
+}
+pub fn checked_rem_i8(a: i8, b: i8) -> i8 {
+    ensure_nonzero_divisor(b)
+    __rem_i8(a, b)
+}
+pub fn checked_neg_i8(x: i8) -> i8 { checked_neg_signed_impl(x) }
+
+// i16
+pub fn checked_add_i16(a: i16, b: i16) -> i16 { checked_add_signed_impl(a, b) }
+pub fn checked_sub_i16(a: i16, b: i16) -> i16 { checked_sub_signed_impl(a, b) }
+pub fn checked_mul_i16(a: i16, b: i16) -> i16 { checked_mul_signed_impl(a, b) }
+pub fn checked_div_i16(a: i16, b: i16) -> i16 {
+    ensure_signed_div_no_overflow(a, b)
+    __div_i16(a, b)
+}
+pub fn checked_rem_i16(a: i16, b: i16) -> i16 {
+    ensure_nonzero_divisor(b)
+    __rem_i16(a, b)
+}
+pub fn checked_neg_i16(x: i16) -> i16 { checked_neg_signed_impl(x) }
+
+// i32
+pub fn checked_add_i32(a: i32, b: i32) -> i32 { checked_add_signed_impl(a, b) }
+pub fn checked_sub_i32(a: i32, b: i32) -> i32 { checked_sub_signed_impl(a, b) }
+pub fn checked_mul_i32(a: i32, b: i32) -> i32 { checked_mul_signed_impl(a, b) }
+pub fn checked_div_i32(a: i32, b: i32) -> i32 {
+    ensure_signed_div_no_overflow(a, b)
+    __div_i32(a, b)
+}
+pub fn checked_rem_i32(a: i32, b: i32) -> i32 {
+    ensure_nonzero_divisor(b)
+    __rem_i32(a, b)
+}
+pub fn checked_neg_i32(x: i32) -> i32 { checked_neg_signed_impl(x) }
+
+// i64
+pub fn checked_add_i64(a: i64, b: i64) -> i64 { checked_add_signed_impl(a, b) }
+pub fn checked_sub_i64(a: i64, b: i64) -> i64 { checked_sub_signed_impl(a, b) }
+pub fn checked_mul_i64(a: i64, b: i64) -> i64 { checked_mul_signed_impl(a, b) }
+pub fn checked_div_i64(a: i64, b: i64) -> i64 {
+    ensure_signed_div_no_overflow(a, b)
+    __div_i64(a, b)
+}
+pub fn checked_rem_i64(a: i64, b: i64) -> i64 {
+    ensure_nonzero_divisor(b)
+    __rem_i64(a, b)
+}
+pub fn checked_neg_i64(x: i64) -> i64 { checked_neg_signed_impl(x) }
+
+// i128
+pub fn checked_add_i128(a: i128, b: i128) -> i128 { checked_add_signed_impl(a, b) }
+pub fn checked_sub_i128(a: i128, b: i128) -> i128 { checked_sub_signed_impl(a, b) }
+pub fn checked_mul_i128(a: i128, b: i128) -> i128 { checked_mul_signed_impl(a, b) }
+pub fn checked_div_i128(a: i128, b: i128) -> i128 {
+    ensure_signed_div_no_overflow(a, b)
+    __div_i128(a, b)
+}
+pub fn checked_rem_i128(a: i128, b: i128) -> i128 {
+    ensure_nonzero_divisor(b)
+    __rem_i128(a, b)
+}
+pub fn checked_neg_i128(x: i128) -> i128 { checked_neg_signed_impl(x) }
+
+// i256
+pub fn checked_add_i256(a: i256, b: i256) -> i256 { checked_add_signed_impl(a, b) }
+pub fn checked_sub_i256(a: i256, b: i256) -> i256 { checked_sub_signed_impl(a, b) }
+pub fn checked_mul_i256(a: i256, b: i256) -> i256 { checked_mul_signed_impl(a, b) }
+pub fn checked_div_i256(a: i256, b: i256) -> i256 {
+    ensure_signed_div_no_overflow(a, b)
+    __div_i256(a, b)
+}
+pub fn checked_rem_i256(a: i256, b: i256) -> i256 {
+    ensure_nonzero_divisor(b)
+    __rem_i256(a, b)
+}
+pub fn checked_neg_i256(x: i256) -> i256 { checked_neg_signed_impl(x) }
+
+// isize
+pub fn checked_add_isize(a: isize, b: isize) -> isize { checked_add_signed_impl(a, b) }
+pub fn checked_sub_isize(a: isize, b: isize) -> isize { checked_sub_signed_impl(a, b) }
+pub fn checked_mul_isize(a: isize, b: isize) -> isize { checked_mul_signed_impl(a, b) }
+pub fn checked_div_isize(a: isize, b: isize) -> isize {
+    ensure_signed_div_no_overflow(a, b)
+    __div_isize(a, b)
+}
+pub fn checked_rem_isize(a: isize, b: isize) -> isize {
+    ensure_nonzero_divisor(b)
+    __rem_isize(a, b)
+}
+pub fn checked_neg_isize(x: isize) -> isize { checked_neg_signed_impl(x) }
+
+// ---------- saturating unsigned wrappers ----------
+
+pub fn saturating_add_u8(a: u8, b: u8) -> u8 { saturating_add_unsigned_impl(a, b) }
+pub fn saturating_sub_u8(a: u8, b: u8) -> u8 { saturating_sub_unsigned_impl(a, b) }
+pub fn saturating_mul_u8(a: u8, b: u8) -> u8 { saturating_mul_unsigned_impl(a, b) }
+
+pub fn saturating_add_u16(a: u16, b: u16) -> u16 { saturating_add_unsigned_impl(a, b) }
+pub fn saturating_sub_u16(a: u16, b: u16) -> u16 { saturating_sub_unsigned_impl(a, b) }
+pub fn saturating_mul_u16(a: u16, b: u16) -> u16 { saturating_mul_unsigned_impl(a, b) }
+
+pub fn saturating_add_u32(a: u32, b: u32) -> u32 { saturating_add_unsigned_impl(a, b) }
+pub fn saturating_sub_u32(a: u32, b: u32) -> u32 { saturating_sub_unsigned_impl(a, b) }
+pub fn saturating_mul_u32(a: u32, b: u32) -> u32 { saturating_mul_unsigned_impl(a, b) }
+
+pub fn saturating_add_u64(a: u64, b: u64) -> u64 { saturating_add_unsigned_impl(a, b) }
+pub fn saturating_sub_u64(a: u64, b: u64) -> u64 { saturating_sub_unsigned_impl(a, b) }
+pub fn saturating_mul_u64(a: u64, b: u64) -> u64 { saturating_mul_unsigned_impl(a, b) }
+
+pub fn saturating_add_u128(a: u128, b: u128) -> u128 { saturating_add_unsigned_impl(a, b) }
+pub fn saturating_sub_u128(a: u128, b: u128) -> u128 { saturating_sub_unsigned_impl(a, b) }
+pub fn saturating_mul_u128(a: u128, b: u128) -> u128 { saturating_mul_unsigned_impl(a, b) }
+
+pub fn saturating_add_u256(a: u256, b: u256) -> u256 { saturating_add_unsigned_impl(a, b) }
+pub fn saturating_sub_u256(a: u256, b: u256) -> u256 { saturating_sub_unsigned_impl(a, b) }
+pub fn saturating_mul_u256(a: u256, b: u256) -> u256 { saturating_mul_unsigned_impl(a, b) }
+
+pub fn saturating_add_usize(a: usize, b: usize) -> usize { saturating_add_unsigned_impl(a, b) }
+pub fn saturating_sub_usize(a: usize, b: usize) -> usize { saturating_sub_unsigned_impl(a, b) }
+pub fn saturating_mul_usize(a: usize, b: usize) -> usize { saturating_mul_unsigned_impl(a, b) }
+
+// ---------- saturating signed wrappers ----------
+
+pub fn saturating_add_i8(a: i8, b: i8) -> i8 { saturating_add_signed_impl(a, b) }
+pub fn saturating_sub_i8(a: i8, b: i8) -> i8 { saturating_sub_signed_impl(a, b) }
+pub fn saturating_mul_i8(a: i8, b: i8) -> i8 { saturating_mul_signed_impl(a, b) }
+
+pub fn saturating_add_i16(a: i16, b: i16) -> i16 { saturating_add_signed_impl(a, b) }
+pub fn saturating_sub_i16(a: i16, b: i16) -> i16 { saturating_sub_signed_impl(a, b) }
+pub fn saturating_mul_i16(a: i16, b: i16) -> i16 { saturating_mul_signed_impl(a, b) }
+
+pub fn saturating_add_i32(a: i32, b: i32) -> i32 { saturating_add_signed_impl(a, b) }
+pub fn saturating_sub_i32(a: i32, b: i32) -> i32 { saturating_sub_signed_impl(a, b) }
+pub fn saturating_mul_i32(a: i32, b: i32) -> i32 { saturating_mul_signed_impl(a, b) }
+
+pub fn saturating_add_i64(a: i64, b: i64) -> i64 { saturating_add_signed_impl(a, b) }
+pub fn saturating_sub_i64(a: i64, b: i64) -> i64 { saturating_sub_signed_impl(a, b) }
+pub fn saturating_mul_i64(a: i64, b: i64) -> i64 { saturating_mul_signed_impl(a, b) }
+
+pub fn saturating_add_i128(a: i128, b: i128) -> i128 { saturating_add_signed_impl(a, b) }
+pub fn saturating_sub_i128(a: i128, b: i128) -> i128 { saturating_sub_signed_impl(a, b) }
+pub fn saturating_mul_i128(a: i128, b: i128) -> i128 { saturating_mul_signed_impl(a, b) }
+
+pub fn saturating_add_i256(a: i256, b: i256) -> i256 { saturating_add_signed_impl(a, b) }
+pub fn saturating_sub_i256(a: i256, b: i256) -> i256 { saturating_sub_signed_impl(a, b) }
+pub fn saturating_mul_i256(a: i256, b: i256) -> i256 { saturating_mul_signed_impl(a, b) }
+
+pub fn saturating_add_isize(a: isize, b: isize) -> isize { saturating_add_signed_impl(a, b) }
+pub fn saturating_sub_isize(a: isize, b: isize) -> isize { saturating_sub_signed_impl(a, b) }
+pub fn saturating_mul_isize(a: isize, b: isize) -> isize { saturating_mul_signed_impl(a, b) }

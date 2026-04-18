@@ -1,0 +1,370 @@
+---
+source: crates/language-server/src/functionality/goto.rs
+expression: snapshot
+input_file: test_files/goto_effects.fe
+---
+note: 
+   ┌─ goto_effects.fe:15:15
+   │
+15 │     fn caller(self) -> u256
+   │               ^^^^ -> goto_effects::Ctx
+
+note: 
+   ┌─ goto_effects.fe:16:18
+   │
+16 │     fn timestamp(self) -> u256
+   │                  ^^^^ -> goto_effects::Ctx
+
+note: 
+   ┌─ goto_effects.fe:20:15
+   │
+20 │     fn verify(self, data: u256) -> bool
+   │               ^^^^ -> goto_effects::Signer
+
+note: 
+   ┌─ goto_effects.fe:25:6
+   │
+25 │ impl Ctx for State {
+   │      ^^^ -> goto_effects::Ctx
+
+note: 
+   ┌─ goto_effects.fe:25:14
+   │
+25 │ impl Ctx for State {
+   │              ^^^^^ -> goto_effects::State
+
+note: 
+   ┌─ goto_effects.fe:26:15
+   │
+26 │     fn caller(self) -> u256 {
+   │               ^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:27:16
+   │
+27 │         return self.value
+   │                ^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:29:18
+   │
+29 │     fn timestamp(self) -> u256 {
+   │                  ^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:30:16
+   │
+30 │         return self.count
+   │                ^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:36:36
+   │
+36 │ fn get_caller() -> u256 uses (ctx: Ctx) {
+   │                                    ^^^ -> goto_effects::Ctx
+
+note: 
+   ┌─ goto_effects.fe:37:12
+   │
+37 │     return ctx.caller()
+   │            ^^^ -> local: ctx
+
+note: 
+   ┌─ goto_effects.fe:40:48
+   │
+40 │ fn log_and_get(x: u256) -> u256 uses (mut log: Logger) {
+   │                                                ^^^^^^ -> goto_effects::Logger
+
+note: 
+   ┌─ goto_effects.fe:41:5
+   │
+41 │     log.entries = log.entries + x
+   │     ^^^ -> local: Logger
+
+note: 
+   ┌─ goto_effects.fe:41:19
+   │
+41 │     log.entries = log.entries + x
+   │                   ^^^ -> local: Logger
+
+note: 
+   ┌─ goto_effects.fe:41:33
+   │
+41 │     log.entries = log.entries + x
+   │                                 ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:42:12
+   │
+42 │     return log.entries
+   │            ^^^ -> local: Logger
+
+note: 
+   ┌─ goto_effects.fe:45:45
+   │
+45 │ fn multi_effect(a: u256) -> u256 uses (ctx: Ctx, mut state: State) {
+   │                                             ^^^ -> goto_effects::Ctx
+
+note: 
+   ┌─ goto_effects.fe:45:61
+   │
+45 │ fn multi_effect(a: u256) -> u256 uses (ctx: Ctx, mut state: State) {
+   │                                                             ^^^^^ -> goto_effects::State
+
+note: 
+   ┌─ goto_effects.fe:46:9
+   │
+46 │     let c: u256 = ctx.caller()
+   │         ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:46:19
+   │
+46 │     let c: u256 = ctx.caller()
+   │                   ^^^ -> local: ctx
+
+note: 
+   ┌─ goto_effects.fe:47:5
+   │
+47 │     state.value = a + c
+   │     ^^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:47:19
+   │
+47 │     state.value = a + c
+   │                   ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:47:23
+   │
+47 │     state.value = a + c
+   │                       ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:48:12
+   │
+48 │     return state.value
+   │            ^^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:57:6
+   │
+57 │ impl Calculator {
+   │      ^^^^^^^^^^ -> goto_effects::Calculator
+
+note: 
+   ┌─ goto_effects.fe:58:12
+   │
+58 │     fn add(self, x: u256) -> u256 {
+   │            ^^^^ -> local: Calculator
+
+note: 
+   ┌─ goto_effects.fe:59:16
+   │
+59 │         return self.base + x
+   │                ^^^^ -> local: Calculator
+
+note: 
+   ┌─ goto_effects.fe:59:28
+   │
+59 │         return self.base + x
+   │                            ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:62:16
+   │
+62 │     fn compute(self, x: u256) -> u256 uses (ctx: Ctx) {
+   │                ^^^^ -> local: Calculator
+
+note: 
+   ┌─ goto_effects.fe:62:50
+   │
+62 │     fn compute(self, x: u256) -> u256 uses (ctx: Ctx) {
+   │                                                  ^^^ -> goto_effects::Ctx
+
+note: 
+   ┌─ goto_effects.fe:63:13
+   │
+63 │         let caller_val: u256 = ctx.caller()
+   │             ^^^^^^^^^^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:63:32
+   │
+63 │         let caller_val: u256 = ctx.caller()
+   │                                ^^^ -> local: ctx
+
+note: 
+   ┌─ goto_effects.fe:64:16
+   │
+64 │         return self.base + x + caller_val
+   │                ^^^^ -> local: Calculator
+
+note: 
+   ┌─ goto_effects.fe:64:28
+   │
+64 │         return self.base + x + caller_val
+   │                            ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:64:32
+   │
+64 │         return self.base + x + caller_val
+   │                                ^^^^^^^^^^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:71:5
+   │
+71 │     Add { x: u256 } -> u256,
+   │     ^^^ -> goto_effects::CalcMsg::Add
+
+note: 
+   ┌─ goto_effects.fe:72:5
+   │
+72 │     GetState -> u256,
+   │     ^^^^^^^^ -> goto_effects::CalcMsg::GetState
+
+note: 
+   ┌─ goto_effects.fe:75:40
+   │
+75 │ pub contract EffectContract uses (ctx: Ctx) {
+   │                                        ^^^ -> goto_effects::Ctx
+
+note: 
+   ┌─ goto_effects.fe:76:16
+   │
+76 │     mut state: State
+   │                ^^^^^ -> goto_effects::State
+
+note: 
+   ┌─ goto_effects.fe:77:14
+   │
+77 │     mut log: Logger
+   │              ^^^^^^ -> goto_effects::Logger
+
+note: 
+   ┌─ goto_effects.fe:79:33
+   │
+79 │     init(start: u256) uses (mut state) {
+   │                                 ^^^^^ -> goto_effects::EffectContract::state
+
+note: 
+   ┌─ goto_effects.fe:80:9
+   │
+80 │         state.value = start
+   │         ^^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:80:23
+   │
+80 │         state.value = start
+   │                       ^^^^^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:81:9
+   │
+81 │         state.count = 0
+   │         ^^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:84:10
+   │
+84 │     recv CalcMsg {
+   │          ^^^^^^^ -> goto_effects::CalcMsg
+
+note: 
+   ┌─ goto_effects.fe:85:9
+   │
+85 │         Add { x } -> u256 uses (ctx, mut state, mut log) {
+   │         ^^^ -> goto_effects::CalcMsg::Add
+
+note: 
+   ┌─ goto_effects.fe:85:15
+   │
+85 │         Add { x } -> u256 uses (ctx, mut state, mut log) {
+   │               ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:85:42
+   │
+85 │         Add { x } -> u256 uses (ctx, mut state, mut log) {
+   │                                          ^^^^^ -> goto_effects::EffectContract::state
+
+note: 
+   ┌─ goto_effects.fe:85:53
+   │
+85 │         Add { x } -> u256 uses (ctx, mut state, mut log) {
+   │                                                     ^^^ -> goto_effects::EffectContract::log
+
+note: 
+   ┌─ goto_effects.fe:86:17
+   │
+86 │             let c: u256 = ctx.caller()
+   │                 ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:86:27
+   │
+86 │             let c: u256 = ctx.caller()
+   │                           ^^^ -> local: Evm
+
+note: 
+   ┌─ goto_effects.fe:87:13
+   │
+87 │             state.value = state.value + x + c
+   │             ^^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:87:27
+   │
+87 │             state.value = state.value + x + c
+   │                           ^^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:87:41
+   │
+87 │             state.value = state.value + x + c
+   │                                         ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:87:45
+   │
+87 │             state.value = state.value + x + c
+   │                                             ^ -> local: u256
+
+note: 
+   ┌─ goto_effects.fe:88:13
+   │
+88 │             log.entries = log.entries + 1
+   │             ^^^ -> local: Logger
+
+note: 
+   ┌─ goto_effects.fe:88:27
+   │
+88 │             log.entries = log.entries + 1
+   │                           ^^^ -> local: Logger
+
+note: 
+   ┌─ goto_effects.fe:89:20
+   │
+89 │             return state.value
+   │                    ^^^^^ -> local: State
+
+note: 
+   ┌─ goto_effects.fe:92:9
+   │
+92 │         GetState -> u256 uses state {
+   │         ^^^^^^^^ -> goto_effects::CalcMsg::GetState
+
+note: 
+   ┌─ goto_effects.fe:92:31
+   │
+92 │         GetState -> u256 uses state {
+   │                               ^^^^^ -> goto_effects::EffectContract::state
+
+note: 
+   ┌─ goto_effects.fe:93:20
+   │
+93 │             return state.value
+   │                    ^^^^^ -> local: State

@@ -1,11 +1,12 @@
 //! Decision tree generation for efficient pattern matching compilation
 //! Based on "Compiling pattern matching to good decision trees"
 
+use super::pattern_analysis::{MatrixPat, MatrixPatKind};
 use super::pattern_analysis::{PatternMatrix, PatternRowVec, SigmaSet};
-use super::simplified_pattern::{ConstructorKind, SimplifiedPattern, SimplifiedPatternKind};
+use super::pattern_ir::{BindingRef, ConstructorKind};
 use super::ty_def::TyId;
 use crate::analysis::HirAnalysisDb;
-use crate::core::hir_def::{EnumVariant, IdentId};
+use crate::core::hir_def::EnumVariant;
 use crate::projection::{Projection as GenericProjection, ProjectionPath as GenericProjectionPath};
 use indexmap::IndexMap;
 
@@ -36,7 +37,7 @@ pub enum DecisionTree<'db> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeafNode<'db> {
     pub arm_index: usize,
-    pub bindings: IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>>,
+    pub bindings: IndexMap<BindingRef<'db>, ProjectionPath<'db>>,
 }
 
 impl<'db> LeafNode<'db> {
@@ -310,7 +311,7 @@ impl DecisionTreeBuilder {
 struct SimplifiedArm<'db> {
     pat_vec: PatternRowVec<'db>,
     body: usize,
-    binds: IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>>,
+    binds: IndexMap<BindingRef<'db>, ProjectionPath<'db>>,
 }
 
 impl<'db> SimplifiedArm<'db> {
@@ -324,17 +325,16 @@ impl<'db> SimplifiedArm<'db> {
         }
     }
 
-    fn pat(&self, col: usize) -> &SimplifiedPattern<'_> {
+    fn pat(&self, col: usize) -> &MatrixPat<'_> {
         &self.pat_vec.inner[col]
     }
 
     fn new_binds(
         &self,
         path: &ProjectionPath<'db>,
-    ) -> IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>> {
+    ) -> IndexMap<BindingRef<'db>, ProjectionPath<'db>> {
         let mut binds = self.binds.clone();
-        if let Some(SimplifiedPatternKind::WildCard(Some(bind))) =
-            self.pat_vec.head().map(|pat| &pat.kind)
+        if let Some(MatrixPatKind::WildCard(Some(bind))) = self.pat_vec.head().map(|pat| &pat.kind)
         {
             binds.entry(*bind).or_insert(path.clone());
         }
@@ -344,14 +344,12 @@ impl<'db> SimplifiedArm<'db> {
     fn finalize_binds(
         &self,
         paths: &[ProjectionPath<'db>],
-    ) -> IndexMap<(IdentId<'db>, usize), ProjectionPath<'db>> {
-        use super::simplified_pattern::SimplifiedPatternKind;
-
+    ) -> IndexMap<BindingRef<'db>, ProjectionPath<'db>> {
         let mut binds = self.binds.clone();
 
         // Extract bindings from current patterns
         for (pat, path) in self.pat_vec.inner.iter().zip(paths.iter()) {
-            if let SimplifiedPatternKind::WildCard(Some(bind)) = &pat.kind {
+            if let MatrixPatKind::WildCard(Some(bind)) = &pat.kind {
                 binds.entry(*bind).or_insert_with(|| path.clone());
             }
         }
@@ -389,7 +387,7 @@ impl<'db> SimplifiedArmMatrix<'db> {
         self.arms[0].pat_vec.len()
     }
 
-    fn pat(&self, row: usize, col: usize) -> &SimplifiedPattern<'_> {
+    fn pat(&self, row: usize, col: usize) -> &MatrixPat<'_> {
         self.arms[row].pat(col)
     }
 
@@ -422,7 +420,7 @@ impl<'db> SimplifiedArmMatrix<'db> {
             .pat_vec
             .inner
             .iter()
-            .all(SimplifiedPattern::is_wildcard)
+            .all(MatrixPat::is_wildcard)
     }
 
     fn swap(&mut self, col: usize) {
@@ -564,20 +562,20 @@ impl NecessityMatrix {
 }
 
 /// Generalize a pattern by removing bindings from constructors
-fn generalize_pattern<'db>(pat: &SimplifiedPattern<'db>) -> SimplifiedPattern<'db> {
+fn generalize_pattern<'db>(pat: &MatrixPat<'db>) -> MatrixPat<'db> {
     match &pat.kind {
-        SimplifiedPatternKind::WildCard(_) => pat.clone(),
+        MatrixPatKind::WildCard(_) => pat.clone(),
 
-        SimplifiedPatternKind::Constructor { kind, fields } => {
+        MatrixPatKind::Constructor { kind, fields } => {
             let fields = fields.iter().map(generalize_pattern).collect();
-            let kind = SimplifiedPatternKind::Constructor {
+            let kind = MatrixPatKind::Constructor {
                 kind: *kind,
                 fields,
             };
-            SimplifiedPattern::new(kind, pat.ty)
+            MatrixPat::new(kind, pat.ty)
         }
 
-        SimplifiedPatternKind::Or(pats) => {
+        MatrixPatKind::Or(pats) => {
             let mut gen_pats = vec![];
             for pat in pats {
                 let gen_pat = generalize_pattern(pat);
@@ -592,13 +590,9 @@ fn generalize_pattern<'db>(pat: &SimplifiedPattern<'db>) -> SimplifiedPattern<'d
             if gen_pats.len() == 1 {
                 gen_pats.pop().unwrap()
             } else {
-                SimplifiedPattern::new(SimplifiedPatternKind::Or(gen_pats), pat.ty)
+                MatrixPat::new(MatrixPatKind::Or(gen_pats), pat.ty)
             }
         }
-
-        // Errored patterns are treated as wildcards for the purpose of
-        // generalization; earlier phases have already emitted diagnostics.
-        SimplifiedPatternKind::Error => pat.clone(),
     }
 }
 

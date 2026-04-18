@@ -1,0 +1,144 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/enum_variant_contract.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_MyOption_0 = enum {
+    #None,
+    #Some(i256),
+};
+
+func private %abi_encode_u256__Evm_hef0af3106e109414__3af54274b2985741(v0.i256) {
+    block0:
+        mstore 0.i256 v0 i256;
+        evm_return 0.i256 32.i256;
+}
+
+func private %init__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        v1.i256 = sym_size &runtime__Evm_hef0af3106e109414__3af54274b2985741;
+        v2.i256 = sym_addr &runtime__Evm_hef0af3106e109414__3af54274b2985741;
+        evm_code_copy 0.i256 v2 v1;
+        evm_return 0.i256 v1;
+}
+
+func private %runtime__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        v2.i256 = evm_calldata_load 0.i256;
+        v4.i256 = shr 224.i256 v2;
+        v6.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_eq v4 1817627404.i256;
+        br v6 block1 block2;
+
+    block1:
+        v8.i256 = evm_calldata_load 4.i256;
+        v9.objref<@__fe_obj_MyOption_0> = obj.alloc @__fe_obj_MyOption_0;
+        enum.set_tag v9 #Some;
+        v10.objref<@__fe_obj_MyOption_0> = enum.assert_variant_ref v9 #Some;
+        v11.objref<i256> = enum.proj v10 #Some 0.i256;
+        obj.store v11 v8;
+        jump block6;
+
+    block2:
+        v14.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_eq v4 1163776883.i256;
+        br v14 block8 block9;
+
+    block3:
+        v16.objref<@__fe_obj_MyOption_0> = enum.assert_variant_ref v9 #Some;
+        v17.objref<i256> = enum.proj v16 #Some 0.i256;
+        v18.i256 = obj.load v17;
+        jump block4;
+
+    block4:
+        v19.i256 = phi (v18 block3) (0.i256 block5);
+        call %abi_encode_u256__Evm_hef0af3106e109414__3af54274b2985741 v19;
+        evm_invalid;
+
+    block5:
+        jump block4;
+
+    block6:
+        v21.enumtag(@__fe_obj_MyOption_0) = enum.get_tag v9;
+        br_table v21 block7 (1.enumtag(@__fe_obj_MyOption_0) block3) (0.enumtag(@__fe_obj_MyOption_0) block5);
+
+    block7:
+        evm_invalid;
+
+    block8:
+        v24.objref<@__fe_obj_MyOption_0> = obj.alloc @__fe_obj_MyOption_0;
+        enum.set_tag v24 #None;
+        jump block13;
+
+    block9:
+        v27.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_eq v4 3572425762.i256;
+        br v27 block15 block16;
+
+    block10:
+        v29.objref<@__fe_obj_MyOption_0> = enum.assert_variant_ref v24 #Some;
+        v30.objref<i256> = enum.proj v29 #Some 0.i256;
+        v31.i256 = obj.load v30;
+        jump block11;
+
+    block11:
+        v32.i256 = phi (v31 block10) (0.i256 block12);
+        call %abi_encode_u256__Evm_hef0af3106e109414__3af54274b2985741 v32;
+        evm_invalid;
+
+    block12:
+        jump block11;
+
+    block13:
+        v34.enumtag(@__fe_obj_MyOption_0) = enum.get_tag v24;
+        br_table v34 block14 (1.enumtag(@__fe_obj_MyOption_0) block10) (0.enumtag(@__fe_obj_MyOption_0) block12);
+
+    block14:
+        evm_invalid;
+
+    block15:
+        v35.i256 = evm_calldata_load 4.i256;
+        v36.objref<@__fe_obj_MyOption_0> = obj.alloc @__fe_obj_MyOption_0;
+        enum.set_tag v36 #Some;
+        v37.objref<@__fe_obj_MyOption_0> = enum.assert_variant_ref v36 #Some;
+        v38.objref<i256> = enum.proj v37 #Some 0.i256;
+        obj.store v38 v35;
+        jump block20;
+
+    block16:
+        evm_return 0.i256 0.i256;
+
+    block17:
+        jump block18;
+
+    block18:
+        v40.i256 = phi (1.i256 block17) (0.i256 block19);
+        call %abi_encode_u256__Evm_hef0af3106e109414__3af54274b2985741 v40;
+        evm_invalid;
+
+    block19:
+        jump block18;
+
+    block20:
+        v42.enumtag(@__fe_obj_MyOption_0) = enum.get_tag v36;
+        br_table v42 block21 (1.enumtag(@__fe_obj_MyOption_0) block17) (0.enumtag(@__fe_obj_MyOption_0) block19);
+
+    block21:
+        evm_invalid;
+}
+
+func private %u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = eq v0 v1;
+        return v2;
+}
+
+
+object @EnumContract {
+    section init {
+        entry %init__Evm_hef0af3106e109414__3af54274b2985741;
+        embed .runtime as &runtime__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+    section runtime {
+        entry %runtime__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+}

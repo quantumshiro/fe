@@ -10,8 +10,7 @@ use test_utils::snap_test;
 ///
 /// This test:
 /// 1. Parses and lowers a `.fe` file to HIR
-/// 2. Pretty-prints the desugared HIR (excluding contract definitions
-///    since they generate synthetic functions during lowering)
+/// 2. Pretty-prints the desugared HIR
 /// 3. Generates a snapshot of the desugared output
 /// 4. Re-parses and analyzes the output to verify it's valid Fe code
 #[dir_test(
@@ -25,10 +24,7 @@ fn hir_desugar(fixture: Fixture<&str>) {
     let file = db.new_stand_alone(file_name.into(), fixture.content());
     let top_mod = map_file_to_mod(&db, file);
 
-    // Print desugared output (skips contract definitions to avoid duplicates)
-    let output = top_mod.pretty_print_desugared(&db);
-
-    // Generate snapshot first (even if analysis fails)
+    let output = top_mod.pretty_print(&db);
     snap_test!(output, fixture.path());
 
     // Parse and analyze the printed output to verify it's valid Fe code

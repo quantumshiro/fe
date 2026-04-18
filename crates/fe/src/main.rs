@@ -1,40 +1,194 @@
 #![allow(clippy::print_stderr, clippy::print_stdout)]
+mod abi;
+mod build;
 mod check;
+mod cli;
+mod doc;
+#[cfg(feature = "doc-server")]
+mod doc_serve;
+pub(crate) mod extract;
+mod index_util;
+mod lsif;
+mod report;
+mod scip_index;
+mod test;
 #[cfg(not(target_arch = "wasm32"))]
 mod tree;
+mod workspace_ingot;
 
 use std::fs;
 
+use build::build;
 use camino::Utf8PathBuf;
 use check::check;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use fmt as fe_fmt;
 use similar::{ChangeTag, TextDiff};
 use walkdir::WalkDir;
 
+use crate::test::TestDebugOptions;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ColorChoice {
+    Auto,
+    Always,
+    Never,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TestDebug {
+    /// Print Yul output for any failing test.
+    Failures,
+    /// Print Yul output for all executed tests.
+    All,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BuildEmit {
+    Bytecode,
+    RuntimeBytecode,
+    Ir,
+    Abi,
+}
+
 #[derive(Debug, Clone, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Options {
+    /// Control colored output (auto, always, never).
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    pub color: ColorChoice,
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
-    Build,
+    /// Compile Fe code to EVM bytecode.
+    Build {
+        /// Path to an ingot/workspace directory (containing fe.toml), a workspace member name, or a .fe file.
+        #[arg(default_value_t = default_project_path())]
+        path: Utf8PathBuf,
+        /// Build artifacts for a single workspace ingot by member name.
+        ///
+        /// This requires targeting a workspace root path.
+        #[arg(short = 'i', long = "ingot", value_name = "INGOT")]
+        ingot: Option<String>,
+        /// Treat a `.fe` file target as standalone, even if it is inside an ingot.
+        #[arg(long)]
+        standalone: bool,
+        /// Build a specific contract by name (defaults to all contracts in the target).
+        #[arg(long)]
+        contract: Option<String>,
+        /// Code generation backend to use (yul or sonatina).
+        #[arg(long, default_value = "sonatina")]
+        backend: String,
+        /// Optimization level (0 = none, s = size-oriented, 2 = speed-oriented).
+        ///
+        /// Defaults to `2`.
+        ///
+        /// Note: with `--backend yul`, optimize levels `s`, `1`, and `2` are currently equivalent.
+        ///
+        /// `1` is currently an alias for `2`.
+        ///
+        /// - Sonatina backend: controls the optimization pipeline.
+        /// - Yul backend: controls whether solc optimization is enabled (0 = disabled, s/1/2 = enabled).
+        #[arg(
+            long = "optimize",
+            short = 'O',
+            value_name = "LEVEL",
+            value_parser = ["0", "1", "2", "s"]
+        )]
+        optimize: Option<String>,
+        /// solc binary to use (overrides FE_SOLC_PATH).
+        ///
+        /// Only used with `--backend yul` (ignored with a warning otherwise).
+        #[arg(long)]
+        solc: Option<String>,
+        /// Output directory for artifacts.
+        #[arg(long)]
+        out_dir: Option<Utf8PathBuf>,
+        /// Compilation profile to use when resolving profile-aware config.
+        #[arg(long, default_value = "release", value_name = "PROFILE")]
+        profile: String,
+        /// Comma-delimited artifacts to emit.
+        #[arg(
+            long,
+            short = 'e',
+            value_enum,
+            value_delimiter = ',',
+            default_value = "bytecode,runtime-bytecode,abi"
+        )]
+        emit: Vec<BuildEmit>,
+        /// Write a debugging report as a `.tar.gz` file (includes sources, IR, backend output, and bytecode artifacts).
+        #[arg(long)]
+        report: bool,
+        /// Output path for `--report` (must end with `.tar.gz`).
+        #[arg(
+            long,
+            value_name = "OUT",
+            default_value = "fe-build-report.tar.gz",
+            requires = "report"
+        )]
+        report_out: Utf8PathBuf,
+        /// Only write the report if `fe build` fails.
+        #[arg(long, requires = "report")]
+        report_failed_only: bool,
+        /// Use recovery mode when parsing.
+        #[arg(long, default_value = "false")]
+        recovery_mode: bool,
+    },
     Check {
         #[arg(default_value_t = default_project_path())]
         path: Utf8PathBuf,
-        #[arg(short, long)]
-        core: Option<Utf8PathBuf>,
+        /// Check a single workspace ingot by member name.
+        ///
+        /// This requires targeting a workspace root path.
+        #[arg(short = 'i', long = "ingot", value_name = "INGOT")]
+        ingot: Option<String>,
+        /// Treat a `.fe` file target as standalone, even if it is inside an ingot.
+        #[arg(long)]
+        standalone: bool,
+        /// Compilation profile to use when resolving profile-aware config.
+        #[arg(long, default_value = "dev", value_name = "PROFILE")]
+        profile: String,
         #[arg(long)]
         dump_mir: bool,
+        /// Write a debugging report as a `.tar.gz` file (includes sources and diagnostics).
         #[arg(long)]
-        emit_yul_min: bool,
+        report: bool,
+        /// Output path for `--report` (must end with `.tar.gz`).
+        #[arg(
+            long,
+            value_name = "OUT",
+            default_value = "fe-check-report.tar.gz",
+            requires = "report"
+        )]
+        report_out: Utf8PathBuf,
+        /// Only write the report if `fe check` fails.
+        #[arg(long, requires = "report")]
+        report_failed_only: bool,
+        /// Use recovery mode when parsing.
+        #[arg(long, default_value = "false")]
+        recovery_mode: bool,
+    },
+    /// Generate documentation for a Fe project
+    Doc {
+        /// Path to a .fe file or ingot directory
+        #[arg(default_value_t = default_project_path())]
+        path: Utf8PathBuf,
+        /// Output directory for generated docs
+        #[arg(short, long)]
+        output: Option<Utf8PathBuf>,
+        /// Include builtin ingots (core, std) in generated docs
+        #[arg(long)]
+        builtins: bool,
+        #[command(subcommand)]
+        action: Option<DocAction>,
     },
     #[cfg(not(target_arch = "wasm32"))]
     Tree {
+        #[arg(default_value_t = default_project_path())]
         path: Utf8PathBuf,
     },
     /// Format Fe source code.
@@ -45,11 +199,232 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
-    New,
+    /// Run Fe tests in a file or directory.
+    Test {
+        /// Path(s) to .fe files or directories containing ingots with tests.
+        ///
+        /// Supports glob patterns (e.g. `crates/fe/tests/fixtures/fe_test/*.fe`).
+        ///
+        /// When omitted, defaults to the current project root (like `cargo test`).
+        #[arg(value_name = "PATH", num_args = 0..)]
+        paths: Vec<Utf8PathBuf>,
+        /// Run tests for a single workspace ingot by member name
+        ///
+        /// This requires targeting a workspace root path.
+        #[arg(short = 'i', long = "ingot", value_name = "INGOT")]
+        ingot: Option<String>,
+        /// Optional filter pattern for test names.
+        #[arg(short, long)]
+        filter: Option<String>,
+        /// Number of suites to run in parallel (0 = auto).
+        #[arg(long, default_value_t = 8, value_name = "N")]
+        jobs: usize,
+        /// Run suites as grouped jobs instead of splitting into per-test jobs.
+        #[arg(long)]
+        grouped: bool,
+        /// Show event logs from test execution.
+        #[arg(long)]
+        show_logs: bool,
+        /// Print Yul output (`failures` or `all`) when using the Yul backend.
+        #[arg(
+            long,
+            value_enum,
+            num_args = 0..=1,
+            default_missing_value = "failures",
+            require_equals = true
+        )]
+        debug: Option<TestDebug>,
+        /// Backend to use for codegen (yul or sonatina).
+        #[arg(long, default_value = "sonatina")]
+        backend: String,
+        /// Compilation profile to use when resolving profile-aware config.
+        #[arg(long, default_value = "test", value_name = "PROFILE")]
+        profile: String,
+        /// solc binary to use (overrides FE_SOLC_PATH).
+        ///
+        /// Only used with `--backend yul` (ignored with a warning otherwise).
+        #[arg(long)]
+        solc: Option<String>,
+        /// Optimization level (0 = none, s = size-oriented, 1/2 = speed-oriented).
+        ///
+        /// Defaults to `2`.
+        ///
+        /// Note: with `--backend yul`, optimize levels `s`, `1`, and `2` are currently equivalent.
+        ///
+        /// `1` is currently an alias for `2`.
+        ///
+        /// - Sonatina backend: controls the optimization pipeline.
+        /// - Yul backend: controls whether solc optimization is enabled (0 = disabled, s/1/2 = enabled).
+        #[arg(
+            long = "optimize",
+            short = 'O',
+            value_name = "LEVEL",
+            value_parser = ["0", "1", "2", "s"]
+        )]
+        optimize: Option<String>,
+        /// Trace executed EVM opcodes while running tests.
+        #[arg(long)]
+        trace_evm: bool,
+        /// How many EVM steps to keep in the trace ring buffer.
+        #[arg(long, default_value_t = 200)]
+        trace_evm_keep: usize,
+        /// How many stack items to print per EVM step in traces.
+        #[arg(long, default_value_t = 16)]
+        trace_evm_stack_n: usize,
+        /// Directory to write debug outputs (traces) into.
+        #[arg(long)]
+        debug_dir: Option<Utf8PathBuf>,
+        /// Write a debugging report as a `.tar.gz` file (includes sources, IR, bytecode, traces).
+        #[arg(long)]
+        report: bool,
+        /// Output path for `--report` (must end with `.tar.gz`).
+        #[arg(
+            long,
+            value_name = "OUT",
+            default_value = "fe-test-report.tar.gz",
+            requires = "report"
+        )]
+        report_out: Utf8PathBuf,
+        /// Write one `.tar.gz` report per input suite into this directory.
+        ///
+        /// Useful when running a glob over many fixtures: each failing suite can be shared as a
+        /// standalone artifact.
+        #[arg(long, value_name = "DIR", conflicts_with = "report")]
+        report_dir: Option<Utf8PathBuf>,
+        /// When used with `--report-dir`, only write reports for suites that failed.
+        #[arg(long, requires = "report_dir")]
+        report_failed_only: bool,
+        /// Print a normalized call trace for each test (for backend comparison).
+        #[arg(long)]
+        call_trace: bool,
+        /// Use recovery mode when parsing.
+        #[arg(long, default_value = "false")]
+        recovery_mode: bool,
+    },
+    /// Create a new ingot or workspace.
+    New {
+        /// Path to create the ingot or workspace in.
+        path: Utf8PathBuf,
+        /// Create a workspace instead of a single ingot.
+        #[arg(long)]
+        workspace: bool,
+        /// Override the default inferred name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Override the default version (default: 0.1.0).
+        #[arg(long)]
+        version: Option<String>,
+    },
+    /// Generate shell completion scripts.
+    Completion {
+        /// Shell to generate completions for
+        #[arg(value_name = "shell")]
+        shell: clap_complete::Shell,
+    },
+    /// Generate LSIF index for code navigation.
+    Lsif {
+        /// Path to the ingot directory.
+        #[arg(default_value_t = default_project_path())]
+        path: Utf8PathBuf,
+        /// Output file (defaults to stdout).
+        #[arg(short, long)]
+        output: Option<Utf8PathBuf>,
+    },
+    /// Find the workspace or ingot root for a given path.
+    ///
+    /// Walks up from the given path (or cwd) looking for fe.toml files.
+    /// Prints the workspace root if found, otherwise the nearest ingot root.
+    /// Useful for editor integrations that need to determine the project root.
+    Root {
+        /// Path to start searching from (default: current directory).
+        path: Option<Utf8PathBuf>,
+    },
+    /// Start the Fe language server (LSP).
+    #[cfg(feature = "lsp")]
+    Lsp {
+        /// Set the workspace root directory.
+        ///
+        /// Used as the server's working directory. When the LSP client doesn't
+        /// send workspace folders, this directory is used as the fallback root
+        /// for ingot/workspace discovery.
+        #[arg(long)]
+        root: Option<Utf8PathBuf>,
+        /// Port for the combined doc+LSP server (default: auto-pick).
+        #[arg(long)]
+        port: Option<u16>,
+        /// Communication mode (default: stdio).
+        #[command(subcommand)]
+        mode: Option<LspMode>,
+    },
+    /// Generate SCIP index for code navigation.
+    Scip {
+        /// Path to the ingot directory.
+        #[arg(default_value_t = default_project_path())]
+        path: Utf8PathBuf,
+        /// Output file (defaults to index.scip).
+        #[arg(short, long, default_value = "index.scip")]
+        output: Utf8PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum DocAction {
+    /// Generate a documentation site (separate files by default).
+    ///
+    /// Default output: docs.json, index.html, fe-web.js, fe-highlight.css.
+    /// Use --self-contained for a single index.html with everything inlined.
+    Static {
+        /// Output a single self-contained index.html instead of separate files
+        #[arg(long)]
+        self_contained: bool,
+    },
+    /// Produce docs.json (DocIndex + SCIP data) for web components.
+    ///
+    /// The JSON can be consumed by <fe-code-block src="docs.json">,
+    /// <fe-doc-item src="docs.json">, and <fe-doc-viewer src="docs.json">.
+    Json {
+        /// Merge into an existing docs.json (deduplicates items, symbols, and files)
+        #[arg(long)]
+        merge: Option<Utf8PathBuf>,
+    },
+    /// Write the fe-web.js component bundle and fe-highlight.css.
+    ///
+    /// Does not require compiling a project — just outputs the reusable assets.
+    Bundle {
+        /// Also write fe-highlight.css alongside the bundle
+        #[arg(long)]
+        with_css: bool,
+    },
+    /// Generate Starlight-compatible markdown pages
+    Pages {
+        /// Base URL prefix for generated links
+        #[arg(long, default_value = "/api")]
+        base_url: String,
+    },
+    /// Start a live documentation server with hot reload
+    Serve {
+        /// Port for HTTP server
+        #[arg(long, default_value = "8080")]
+        port: u16,
+    },
+}
+
+#[cfg(feature = "lsp")]
+#[derive(Debug, Clone, Subcommand)]
+pub enum LspMode {
+    /// Start with TCP transport instead of stdio.
+    Tcp {
+        /// Port to listen on.
+        #[arg(short, long, default_value_t = 4242)]
+        port: u16,
+        /// Timeout in seconds to shut down if no clients are connected.
+        #[arg(short, long, default_value_t = 10)]
+        timeout: u64,
+    },
 }
 
 fn default_project_path() -> Utf8PathBuf {
-    driver::files::find_project_root().unwrap_or(Utf8PathBuf::from("."))
+    Utf8PathBuf::from(".")
 }
 
 fn main() {
@@ -57,25 +432,789 @@ fn main() {
     run(&opts);
 }
 pub fn run(opts: &Options) {
+    let preference = match opts.color {
+        ColorChoice::Auto => common::color::ColorPreference::Auto,
+        ColorChoice::Always => common::color::ColorPreference::Always,
+        ColorChoice::Never => common::color::ColorPreference::Never,
+    };
+    common::color::set_color_preference(preference);
+    match preference {
+        common::color::ColorPreference::Auto => colored::control::unset_override(),
+        common::color::ColorPreference::Always => colored::control::set_override(true),
+        common::color::ColorPreference::Never => colored::control::set_override(false),
+    }
+
     match &opts.command {
-        Command::Build => eprintln!("`fe build` doesn't work at the moment"),
+        Command::Build {
+            path,
+            ingot,
+            standalone,
+            contract,
+            backend,
+            optimize,
+            solc,
+            out_dir,
+            profile,
+            emit,
+            report,
+            report_out,
+            report_failed_only,
+            recovery_mode,
+        } => {
+            let backend_kind: codegen::BackendKind = match backend.parse() {
+                Ok(kind) => kind,
+                Err(err) => {
+                    eprintln!("Error: {err}");
+                    std::process::exit(1);
+                }
+            };
+            let opt_level = match effective_opt_level(backend_kind, optimize.as_deref()) {
+                Ok(level) => level,
+                Err(err) => {
+                    eprintln!("Error: {err}");
+                    std::process::exit(1);
+                }
+            };
+            if backend_kind != codegen::BackendKind::Yul && solc.is_some() {
+                eprintln!("Warning: --solc is only used with --backend yul; ignoring --solc");
+            }
+            build(
+                path,
+                ingot.as_deref(),
+                *standalone,
+                contract.as_deref(),
+                backend_kind,
+                opt_level,
+                emit,
+                out_dir.as_ref(),
+                profile,
+                solc.as_deref(),
+                (*report).then_some(report_out),
+                *report_failed_only,
+                *recovery_mode,
+            )
+        }
         Command::Check {
             path,
-            core: _,
+            ingot,
+            standalone,
+            profile,
             dump_mir,
-            emit_yul_min,
+            report,
+            report_out,
+            report_failed_only,
+            recovery_mode,
         } => {
-            //: TODO readd custom core
-            check(path, *dump_mir, *emit_yul_min);
+            match check(
+                path,
+                ingot.as_deref(),
+                *standalone,
+                profile,
+                *dump_mir,
+                (*report).then_some(report_out),
+                *report_failed_only,
+                *recovery_mode,
+            ) {
+                Ok(has_errors) => {
+                    if has_errors {
+                        std::process::exit(1);
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Error: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::Doc {
+            path,
+            output,
+            builtins,
+            action,
+        } => {
+            if let Some(DocAction::Bundle { with_css }) = action {
+                let output_dir = output.clone().unwrap_or_else(|| Utf8PathBuf::from("."));
+                doc::write_bundle(&output_dir.join("fe-web.js"));
+                if *with_css {
+                    doc::write_highlight_css(&output_dir.join("fe-highlight.css"));
+                }
+            } else {
+                doc::generate_docs(path, output.as_ref(), *builtins, action.as_ref());
+            }
         }
         #[cfg(not(target_arch = "wasm32"))]
         Command::Tree { path } => {
-            tree::print_tree(path);
+            if tree::print_tree(path) {
+                std::process::exit(1);
+            }
         }
         Command::Fmt { path, check } => {
             run_fmt(path.as_ref(), *check);
         }
-        Command::New => eprintln!("`fe new` doesn't work at the moment"),
+        Command::Test {
+            paths,
+            ingot,
+            filter,
+            jobs,
+            grouped,
+            show_logs,
+            debug: test_debug,
+            backend,
+            profile,
+            solc,
+            optimize,
+            trace_evm,
+            trace_evm_keep,
+            trace_evm_stack_n,
+            debug_dir,
+            report,
+            report_out,
+            report_dir,
+            report_failed_only,
+            call_trace,
+            recovery_mode,
+        } => {
+            let backend_kind: codegen::BackendKind = match backend.parse() {
+                Ok(kind) => kind,
+                Err(err) => {
+                    eprintln!("Error: {err}");
+                    std::process::exit(1);
+                }
+            };
+            let opt_level = match effective_opt_level(backend_kind, optimize.as_deref()) {
+                Ok(level) => level,
+                Err(err) => {
+                    eprintln!("Error: {err}");
+                    std::process::exit(1);
+                }
+            };
+            if backend_kind != codegen::BackendKind::Yul && solc.is_some() {
+                eprintln!("Warning: --solc is only used with --backend yul; ignoring --solc");
+            }
+            let debug = TestDebugOptions {
+                trace_evm: *trace_evm,
+                trace_evm_keep: *trace_evm_keep,
+                trace_evm_stack_n: *trace_evm_stack_n,
+                dump_yul_on_failure: matches!(test_debug, Some(TestDebug::Failures)),
+                dump_yul_for_all: matches!(test_debug, Some(TestDebug::All)),
+                debug_dir: debug_dir.clone(),
+            };
+            let paths = if paths.is_empty() {
+                vec![default_project_path()]
+            } else {
+                paths.clone()
+            };
+            let solc = if backend_kind == codegen::BackendKind::Yul {
+                solc.as_deref()
+            } else {
+                None
+            };
+            let yul_optimize =
+                backend_kind == codegen::BackendKind::Yul && opt_level.yul_optimize();
+            match test::run_tests(
+                &paths,
+                ingot.as_deref(),
+                filter.as_deref(),
+                *jobs,
+                *grouped,
+                *show_logs,
+                backend,
+                profile,
+                yul_optimize,
+                solc,
+                opt_level,
+                &debug,
+                (*report).then_some(report_out),
+                report_dir.as_ref(),
+                *report_failed_only,
+                *call_trace,
+                *recovery_mode,
+            ) {
+                Ok(has_failures) => {
+                    if has_failures {
+                        std::process::exit(1);
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Error: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Command::New {
+            path,
+            workspace,
+            name,
+            version,
+        } => {
+            if let Err(err) = cli::new::run(path, *workspace, name.as_deref(), version.as_deref()) {
+                eprintln!("Error: {err}");
+                std::process::exit(1);
+            }
+        }
+        Command::Completion { shell } => {
+            clap_complete::generate(
+                *shell,
+                &mut Options::command(),
+                "fe",
+                &mut std::io::stdout(),
+            );
+        }
+        Command::Root { path } => {
+            run_root(path.as_ref());
+        }
+        #[cfg(feature = "lsp")]
+        Command::Lsp { root, port, mode } => {
+            // If --root is explicit, use it. Otherwise, auto-discover from cwd.
+            let resolved_root = match root {
+                Some(r) => Some(r.canonicalize_utf8().unwrap_or_else(|e| {
+                    eprintln!("Error: invalid --root path {r}: {e}");
+                    std::process::exit(1);
+                })),
+                None => driver::files::find_project_root(),
+            };
+            if let Some(root) = &resolved_root {
+                std::env::set_current_dir(root.as_std_path()).unwrap_or_else(|e| {
+                    eprintln!("Error: cannot chdir to {root}: {e}");
+                    std::process::exit(1);
+                });
+            }
+
+            let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
+                eprintln!("Error creating async runtime: {e}");
+                std::process::exit(1);
+            });
+            rt.block_on(async {
+                unsafe {
+                    std::env::set_var("RUST_BACKTRACE", "full");
+                }
+                language_server::setup_panic_hook();
+                match mode {
+                    Some(LspMode::Tcp { port, timeout }) => {
+                        language_server::run_tcp_server(
+                            *port,
+                            std::time::Duration::from_secs(*timeout),
+                        )
+                        .await;
+                    }
+                    None => {
+                        run_lsp_with_combined_server(resolved_root, *port).await;
+                    }
+                }
+            });
+        }
+        Command::Lsif { path, output } => {
+            run_lsif(path, output.as_ref());
+        }
+        Command::Scip { path, output } => {
+            run_scip(path, output);
+        }
+    }
+}
+
+#[cfg(feature = "lsp")]
+async fn run_lsp_with_combined_server(resolved_root: Option<Utf8PathBuf>, port: Option<u16>) {
+    use std::sync::Arc;
+    use tokio::net::TcpListener;
+
+    // Bind the combined server listener
+    let addr = format!("127.0.0.1:{}", port.unwrap_or(0));
+    let listener = match TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Warning: could not bind combined server: {e}");
+            language_server::run_stdio_server(None).await;
+            return;
+        }
+    };
+    let actual_port = listener.local_addr().unwrap().port();
+
+    // Generate doc HTML for the workspace (best-effort)
+    let doc_html = generate_lsp_doc_html(resolved_root.as_ref());
+
+    eprintln!("Documentation: http://127.0.0.1:{actual_port}");
+
+    // Write .fe-lsp.json for discovery
+    let workspace_root_path = resolved_root
+        .as_ref()
+        .map(|r| r.as_std_path().to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    // Inspect any existing .fe-lsp.json. This is purely diagnostic: we
+    // always proceed with writing our own, since the file is a discovery
+    // pointer, not a lock. The outcome is still important for triage:
+    // stale files mean a previous crash, sibling-live means Zed respawned
+    // us without shutting the old instance down, and a root-mismatch
+    // means we're fighting with another instance over workspace root
+    // detection.
+    //
+    // These diagnostics are emitted via `eprintln!` rather than `tracing`
+    // because the tracing subscriber isn't installed until later, inside
+    // `language_server::run_stdio_server` -> `setup_default_subscriber`.
+    // Zed captures stderr for its LSP log panel, so users still see the
+    // messages in the same place they'd see a `tracing::warn!`.
+    let workspace_root_display = workspace_root_path.display();
+    let our_pid = std::process::id();
+    match doc::ExistingInstanceCheck::inspect(&workspace_root_path) {
+        doc::ExistingInstanceCheck::None => {
+            // Nothing to report in the common case; keep startup quiet.
+        }
+        doc::ExistingInstanceCheck::StaleFound {
+            stale_pid,
+            recorded_workspace_root,
+        } => {
+            eprintln!(
+                "fe-language-server: removing stale .fe-lsp.json at {workspace_root_display} \
+                 (previous pid {stale_pid} not alive; recorded workspace_root={recorded_workspace_root:?}). \
+                 Previous instance likely crashed without cleanup."
+            );
+            doc::LspServerInfo::remove_from_workspace(&workspace_root_path);
+        }
+        doc::ExistingInstanceCheck::SiblingLive {
+            sibling_pid,
+            sibling_docs_url,
+        } => {
+            eprintln!(
+                "fe-language-server: another fe lsp instance (pid {sibling_pid}) is already \
+                 running for workspace {workspace_root_display} (sibling_docs_url={sibling_docs_url:?}); \
+                 overwriting .fe-lsp.json with our info (pid {our_pid}). Zed may have respawned \
+                 us before the previous instance finished shutting down."
+            );
+        }
+        doc::ExistingInstanceCheck::RootMismatch {
+            other_pid,
+            other_workspace_root,
+            our_workspace_root,
+        } => {
+            eprintln!(
+                "fe-language-server: ROOT MISMATCH: existing .fe-lsp.json (pid {other_pid}) refers \
+                 to workspace_root={other_workspace_root:?}, but we detected {our_workspace_root}. \
+                 This usually means either a workspace-root detection bug or a pid-reuse false \
+                 positive in is_alive(). To triage, check what the two processes think their \
+                 workspace_folders are in the initialize params. Our pid is {our_pid}."
+            );
+        }
+        doc::ExistingInstanceCheck::Malformed => {
+            eprintln!(
+                "fe-language-server: removing malformed .fe-lsp.json at {workspace_root_display} \
+                 (parse failed; probably a leftover from an older fe version)."
+            );
+            doc::LspServerInfo::remove_from_workspace(&workspace_root_path);
+        }
+    }
+
+    let server_info = doc::LspServerInfo {
+        pid: our_pid,
+        port: Some(actual_port),
+        workspace_root: Some(workspace_root_path.display().to_string()),
+        docs_url: Some(format!("http://127.0.0.1:{actual_port}")),
+    };
+    if let Err(e) = server_info.write_to_workspace(&workspace_root_path) {
+        eprintln!(
+            "fe-language-server: could not write .fe-lsp.json at {workspace_root_display}: {e}"
+        );
+    }
+
+    // Create the doc regeneration closure for live reload.
+    // Uses a read-only salsa snapshot — the Backend's db is already initialized
+    // with all ingots/files, so we enumerate from the snapshot's dependency graph
+    // and workspace rather than re-discovering from disk.
+    let doc_regenerate_fn: language_server::DocRegenerateFn = Arc::new(regenerate_doc_data_from_db);
+
+    let config = language_server::CombinedServerConfig {
+        listener,
+        doc_html,
+        docs_url: Some(format!("http://127.0.0.1:{actual_port}")),
+        doc_regenerate_fn: Some(doc_regenerate_fn),
+    };
+
+    language_server::run_stdio_server(Some(config)).await;
+
+    // Cleanup on exit
+    doc::LspServerInfo::remove_from_workspace(&workspace_root_path);
+}
+
+/// Initial doc data generation from a workspace root.
+///
+/// Discovers ingots via `discover_and_init` (requires `&mut`), then delegates
+/// to `build_doc_index` for the actual extraction. Used at LSP startup.
+#[cfg(feature = "lsp")]
+fn regenerate_doc_data(
+    db: &mut driver::DriverDataBase,
+    workspace_root: &camino::Utf8Path,
+) -> (String, Option<String>) {
+    let root_path = workspace_root
+        .canonicalize_utf8()
+        .unwrap_or_else(|_| workspace_root.to_owned());
+
+    if let Ok(root_url) = url::Url::from_directory_path(&root_path) {
+        let discovered = driver::discover_and_init(db, &root_url);
+        build_doc_index(db, &discovered.ingot_urls, &discovered.standalone_files)
+    } else {
+        let json = serde_json::to_string(&fe_web::model::DocIndex::new()).unwrap();
+        (json, None)
+    }
+}
+
+/// Regenerate doc data from an already-initialized database snapshot.
+///
+/// Enumerates ingots from the dependency graph and standalone files from the
+/// workspace — no mutation needed. Used for live reload on save.
+#[cfg(feature = "lsp")]
+pub fn regenerate_doc_data_from_db(db: &driver::DriverDataBase) -> (String, Option<String>) {
+    use common::InputDb;
+
+    let builtin_core_url = url::Url::parse(common::stdlib::BUILTIN_CORE_BASE_URL).unwrap();
+    let builtin_std_url = url::Url::parse(common::stdlib::BUILTIN_STD_BASE_URL).unwrap();
+
+    // Get non-builtin ingot URLs from the dependency graph
+    let ingot_urls: Vec<url::Url> = db
+        .dependency_graph()
+        .petgraph(db)
+        .node_weights()
+        .filter(|u| *u != &builtin_core_url && *u != &builtin_std_url)
+        .cloned()
+        .collect();
+
+    // Find standalone files (in workspace but not under any ingot)
+    let standalone_files: Vec<url::Url> = db
+        .workspace()
+        .all_files(db)
+        .iter()
+        .filter_map(|(url, _file)| {
+            if db.workspace().containing_ingot(db, url.clone()).is_none() {
+                Some(url)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    build_doc_index(db, &ingot_urls, &standalone_files)
+}
+
+/// Core doc extraction logic shared by initial generation and live reload.
+///
+/// Takes a read-only db reference and pre-computed URL lists.
+#[cfg(feature = "lsp")]
+fn build_doc_index(
+    db: &driver::DriverDataBase,
+    ingot_urls: &[url::Url],
+    standalone_file_urls: &[url::Url],
+) -> (String, Option<String>) {
+    use crate::extract::DocExtractor;
+    use common::InputDb;
+    use common::stdlib::{HasBuiltinCore, HasBuiltinStd};
+    use hir::hir_def::HirIngot;
+
+    let mut index = fe_web::model::DocIndex::new();
+    let mut scip_json: Option<String> = None;
+
+    let extractor = DocExtractor::new(db);
+
+    // Extract docs from each ingot
+    for ingot_url in ingot_urls {
+        let Some(ingot) = db.workspace().containing_ingot(db, ingot_url.clone()) else {
+            continue;
+        };
+        for top_mod in ingot.all_modules(db) {
+            for item in top_mod.children_nested(db) {
+                if let Some(doc_item) = extractor.extract_item_for_ingot(item, ingot) {
+                    index.items.push(doc_item);
+                }
+            }
+        }
+        let root_mod = ingot.root_mod(db);
+        index
+            .modules
+            .extend(extractor.build_module_tree_for_ingot(ingot, root_mod));
+        let trait_impl_links = extractor.extract_trait_impl_links(ingot);
+        index.link_trait_impls(trait_impl_links);
+    }
+
+    // Extract docs from standalone .fe files
+    for file_url in standalone_file_urls {
+        if let Some(file) = db.workspace().get(db, file_url) {
+            let top_mod = db.top_mod(file);
+            for item in top_mod.children_nested(db) {
+                if let Some(doc_item) = extractor.extract_item(item) {
+                    index.items.push(doc_item);
+                }
+            }
+            index
+                .modules
+                .push(extractor.build_standalone_module_tree(top_mod));
+        }
+    }
+
+    // Include builtin libraries (core, std)
+    let existing: std::collections::HashSet<_> =
+        index.modules.iter().map(|m| m.name.clone()).collect();
+    for (label, builtin) in [("core", db.builtin_core()), ("std", db.builtin_std())] {
+        if existing.contains(label) {
+            continue;
+        }
+        for top_mod in builtin.all_modules(db) {
+            for item in top_mod.children_nested(db) {
+                if let Some(doc_item) = extractor.extract_item_for_ingot(item, builtin) {
+                    index.items.push(doc_item);
+                }
+            }
+        }
+        let root_mod = builtin.root_mod(db);
+        index
+            .builtin_modules
+            .extend(extractor.build_module_tree_for_ingot(builtin, root_mod));
+        let trait_impl_links = extractor.extract_trait_impl_links(builtin);
+        index.link_trait_impls(trait_impl_links);
+    }
+
+    // Generate SCIP data
+    let mut combined_scip = scip::types::Index::default();
+    let mut combined_doc_urls = std::collections::HashMap::new();
+    let mut any_scip = false;
+
+    let builtin_urls = [
+        url::Url::parse(common::stdlib::BUILTIN_CORE_BASE_URL).unwrap(),
+        url::Url::parse(common::stdlib::BUILTIN_STD_BASE_URL).unwrap(),
+    ];
+    let all_scip_urls: Vec<_> = ingot_urls.iter().chain(builtin_urls.iter()).collect();
+
+    for ingot_url in &all_scip_urls {
+        match crate::scip_index::generate_scip(db, ingot_url) {
+            Ok(mut result) => {
+                if ingot_url.scheme() == "file" {
+                    if let Some(project_root) = ingot_url
+                        .to_file_path()
+                        .ok()
+                        .and_then(|p| camino::Utf8PathBuf::from_path_buf(p).ok())
+                    {
+                        crate::scip_index::enrich_signatures(
+                            db,
+                            &project_root,
+                            &mut index,
+                            &mut result.index,
+                        );
+                    }
+                } else {
+                    crate::scip_index::enrich_signatures_with_base(
+                        db,
+                        camino::Utf8Path::new("/"),
+                        Some(ingot_url),
+                        &mut index,
+                        &mut result.index,
+                    );
+                }
+                combined_scip.documents.extend(result.index.documents);
+                combined_doc_urls.extend(result.doc_urls);
+                any_scip = true;
+            }
+            Err(e) => {
+                eprintln!("Warning: SCIP generation failed for {ingot_url}: {e}");
+            }
+        }
+    }
+    if any_scip {
+        scip_json = Some(crate::scip_index::scip_to_json_data(
+            &combined_scip,
+            &combined_doc_urls,
+        ));
+    }
+
+    // Serialize DocIndex with HTML bodies injected
+    let mut value = serde_json::to_value(&index).expect("serialize DocIndex");
+    fe_web::static_site::inject_html_bodies(&mut value);
+    let json = serde_json::to_string(&value).expect("serialize JSON");
+
+    (json, scip_json)
+}
+
+/// Generate the doc HTML for the combined server.
+///
+/// Uses `discover_context` (same discovery the LS uses) to find all ingots
+/// under the workspace root, so it works for:
+/// - Single ingots (directory with fe.toml)
+/// - Workspaces (fe.toml with [workspace] members)
+/// - Directories containing multiple ingots without a root fe.toml
+/// - Sentinel workspaces with members=[] (discovers child ingots)
+#[cfg(feature = "lsp")]
+fn generate_lsp_doc_html(resolved_root: Option<&Utf8PathBuf>) -> String {
+    let root_path = resolved_root
+        .cloned()
+        .unwrap_or_else(|| Utf8PathBuf::from("."));
+
+    let mut db = driver::DriverDataBase::default();
+    let (json, scip_json) = regenerate_doc_data(&mut db, &root_path);
+
+    // Parse back the index to get the title
+    let index: fe_web::model::DocIndex =
+        serde_json::from_str(&json).unwrap_or_else(|_| fe_web::model::DocIndex::new());
+    let title = if let Some(root) = index.modules.first() {
+        format!("{} — Fe Documentation", root.name)
+    } else {
+        "Fe Documentation".to_string()
+    };
+    let mut html = fe_web::assets::html_shell_full(&title, &json, scip_json.as_deref(), None);
+
+    // Append auto-connect script
+    let connect_script =
+        r#"<script>window.FE_LSP = connectLsp(`${location.protocol==='https:'?'wss:':'ws:'}://${location.host}/lsp`);</script>"#.to_string();
+    if let Some(pos) = html.rfind("</body>") {
+        html.insert_str(pos, &connect_script);
+    }
+
+    html
+}
+
+fn effective_opt_level(
+    backend_kind: codegen::BackendKind,
+    optimize: Option<&str>,
+) -> Result<codegen::OptLevel, String> {
+    let level: codegen::OptLevel = optimize.unwrap_or("2").parse()?;
+
+    if backend_kind == codegen::BackendKind::Yul
+        && let Some(optimize @ ("1" | "2")) = optimize
+    {
+        eprintln!(
+            "Warning: --optimize {optimize} has no additional effect for --backend yul (same as s)"
+        );
+    }
+
+    Ok(level)
+}
+
+fn run_lsif(path: &Utf8PathBuf, output: Option<&Utf8PathBuf>) {
+    use driver::DriverDataBase;
+
+    let mut db = DriverDataBase::default();
+
+    let canonical_path = match path.canonicalize_utf8() {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("Error: Invalid or non-existent directory path: {path}");
+            std::process::exit(1);
+        }
+    };
+
+    let ingot_url = match url::Url::from_directory_path(canonical_path.as_str()) {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Error: Invalid directory path: {path}");
+            std::process::exit(1);
+        }
+    };
+
+    let had_init_diagnostics = driver::init_ingot(&mut db, &ingot_url);
+    if had_init_diagnostics {
+        eprintln!("Warning: ingot had initialization diagnostics");
+    }
+
+    let result = if let Some(output_path) = output {
+        let file = match std::fs::File::create(output_path.as_std_path()) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Error creating output file: {e}");
+                std::process::exit(1);
+            }
+        };
+        let writer = std::io::BufWriter::new(file);
+        lsif::generate_lsif(&mut db, &ingot_url, writer)
+    } else {
+        let stdout = std::io::stdout().lock();
+        let writer = std::io::BufWriter::new(stdout);
+        lsif::generate_lsif(&mut db, &ingot_url, writer)
+    };
+
+    if let Err(e) = result {
+        eprintln!("Error generating LSIF: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run_scip(path: &Utf8PathBuf, output: &Utf8PathBuf) {
+    use driver::DriverDataBase;
+
+    let mut db = DriverDataBase::default();
+
+    let canonical_path = match path.canonicalize_utf8() {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("Error: Invalid or non-existent directory path: {path}");
+            std::process::exit(1);
+        }
+    };
+
+    let ingot_url = match url::Url::from_directory_path(canonical_path.as_str()) {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Error: Invalid directory path: {path}");
+            std::process::exit(1);
+        }
+    };
+
+    let had_init_diagnostics = driver::init_ingot(&mut db, &ingot_url);
+    if had_init_diagnostics {
+        eprintln!("Warning: ingot had initialization diagnostics");
+    }
+
+    let index = match scip_index::generate_scip(&db, &ingot_url) {
+        Ok(index) => index,
+        Err(e) => {
+            eprintln!("Error generating SCIP: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = scip::write_message_to_file(output.as_std_path(), index.index) {
+        eprintln!("Error writing SCIP file: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run_root(path: Option<&Utf8PathBuf>) {
+    use resolver::workspace::discover_context;
+
+    let start = match path {
+        Some(p) => p.canonicalize_utf8().unwrap_or_else(|e| {
+            eprintln!("Error: invalid path {p}: {e}");
+            std::process::exit(1);
+        }),
+        None => Utf8PathBuf::from_path_buf(
+            std::env::current_dir().expect("Unable to get current directory"),
+        )
+        .expect("Expected utf8 path"),
+    };
+
+    let start_url = url::Url::from_directory_path(start.as_str()).unwrap_or_else(|_| {
+        // Maybe it's a file, try the parent directory
+        let parent = start.parent().unwrap_or(&start);
+        url::Url::from_directory_path(parent.as_str()).unwrap_or_else(|_| {
+            eprintln!("Error: invalid directory path: {start}");
+            std::process::exit(1);
+        })
+    });
+
+    match discover_context(&start_url, false) {
+        Ok(discovery) => {
+            if let Some(workspace_root) = &discovery.workspace_root
+                && let Ok(path) = workspace_root.to_file_path()
+            {
+                println!("{}", path.display());
+                return;
+            }
+            if let Some(ingot_root) = discovery.ingot_roots.first()
+                && let Ok(path) = ingot_root.to_file_path()
+            {
+                println!("{}", path.display());
+                return;
+            }
+            eprintln!("No fe.toml found in {start} or any parent directory");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error discovering project root: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -87,7 +1226,7 @@ fn run_fmt(path: Option<&Utf8PathBuf>, check: bool) {
         Some(p) if p.is_file() => vec![p.clone()],
         Some(p) if p.is_dir() => collect_fe_files(p),
         Some(p) => {
-            eprintln!("Path does not exist: {}", p);
+            eprintln!("Error: Path does not exist: {p}");
             std::process::exit(1);
         }
         None => {
@@ -96,7 +1235,7 @@ fn run_fmt(path: Option<&Utf8PathBuf>, check: bool) {
                 Some(root) => collect_fe_files(&root.join("src")),
                 None => {
                     eprintln!(
-                        "No fe.toml found. Run from a Fe project directory or specify a path."
+                        "Error: No fe.toml found. Run from a Fe project directory or specify a path."
                     );
                     std::process::exit(1);
                 }
@@ -105,7 +1244,7 @@ fn run_fmt(path: Option<&Utf8PathBuf>, check: bool) {
     };
 
     if files.is_empty() {
-        eprintln!("No .fe files found");
+        eprintln!("Error: No .fe files found");
         std::process::exit(1);
     }
 
@@ -125,13 +1264,13 @@ fn run_fmt(path: Option<&Utf8PathBuf>, check: bool) {
                 }
             }
             FormatResult::ParseError(errs) => {
-                eprintln!("Skipping {} (parse errors):", file);
+                eprintln!("Warning: Skipping {file} (parse errors):");
                 for err in errs {
                     eprintln!("  {}", err.msg());
                 }
             }
             FormatResult::IoError(err) => {
-                eprintln!("Error processing {}: {}", file, err);
+                eprintln!("Error: Failed to process {file}: {err}");
                 error_count += 1;
             }
         }

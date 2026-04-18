@@ -1,0 +1,5 @@
+#[event()]
+struct Event {
+    #[indexed()]
+    topic: u256
+}

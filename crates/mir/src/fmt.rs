@@ -25,6 +25,10 @@ pub fn format_module(db: &dyn HirAnalysisDb, module: &MirModule<'_>) -> String {
 /// Format a single MIR function.
 pub fn format_function(db: &dyn HirAnalysisDb, func: &MirFunction<'_>) -> String {
     let mut out = String::new();
+    if let Some(hint) = func.inline_hint {
+        out.push_str(hint.pretty_print());
+        out.push('\n');
+    }
 
     // Function signature with parameters
     let params: Vec<String> = func
@@ -35,11 +39,35 @@ pub fn format_function(db: &dyn HirAnalysisDb, func: &MirFunction<'_>) -> String
         .map(|local| format_local_decl(db, &func.body, *local))
         .collect();
     let params_str = params.join(", ");
-    let return_ty = func.func.return_ty(db).pretty_print(db);
+    let return_ty = func.ret_ty.pretty_print(db);
     out.push_str(&format!(
         "fn {}({}) -> {}:\n",
         func.symbol_name, params_str, return_ty
     ));
+    if func.runtime_abi.value_params.iter().any(|visible| !visible)
+        || func
+            .runtime_abi
+            .effect_params
+            .iter()
+            .any(|visible| !visible)
+    {
+        let runtime_value_params = func
+            .runtime_param_locals()
+            .into_iter()
+            .map(|local| format_local_decl(db, &func.body, local))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let runtime_effect_params = func
+            .runtime_effect_param_locals()
+            .into_iter()
+            .map(|local| format_local_decl(db, &func.body, local))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "  ; runtime_abi values=[{}] effects=[{}]\n",
+            runtime_value_params, runtime_effect_params
+        ));
+    }
 
     let mut defined_locals: HashSet<LocalId> = func
         .body
@@ -60,7 +88,7 @@ pub fn format_function(db: &dyn HirAnalysisDb, func: &MirFunction<'_>) -> String
         }
         out.push_str(&format!(
             "    {}\n",
-            format_terminator(&func.body, &block.terminator)
+            format_terminator(db, &func.body, &block.terminator)
         ));
     }
 
@@ -75,25 +103,25 @@ fn format_local_decl(db: &dyn HirAnalysisDb, body: &MirBody<'_>, local: LocalId)
 }
 
 /// Format a single MIR instruction.
-pub fn format_inst(_db: &dyn HirAnalysisDb, body: &MirBody<'_>, inst: &MirInst<'_>) -> String {
+pub fn format_inst(db: &dyn HirAnalysisDb, body: &MirBody<'_>, inst: &MirInst<'_>) -> String {
     match inst {
         MirInst::Assign { dest, rvalue, .. } => {
-            let rendered = format_rvalue(body, rvalue);
+            let rendered = format_rvalue(db, body, rvalue);
             if let Some(dest) = dest {
                 format!("{} = {}", format_local(*dest), rendered)
             } else {
                 format!("eval {rendered}")
             }
         }
-        MirInst::BindValue { value } => format!("bind {}", format_value(body, *value)),
-        MirInst::Store { place, value } => {
+        MirInst::BindValue { value, .. } => format!("bind {}", format_value(body, *value)),
+        MirInst::Store { place, value, .. } => {
             format!(
                 "store {} = {}",
                 format_place(body, place),
                 format_value(body, *value)
             )
         }
-        MirInst::InitAggregate { place, inits } => {
+        MirInst::InitAggregate { place, inits, .. } => {
             let inits: Vec<String> = inits
                 .iter()
                 .map(|(path, value)| {
@@ -107,20 +135,26 @@ pub fn format_inst(_db: &dyn HirAnalysisDb, body: &MirBody<'_>, inst: &MirInst<'
                 inits.join(", ")
             )
         }
-        MirInst::SetDiscriminant { place, variant } => {
+        MirInst::SetDiscriminant { place, variant, .. } => {
             format!("set_discr {} = {}", format_place(body, place), variant.idx)
         }
     }
 }
 
 /// Format a MIR terminator.
-pub fn format_terminator(body: &MirBody<'_>, term: &Terminator<'_>) -> String {
+pub fn format_terminator(
+    db: &dyn HirAnalysisDb,
+    body: &MirBody<'_>,
+    term: &Terminator<'_>,
+) -> String {
     match term {
-        Terminator::Return(Some(val)) => format!("ret {}", format_value(body, *val)),
-        Terminator::Return(None) => "ret".into(),
-        Terminator::TerminatingCall(call) => match call {
+        Terminator::Return {
+            value: Some(val), ..
+        } => format!("ret {}", format_value(body, *val)),
+        Terminator::Return { value: None, .. } => "ret".into(),
+        Terminator::TerminatingCall { call, .. } => match call {
             TerminatingCall::Call(call) => {
-                let rendered = format_call(body, call);
+                let rendered = format_call(db, body, call);
                 format!("terminate {rendered}")
             }
             TerminatingCall::Intrinsic { op, args } => {
@@ -128,11 +162,12 @@ pub fn format_terminator(body: &MirBody<'_>, term: &Terminator<'_>) -> String {
                 format!("terminate {}({})", format_intrinsic(*op), args.join(", "))
             }
         },
-        Terminator::Goto { target } => format!("jmp bb{}", target.index()),
+        Terminator::Goto { target, .. } => format!("jmp bb{}", target.index()),
         Terminator::Branch {
             cond,
             then_bb,
             else_bb,
+            ..
         } => format!(
             "br {} bb{} bb{}",
             format_value(body, *cond),
@@ -143,6 +178,7 @@ pub fn format_terminator(body: &MirBody<'_>, term: &Terminator<'_>) -> String {
             discr,
             targets,
             default,
+            ..
         } => {
             let arms: Vec<String> = targets
                 .iter()
@@ -155,26 +191,43 @@ pub fn format_terminator(body: &MirBody<'_>, term: &Terminator<'_>) -> String {
                 default.index()
             )
         }
-        Terminator::Unreachable => "unreachable".into(),
+        Terminator::Unreachable { .. } => "unreachable".into(),
     }
 }
 
-fn format_call(body: &MirBody<'_>, call: &CallOrigin<'_>) -> String {
-    let name = call.resolved_name.as_deref().unwrap_or("<unresolved>");
+fn format_call(db: &dyn HirAnalysisDb, body: &MirBody<'_>, call: &CallOrigin<'_>) -> String {
+    let name = if let Some(checked) = call.checked_intrinsic {
+        format!(
+            "{}<{}>",
+            checked.op.helper_symbol_prefix(),
+            checked.ty.pretty_print(db)
+        )
+    } else {
+        call.resolved_name
+            .clone()
+            .or_else(|| match call.target.as_ref()? {
+                crate::ir::CallTargetRef::Hir(target) => target
+                    .callable_def
+                    .name(db)
+                    .map(|name| name.data(db).to_string()),
+                crate::ir::CallTargetRef::Synthetic(id) => Some(format!("{id:?}")),
+            })
+            .unwrap_or_else(|| "<unresolved>".to_string())
+    };
     let args: Vec<String> = call
         .args
         .iter()
         .chain(call.effect_args.iter())
         .map(|arg| format_value(body, *arg))
         .collect();
-    format!("{}({})", name, args.join(", "))
+    format!("{name}({})", args.join(", "))
 }
 
-fn format_rvalue(body: &MirBody<'_>, rvalue: &Rvalue<'_>) -> String {
+fn format_rvalue(db: &dyn HirAnalysisDb, body: &MirBody<'_>, rvalue: &Rvalue<'_>) -> String {
     match rvalue {
         Rvalue::ZeroInit => "0".into(),
         Rvalue::Value(value) => format_value(body, *value),
-        Rvalue::Call(call) => format_call(body, call),
+        Rvalue::Call(call) => format_call(db, body, call),
         Rvalue::Intrinsic { op, args } => {
             let args: Vec<String> = args.iter().map(|arg| format_value(body, *arg)).collect();
             format!("{}({})", format_intrinsic(*op), args.join(", "))
@@ -183,10 +236,14 @@ fn format_rvalue(body: &MirBody<'_>, rvalue: &Rvalue<'_>) -> String {
         Rvalue::Alloc { address_space } => {
             let space = match address_space {
                 AddressSpaceKind::Memory => "mem",
+                AddressSpaceKind::Calldata => "calldata",
                 AddressSpaceKind::Storage => "stor",
+                AddressSpaceKind::TransientStorage => "tstor",
+                AddressSpaceKind::Code => "code",
             };
             format!("alloc {space}")
         }
+        Rvalue::ConstAggregate { data, .. } => format!("const_aggregate ({} bytes)", data.len()),
     }
 }
 
@@ -224,6 +281,8 @@ fn format_value_inner(
                 UnOp::Minus => format!("(-{inner})"),
                 UnOp::Not => format!("(!{inner})"),
                 UnOp::BitNot => format!("(~{inner})"),
+                UnOp::Mut => format!("(mut {inner})"),
+                UnOp::Ref => format!("(ref {inner})"),
             }
         }
         ValueOrigin::Binary { op, lhs, rhs } => {
@@ -246,8 +305,9 @@ fn format_value_inner(
             crate::ir::SyntheticValue::Bytes(bytes) => format_bytes(bytes),
         },
         ValueOrigin::Local(local) => format_local(*local),
-        ValueOrigin::FuncItem(root) => format!(
-            "func_item({})",
+        ValueOrigin::PlaceRoot(local) => format!("place_root({})", format_local(*local)),
+        ValueOrigin::CodeRegionRef(root) => format!(
+            "code_region({})",
             root.symbol.as_deref().unwrap_or("<unresolved>")
         ),
         ValueOrigin::FieldPtr(field_ptr) => {
@@ -259,6 +319,11 @@ fn format_value_inner(
             }
         }
         ValueOrigin::PlaceRef(place) => format!("&{}", format_place(body, place)),
+        ValueOrigin::ConstRegion(id) => format!("const_region_{}", id.0),
+        ValueOrigin::MoveOut { place } => format!("move_out({})", format_place(body, place)),
+        ValueOrigin::TransparentCast { value } => {
+            format_value_inner(body, *value, stack, depth + 1)
+        }
     };
 
     stack.remove(&val);
@@ -270,9 +335,12 @@ fn format_local(local: LocalId) -> String {
 }
 
 fn format_place(body: &MirBody<'_>, place: &Place<'_>) -> String {
-    let space = match place.address_space {
+    let space = match body.place_address_space(place) {
         AddressSpaceKind::Memory => "mem",
+        AddressSpaceKind::Calldata => "calldata",
         AddressSpaceKind::Storage => "stor",
+        AddressSpaceKind::TransientStorage => "tstor",
+        AddressSpaceKind::Code => "code",
     };
     let base = format_value(body, place.base);
     let proj = format_projection_path(body, place.projection.iter());
@@ -291,7 +359,7 @@ fn format_inst_with_local_types(
 ) -> String {
     match inst {
         MirInst::Assign { dest, rvalue, .. } => {
-            let rendered = format_rvalue(body, rvalue);
+            let rendered = format_rvalue(db, body, rvalue);
             if let Some(dest) = dest {
                 let local = *dest;
                 let local_name = format_local(local);
@@ -351,6 +419,7 @@ fn format_bin_op(op: BinOp) -> &'static str {
             ArithBinOp::BitAnd => "&",
             ArithBinOp::BitOr => "|",
             ArithBinOp::BitXor => "^",
+            ArithBinOp::Range => "..",
         },
         BinOp::Comp(comp) => match comp {
             CompBinOp::Eq => "==",
@@ -388,6 +457,7 @@ fn format_intrinsic(op: IntrinsicOp) -> &'static str {
         IntrinsicOp::AddrOf => "addr_of",
         IntrinsicOp::Mstore => "mstore",
         IntrinsicOp::Mstore8 => "mstore8",
+        IntrinsicOp::Alloc => "alloc",
         IntrinsicOp::Sload => "sload",
         IntrinsicOp::Sstore => "sstore",
         IntrinsicOp::ReturnData => "return_data",
@@ -395,9 +465,12 @@ fn format_intrinsic(op: IntrinsicOp) -> &'static str {
         IntrinsicOp::Codesize => "codesize",
         IntrinsicOp::CodeRegionOffset => "code_region_offset",
         IntrinsicOp::CodeRegionLen => "code_region_len",
+        IntrinsicOp::CurrentCodeRegionLen => "current_code_region_len",
         IntrinsicOp::Keccak => "keccak256",
+        IntrinsicOp::Addmod => "addmod",
+        IntrinsicOp::Mulmod => "mulmod",
         IntrinsicOp::Revert => "revert",
         IntrinsicOp::Caller => "caller",
-        IntrinsicOp::StorAt => "stor_at",
+        IntrinsicOp::Callvalue => "callvalue",
     }
 }

@@ -1,0 +1,64 @@
+// Reproduction of hover/goto bugs seen in effects.fe.
+//
+// Bug 1: Hovering over `InitArgs` in `C::InitArgs::ENCODED_SIZE`
+//         should underline `InitArgs`, not the full assoc-const path.
+//         reference_at() finds the outer reference first.
+//
+// Bug 2: Zero-arg calls like `ops::returndatasize()` produce no
+//         underline at all in Zed. Adding a dummy arg fixes it.
+
+trait AbiSize {
+    const ENCODED_SIZE: u256
+}
+
+trait Encode<A>: AbiSize {}
+
+trait Contract {
+    type InitArgs: Encode<u256>
+
+    fn init_code_offset() -> u256
+    fn init_code_len() -> u256
+}
+
+pub struct Address {
+    pub inner: u256
+}
+
+struct Encoder {
+    pub start: u256
+    pub pos: u256
+    pub end: u256
+}
+
+mod ops {
+    extern {
+        pub fn returndatasize() -> u256
+        pub fn returndatacopy(dest: u256, offset: u256, len: u256)
+        pub fn codecopy(dest: u256, offset: u256, len: u256)
+        pub fn create(value: u256, offset: u256, len: u256) -> u256
+        pub fn revert(offset: u256, len: u256)
+    }
+}
+
+mod mem {
+    pub fn alloc(_ size: u256) -> u256 {
+        0
+    }
+}
+
+// Mirrors effects.fe Create::create<C: Contract>
+fn create<C: Contract>() {
+    // Bug 1: C::InitArgs in an assoc-const path — hover over InitArgs should
+    // underline InitArgs, not the full ENCODED_SIZE access
+    let init_len = C::init_code_len()
+    let init_off = C::init_code_offset()
+    let args_len = C::InitArgs::ENCODED_SIZE
+    let total_len = init_len + args_len
+
+    let init_ptr = mem::alloc(total_len)
+
+    // Bug 2: zero-arg extern call — no underline in Zed
+    let ret_len = ops::returndatasize()
+    let ret_ptr = mem::alloc(ret_len)
+    ops::revert(offset: ret_ptr, len: ret_len)
+}

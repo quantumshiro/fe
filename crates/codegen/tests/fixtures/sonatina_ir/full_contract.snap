@@ -1,0 +1,129 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/full_contract.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_Point_0 = {i256, i256};
+
+func private %abi_encode__Evm_hef0af3106e109414__3af54274b2985741(v0.i256) {
+    block0:
+        mstore 0.i256 v0 i256;
+        evm_return 0.i256 32.i256;
+}
+
+func private %init__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        v1.i256 = sym_size &dispatch__Evm_hef0af3106e109414__3af54274b2985741;
+        v2.i256 = sym_addr &dispatch__Evm_hef0af3106e109414__3af54274b2985741;
+        evm_code_copy 0.i256 v2 v1;
+        evm_return 0.i256 v1;
+}
+
+func private %dispatch__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        v2.i256 = evm_calldata_load 0.i256;
+        v4.i256 = shr 224.i256 v2;
+        v6.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_eq v4 151146943.i256;
+        br v6 block1 block2;
+
+    block1:
+        v8.i256 = evm_calldata_load 4.i256;
+        v10.i256 = evm_calldata_load 36.i256;
+        v11.objref<@__fe_obj_Point_0> = obj.alloc @__fe_obj_Point_0;
+        v12.objref<i256> = obj.proj v11 0.i256;
+        obj.store v12 v8;
+        v14.objref<i256> = obj.proj v11 1.i256;
+        obj.store v14 v10;
+        v15.objref<i256> = obj.proj v11 0.i256;
+        v16.i256 = obj.load v15;
+        (v17.i256, v18.i1) = uaddo v16 1.i256;
+        br v18 block5 block6;
+
+    block2:
+        v33.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_eq v4 2066295049.i256;
+        br v33 block3 block4;
+
+    block3:
+        v34.i256 = evm_calldata_load 4.i256;
+        (v36.i256, v37.i1) = uaddo v34 3.i256;
+        br v37 block5 block8;
+
+    block4:
+        evm_return 0.i256 0.i256;
+
+    block5:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block6:
+        v22.objref<i256> = obj.proj v11 0.i256;
+        obj.store v22 v17;
+        v23.objref<i256> = obj.proj v11 1.i256;
+        v24.i256 = obj.load v23;
+        (v26.i256, v27.i1) = uaddo v24 2.i256;
+        br v27 block5 block7;
+
+    block7:
+        v29.objref<i256> = obj.proj v11 1.i256;
+        obj.store v29 v26;
+        v30.i256 = call %point_hac92469562809d28_area v11;
+        call %abi_encode__Evm_hef0af3106e109414__3af54274b2985741 v30;
+        evm_invalid;
+
+    block8:
+        v38.i256 = call %square_h97afaa872b6ea17e_area v36;
+        call %abi_encode__Evm_hef0af3106e109414__3af54274b2985741 v38;
+        evm_invalid;
+}
+
+func private %u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = eq v0 v1;
+        return v2;
+}
+
+func private %point_hac92469562809d28_area(v0.objref<@__fe_obj_Point_0>) -> i256 {
+    block0:
+        v2.objref<i256> = obj.proj v0 0.i256;
+        v3.i256 = obj.load v2;
+        v5.objref<i256> = obj.proj v0 1.i256;
+        v6.i256 = obj.load v5;
+        (v7.i256, v8.i1) = umulo v3 v6;
+        br v8 block1 block2;
+
+    block1:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block2:
+        return v7;
+}
+
+func private %square_h97afaa872b6ea17e_area(v0.i256) -> i256 {
+    block0:
+        (v1.i256, v2.i1) = umulo v0 v0;
+        br v2 block1 block2;
+
+    block1:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block2:
+        return v1;
+}
+
+
+object @ShapeDispatcher {
+    section init {
+        entry %init__Evm_hef0af3106e109414__3af54274b2985741;
+        embed .runtime as &dispatch__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+    section runtime {
+        entry %dispatch__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+}

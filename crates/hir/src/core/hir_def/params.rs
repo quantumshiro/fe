@@ -17,6 +17,19 @@ impl<'db> GenericArgListId<'db> {
         Self::new(db, vec![], false)
     }
 
+    pub fn given(db: &'db dyn HirDb, data: Vec<GenericArg<'db>>) -> Self {
+        Self::new(db, data, true)
+    }
+
+    pub fn given1_type(db: &'db dyn HirDb, ty: TypeId<'db>) -> Self {
+        Self::given(
+            db,
+            vec![GenericArg::Type(TypeGenericArg {
+                ty: Partial::Present(ty),
+            })],
+        )
+    }
+
     pub fn len(self, db: &dyn HirDb) -> usize {
         self.data(db).len()
     }
@@ -26,18 +39,28 @@ impl<'db> GenericArgListId<'db> {
     }
 
     pub fn pretty_print(self, db: &dyn HirDb) -> String {
+        fn space_adjacent_angles(s: &str) -> String {
+            let mut out = String::with_capacity(s.len());
+            let mut prev: Option<char> = None;
+            for ch in s.chars() {
+                if matches!((prev, ch), (Some('<'), '<') | (Some('>'), '>')) {
+                    out.push(' ');
+                }
+                out.push(ch);
+                prev = Some(ch);
+            }
+            out
+        }
+
         if !self.is_given(db) {
             "".into()
         } else {
-            format!(
+            space_adjacent_angles(&format!(
                 "<{}>",
                 self.data(db)
                     .iter()
                     .map(|p| match p {
-                        GenericArg::Const(c) => c
-                            .body
-                            .to_opt()
-                            .map_or_else(|| "<missing>".into(), |b| b.pretty_print(db)),
+                        GenericArg::Const(c) => c.value.pretty_print(db),
                         GenericArg::Type(t) => {
                             t.ty.to_opt()
                                 .map_or_else(|| "<missing>".into(), |t| t.pretty_print(db))
@@ -55,7 +78,7 @@ impl<'db> GenericArgListId<'db> {
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
-            )
+            ))
         }
     }
 }
@@ -129,6 +152,7 @@ pub struct TypeGenericParam<'db> {
 pub struct ConstGenericParam<'db> {
     pub name: Partial<IdentId<'db>>,
     pub ty: Partial<TypeId<'db>>,
+    pub default: Option<ConstGenericArgValue<'db>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
@@ -145,7 +169,24 @@ pub struct TypeGenericArg<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConstGenericArg<'db> {
-    pub body: Partial<Body<'db>>,
+    pub value: ConstGenericArgValue<'db>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConstGenericArgValue<'db> {
+    Expr(Partial<Body<'db>>),
+    Hole,
+}
+
+impl<'db> ConstGenericArgValue<'db> {
+    pub fn pretty_print(&self, db: &dyn HirDb) -> String {
+        match self {
+            Self::Expr(body) => body
+                .to_opt()
+                .map_or_else(|| "<missing>".into(), |b| b.pretty_print(db)),
+            Self::Hole => "_".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -154,10 +195,21 @@ pub struct AssocTypeGenericArg<'db> {
     pub ty: Partial<TypeId<'db>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+pub enum FuncParamMode {
+    /// Default `x: T`: readable but cannot be moved-out.
+    View,
+    /// `x: own T`: callee takes ownership of the argument.
+    Own,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncParam<'db> {
+    pub mode: FuncParamMode,
     pub is_mut: bool,
-    pub label: Option<FuncParamName<'db>>,
+    pub has_ref_prefix: bool,
+    pub has_own_prefix: bool,
+    pub is_label_suppressed: bool,
     pub name: Partial<FuncParamName<'db>>,
     pub ty: Partial<TypeId<'db>>,
 
@@ -168,17 +220,13 @@ pub struct FuncParam<'db> {
 
 impl<'db> FuncParam<'db> {
     pub fn label_eagerly(&self) -> Option<IdentId<'db>> {
-        match self.label {
-            Some(FuncParamName::Ident(ident)) => return Some(ident),
-            Some(FuncParamName::Underscore) => return None,
-            _ => {}
-        }
-
-        if let FuncParamName::Ident(ident) = self.name.to_opt()? {
-            Some(ident)
-        } else {
-            None
-        }
+        (!self.is_label_suppressed)
+            .then(|| self.name.to_opt())
+            .flatten()
+            .and_then(|name| match name {
+                FuncParamName::Ident(ident) => Some(ident),
+                FuncParamName::Underscore => None,
+            })
     }
 
     pub fn name(&self) -> Option<IdentId<'db>> {

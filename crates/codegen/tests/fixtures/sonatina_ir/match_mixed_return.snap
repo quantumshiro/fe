@@ -1,0 +1,48 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_mixed_return.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %f(v0.i256) -> i256 {
+    block0:
+        jump block4;
+
+    block1:
+        return 0.i256;
+
+    block2:
+        jump block3;
+
+    block3:
+        (v4.i256, v5.i1) = uaddo 1.i256 1.i256;
+        br v5 block6 block7;
+
+    block4:
+        br_table v0 block5 (0.i256 block1) (1.i256 block2);
+
+    block5:
+        evm_invalid;
+
+    block6:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block7:
+        return v4;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i256 = call %f 0.i256;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

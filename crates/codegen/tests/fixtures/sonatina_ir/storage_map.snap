@@ -1,0 +1,7 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+assertion_line: 64
+expression: output
+input_file: crates/codegen/tests/fixtures/storage_map.fe
+---
+target = "evm-ethereum-osaka"

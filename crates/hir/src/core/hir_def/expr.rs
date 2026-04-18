@@ -1,6 +1,8 @@
 use cranelift_entity::entity_impl;
 
-use super::{Body, GenericArgListId, IdentId, IntegerId, LitKind, Partial, PatId, PathId, StmtId};
+use super::{
+    Body, GenericArgListId, IdentId, IntegerId, LitKind, Partial, PatId, PathId, StmtId, TypeId,
+};
 use crate::{HirDb, span::expr::LazyExprSpan};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -10,6 +12,8 @@ pub enum Expr<'db> {
     /// The first `ExprId` is the lhs, the second is the rhs.
     Bin(ExprId, ExprId, BinOp),
     Un(ExprId, UnOp),
+    /// `expr as Type`
+    Cast(ExprId, Partial<TypeId<'db>>),
     /// (callee, call args)
     Call(ExprId, Vec<CallArg<'db>>),
     /// (receiver, method_name, generic args, call args)
@@ -31,10 +35,10 @@ pub enum Expr<'db> {
     /// should be resolved as a constant expression.
     ArrayRep(ExprId, Partial<Body<'db>>),
 
-    /// The first `ExprId` is the condition, the second is the then branch, the
+    /// The first `CondId` is the condition, the second is the then branch, the
     /// third is the else branch.
     /// In case `else if`, the third is the lowered into `If` expression.
-    If(ExprId, ExprId, Option<ExprId>),
+    If(CondId, ExprId, Option<ExprId>),
 
     /// The first `ExprId` is the scrutinee, the second is the arms.
     Match(ExprId, Partial<Vec<MatchArm>>),
@@ -60,6 +64,26 @@ impl ExprId {
 
     pub fn data<'db>(self, db: &'db dyn HirDb, body: Body<'db>) -> &'db Partial<Expr<'db>> {
         &body.exprs(db)[self]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub enum Cond {
+    /// A plain boolean expression condition.
+    Expr(ExprId),
+    /// A let-pattern condition: `let pat = expr`.
+    Let(PatId, ExprId),
+    /// A logical condition chain node.
+    Bin(CondId, CondId, LogicalBinOp),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, salsa::Update)]
+pub struct CondId(u32);
+entity_impl!(CondId);
+
+impl CondId {
+    pub fn data<'db>(self, db: &'db dyn HirDb, body: Body<'db>) -> &'db Partial<Cond> {
+        &body.conds(db)[self]
     }
 }
 
@@ -112,6 +136,8 @@ pub enum ArithBinOp {
     BitOr,
     /// `^`
     BitXor,
+    /// `..`
+    Range,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -148,6 +174,10 @@ pub enum UnOp {
     Not,
     /// `~`
     BitNot,
+    /// `mut`
+    Mut,
+    /// `ref`
+    Ref,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]

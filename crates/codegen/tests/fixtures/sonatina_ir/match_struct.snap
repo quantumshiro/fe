@@ -1,0 +1,102 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/match_struct.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_Point_0 = {i8, i8};
+
+func private %match_struct_fields(v0.objref<@__fe_obj_Point_0>) -> i8 {
+    block0:
+        jump block6;
+
+    block1:
+        jump block2;
+
+    block2:
+        v3.i8 = phi (0.i8 block1) (v7 block3) (v10 block4) (v16 block10);
+        return v3;
+
+    block3:
+        v6.objref<i8> = obj.proj v0 1.i256;
+        v7.i8 = obj.load v6;
+        jump block2;
+
+    block4:
+        v9.objref<i8> = obj.proj v0 0.i256;
+        v10.i8 = obj.load v9;
+        jump block2;
+
+    block5:
+        v12.objref<i8> = obj.proj v0 1.i256;
+        v13.objref<i8> = obj.proj v0 0.i256;
+        v14.i8 = obj.load v13;
+        v15.i8 = obj.load v12;
+        (v16.i8, v17.i1) = uaddo v14 v15;
+        br v17 block9 block10;
+
+    block6:
+        v23.objref<i8> = obj.proj v0 1.i256;
+        v24.i8 = obj.load v23;
+        br_table v24 block8 (0.i8 block7);
+
+    block7:
+        v26.objref<i8> = obj.proj v0 0.i256;
+        v27.i8 = obj.load v26;
+        br_table v27 block4 (0.i8 block1);
+
+    block8:
+        v29.objref<i8> = obj.proj v0 0.i256;
+        v30.i8 = obj.load v29;
+        br_table v30 block5 (0.i8 block3);
+
+    block9:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block10:
+        jump block2;
+}
+
+func private %match_struct_wildcard(v0.objref<@__fe_obj_Point_0>) -> i8 {
+    block0:
+        jump block5;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (2.i8 block3) (3.i8 block4);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        jump block2;
+
+    block5:
+        v8.objref<i8> = obj.proj v0 0.i256;
+        v9.i8 = obj.load v8;
+        br_table v9 block6 (0.i8 block1);
+
+    block6:
+        v12.objref<i8> = obj.proj v0 1.i256;
+        v13.i8 = obj.load v12;
+        br_table v13 block4 (0.i8 block3);
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i8 = call %match_struct_fields undef.objref<@__fe_obj_Point_0>;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

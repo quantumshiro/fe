@@ -1,6 +1,6 @@
 use rowan::ast::{AstNode, support};
 
-use super::{TraitRef, TupleType, TypeBoundList, ast_node};
+use super::{TraitRef, TupleType, TypeBoundList, ast_node, use_tree::UsePath};
 use crate::{FeLang, SyntaxKind as SK, SyntaxToken};
 
 ast_node! {
@@ -19,6 +19,11 @@ ast_node! {
     pub struct ItemList,
     SK::ItemList,
     IntoIterator<Item=Item>
+}
+impl ItemList {
+    pub fn inner_attr_list(&self) -> Option<super::AttrList> {
+        support::child(self.syntax())
+    }
 }
 
 ast_node! {
@@ -105,6 +110,10 @@ impl FuncSignature {
 impl super::AttrListOwner for Func {}
 impl super::ItemModifierOwner for Func {}
 impl Func {
+    pub fn const_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::ConstKw)
+    }
+
     /// Returns the function's signature if present in the syntax tree.
     /// This is primarily for consumers (like lazy spans) that need to handle
     /// malformed code without panicking.
@@ -190,6 +199,7 @@ ast_node! {
     pub struct ContractInit,
     SK::ContractInit,
 }
+impl super::AttrListOwner for ContractInit {}
 impl ContractInit {
     pub fn params(&self) -> Option<super::FuncParamList> {
         support::child(self.syntax())
@@ -209,6 +219,7 @@ ast_node! {
     pub struct ContractRecv,
     SK::ContractRecv,
 }
+impl super::AttrListOwner for ContractRecv {}
 impl ContractRecv {
     /// Optional root message type path (`recv Type { ... }`).
     pub fn path(&self) -> Option<super::Path> {
@@ -233,6 +244,7 @@ ast_node! {
     pub struct RecvArm,
     SK::RecvArm,
 }
+impl super::AttrListOwner for RecvArm {}
 impl RecvArm {
     /// The pattern being matched (e.g., `Transfer { to, amount }`).
     pub fn pat(&self) -> Option<super::Pat> {
@@ -534,6 +546,11 @@ impl RecordFieldDef {
         support::token(self.syntax(), SK::PubKw)
     }
 
+    /// Returns the visibility restriction if exists, e.g. `(ingot)` in `pub(ingot)`.
+    pub fn vis_restriction(&self) -> Option<VisRestriction> {
+        support::child(self.syntax())
+    }
+
     /// Returns the mut keyword if exists.
     pub fn mut_kw(&self) -> Option<SyntaxToken> {
         support::token(self.syntax(), SK::MutKw)
@@ -613,23 +630,35 @@ ast_node! {
 }
 
 ast_node! {
-    /// A modifier on an item.
-    /// `pub unsafe`
-    pub struct ItemModifier,
-    SK::ItemModifier,
+    /// `(ingot)`, `(super)`, `(in path::to::module)`
+    pub struct VisRestriction,
+    SK::VisRestriction,
 }
-impl ItemModifier {
-    pub fn pub_kw(&self) -> Option<SyntaxToken> {
-        support::token(self.syntax(), SK::PubKw)
+impl VisRestriction {
+    pub fn ingot_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::IngotKw)
     }
-
-    pub fn unsafe_kw(&self) -> Option<SyntaxToken> {
-        support::token(self.syntax(), SK::UnsafeKw)
+    pub fn super_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::SuperKw)
+    }
+    pub fn in_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::InKw)
+    }
+    pub fn path(&self) -> Option<UsePath> {
+        support::child(self.syntax())
     }
 }
 
 pub trait ItemModifierOwner: AstNode<Language = FeLang> {
-    fn modifier(&self) -> Option<ItemModifier> {
+    fn pub_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::PubKw)
+    }
+
+    fn unsafe_kw(&self) -> Option<SyntaxToken> {
+        support::token(self.syntax(), SK::UnsafeKw)
+    }
+
+    fn vis_restriction(&self) -> Option<VisRestriction> {
         support::child(self.syntax())
     }
 }
@@ -717,7 +746,7 @@ mod tests {
     use crate::{
         ast::{ExprKind, TypeKind, prelude::*},
         lexer::Lexer,
-        parser::{ItemListScope, Parser},
+        parser::{ItemListScope, Parser, RecoveryMode},
     };
 
     fn parse_item<T>(source: &str) -> T
@@ -725,7 +754,7 @@ mod tests {
         T: TryFrom<ItemKind, Error = TryIntoError<ItemKind>>,
     {
         let lexer = Lexer::new(source);
-        let mut parser = Parser::new(lexer);
+        let mut parser = Parser::new(lexer, RecoveryMode::Recover);
 
         let _ = parser.parse(ItemListScope::default());
         let (node, errs) = parser.finish_to_node();
@@ -775,6 +804,50 @@ mod tests {
 
     #[test]
     #[wasm_bindgen_test]
+    fn mod_with_inner_attr() {
+        let source = r"
+            pub mod foo {
+                #![arithmetic(unchecked)]
+                pub fn bar() {}
+            }
+        ";
+        let mod_: Mod = parse_item(source);
+        let item_list = mod_.items().expect("module should have items");
+        assert_eq!(
+            item_list
+                .inner_attr_list()
+                .expect("module should have inner attrs")
+                .normal_attrs()
+                .count(),
+            1
+        );
+        assert_eq!(item_list.into_iter().count(), 1);
+    }
+
+    #[test]
+    #[wasm_bindgen_test]
+    fn root_with_inner_attr() {
+        let source = r"
+            #![arithmetic(unchecked)]
+            fn foo() {}
+        ";
+        let (node, errs) = crate::parse_source_file(source, RecoveryMode::Recover);
+        assert!(errs.is_empty(), "unexpected parse errors: {errs:?}");
+        let root = Root::cast(rowan::SyntaxNode::new_root(node)).expect("root");
+        let item_list = root.items().expect("root should have items");
+        assert_eq!(
+            item_list
+                .inner_attr_list()
+                .expect("root should have inner attrs")
+                .normal_attrs()
+                .count(),
+            1
+        );
+        assert_eq!(item_list.into_iter().count(), 1);
+    }
+
+    #[test]
+    #[wasm_bindgen_test]
     fn func() {
         let source = r#"
                 /// This is doc comment
@@ -792,9 +865,8 @@ mod tests {
             func.sig().ret_ty().unwrap().kind(),
             TypeKind::Tuple(_)
         ));
-        let modifier = func.modifier().unwrap();
-        assert!(modifier.pub_kw().is_some());
-        assert!(modifier.unsafe_kw().is_some());
+        assert!(func.pub_kw().is_some());
+        assert!(func.unsafe_kw().is_some());
     }
 
     #[test]

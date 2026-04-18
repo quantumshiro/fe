@@ -6,7 +6,7 @@ use unwrap_infallible::UnwrapInfallible;
 use super::token_stream::LexicalToken;
 use super::{
     ErrProof, Parser, Recovery, define_scope,
-    expr::{parse_expr, parse_expr_no_struct},
+    expr::{parse_condition_expr, parse_expr, parse_expr_no_struct},
     item::ItemScope,
     parse_list, parse_pat,
     stmt::parse_stmt,
@@ -40,29 +40,25 @@ pub(super) fn parse_expr_atom<S: TokenStream>(
         Some(SyntaxKind::Ident) => {
             // Contextual 'with': only treat as with-block when:
             // ident text is "with" AND we can parse a WithParamList AND next is '{'
-            let is_with = parser.dry_run(|p| {
-                let is_with_ident = p
-                    .current_token()
-                    .map(|t| t.text() == "with")
-                    .unwrap_or(false);
-                if !is_with_ident {
-                    return false;
-                }
-                p.bump();
-                // Must start with '(' for with param list
-                if p.current_kind() != Some(SyntaxKind::LParen) {
-                    return false;
-                }
-                // Try parse the with param list
-                if !p
-                    .parse_ok(WithParamListScope::default())
-                    .is_ok_and(identity)
-                {
-                    return false;
-                }
-                // Require a block immediately after
-                p.current_kind() == Some(SyntaxKind::LBrace)
-            });
+            let is_with = parser
+                .current_token()
+                .map(|t| t.text() == "with")
+                .unwrap_or(false)
+                && matches!(
+                    parser.peek_n_non_trivia(2).as_slice(),
+                    [SyntaxKind::Ident, SyntaxKind::LParen]
+                )
+                && parser.dry_run(|p| {
+                    p.bump_expected(SyntaxKind::Ident);
+                    // Try parse the with param list body and require a block right after.
+                    if !p
+                        .parse_ok(WithParamListScope::default())
+                        .is_ok_and(identity)
+                    {
+                        return false;
+                    }
+                    p.current_kind() == Some(SyntaxKind::LBrace)
+                });
             if is_with {
                 parser.parse_cp(WithExprScope::default(), None)
             } else {
@@ -146,7 +142,7 @@ impl super::Parse for IfExprScope {
         parser.bump_expected(SyntaxKind::IfKw);
 
         parser.set_scope_recovery_stack(&[SyntaxKind::LBrace, SyntaxKind::ElseKw]);
-        parse_expr_no_struct(parser)?;
+        parse_condition_expr(parser)?;
 
         if parser.find_and_pop(SyntaxKind::LBrace, ExpectedKind::Body(SyntaxKind::IfExpr))? {
             parser.parse(BlockExprScope::default())?;
@@ -217,7 +213,10 @@ impl super::Parse for WithParamScope {
         // `with` parameter supports either:
         // - `Key = value` (legacy)
         // - `value` (shorthand; key inferred from value type / usage)
-        let is_keyed = parser.dry_run(|p| {
+        let is_keyed = matches!(
+            parser.peek_n_non_trivia(1).as_slice(),
+            [kind] if path::is_path_segment(*kind)
+        ) && parser.dry_run(|p| {
             if !p.parse_ok(path::PathScope::default()).is_ok_and(identity) {
                 return false;
             }
@@ -298,7 +297,28 @@ impl super::Parse for MatchArmScope {
         if parser.find_and_pop(SyntaxKind::FatArrow, ExpectedKind::Unspecified)? {
             parser.bump();
         }
-        parse_expr(parser)
+
+        // Allow statement-like keywords (return, break, continue) in match
+        // arms by wrapping them in an implicit block expression.
+        if matches!(
+            parser.current_kind(),
+            Some(SyntaxKind::ReturnKw | SyntaxKind::BreakKw | SyntaxKind::ContinueKw)
+        ) {
+            parser.parse(ImplicitBlockExprScope::default())
+        } else {
+            parse_expr(parser)
+        }
+    }
+}
+
+// A block expression without braces, used to wrap a single statement
+// (e.g. `return`) in match arm bodies where only expressions are expected.
+define_scope! { ImplicitBlockExprScope, BlockExpr }
+impl super::Parse for ImplicitBlockExprScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parse_stmt(parser)
     }
 }
 

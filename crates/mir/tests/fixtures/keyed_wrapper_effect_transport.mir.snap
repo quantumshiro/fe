@@ -1,0 +1,23 @@
+---
+source: crates/mir/tests/lowering_snapshots.rs
+expression: mir_output
+---
+fn needs__StorPtr_Storage_u8____e37e0e92de47c723(v0: u256) -> ():
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    ret
+
+fn caller(v0: Ptr<Storage<u8>>) -> ():
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    eval needs__Ptr_Storage_u8____a1d45fed9b34d435()
+    ret
+
+fn ptr_storage_u8___ha1d45fed9b34d435_effecthandle_hfc52f915596f993a_from_raw(v0: u256) -> Ptr<Storage<u8>>:
+  bb0:
+    ret v0
+
+fn needs__Ptr_Storage_u8____a1d45fed9b34d435(v0: u256) -> ():
+  ; runtime_abi values=[] effects=[]
+  bb0:
+    ret

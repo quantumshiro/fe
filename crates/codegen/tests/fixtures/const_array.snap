@@ -1,0 +1,58 @@
+---
+source: crates/codegen/tests/yul.rs
+expression: output
+input_file: tests/fixtures/const_array.fe
+---
+object "main" {
+  code {
+    function $sum_two($i, $j) -> ret {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      datacopy(v0, add(dataoffset("data_sum_two_0"), mul($i, 32)), 32)
+      let v1 := mload(v0)
+      let v2 := mload(0x40)
+      if iszero(v2) {
+        v2 := 0x80
+      }
+      datacopy(v2, add(dataoffset("data_sum_two_0"), mul($j, 32)), 32)
+      let v3 := mload(v2)
+      let v4 := $checked_add_u256(v1, v3)
+      ret := v4
+      leave
+    }
+    function $checked_add_u256($a, $b) -> ret {
+      let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
+      ret := v0
+      leave
+    }
+    function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+      let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+      let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+      let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+      let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+      let v4 := v3
+      if v4 {
+        revert(0, 0)
+      }
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+      ret := $self
+      leave
+    }
+    function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+      let v0 := lt($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+      let v0 := add($self, $other)
+      ret := v0
+      leave
+    }
+  }
+  data "data_sum_two_0" hex"000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000001e"
+}

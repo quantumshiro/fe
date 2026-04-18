@@ -1,0 +1,69 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/internal_helper_shadowing.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_tuple_0 = {i64, i64};
+
+func private %checked_add_u64() -> i64 {
+    block0:
+        return 77.i64;
+}
+
+func private %saturating_add_u64() -> i64 {
+    block0:
+        return 88.i64;
+}
+
+func private %call_user_helpers() -> objref<@__fe_obj_tuple_0> {
+    block0:
+        v2.i64 = call %checked_add_u64;
+        v3.i64 = call %saturating_add_u64;
+        v4.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v6.objref<i64> = obj.proj v4 0.i256;
+        obj.store v6 v2;
+        v8.objref<i64> = obj.proj v4 1.i256;
+        obj.store v8 v3;
+        return v4;
+}
+
+func private %call_internal_helpers(v0.i64, v1.i64) -> objref<@__fe_obj_tuple_0> {
+    block0:
+        (v2.i64, v3.i1) = uaddo v0 v1;
+        br v3 block1 block2;
+
+    block1:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block2:
+        v11.i64 = call %u64_haee7f05a097ffa16_saturatingadd_h7ca6e43aca8f23bb_saturating_add v0 v1;
+        v12.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v13.objref<i64> = obj.proj v12 0.i256;
+        obj.store v13 v2;
+        v15.objref<i64> = obj.proj v12 1.i256;
+        obj.store v15 v11;
+        return v12;
+}
+
+func private %u64_haee7f05a097ffa16_saturatingadd_h7ca6e43aca8f23bb_saturating_add(v0.i64, v1.i64) -> i64 {
+    block0:
+        v2.i64 = uaddsat v0 v1;
+        return v2;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v0.i64 = call %checked_add_u64;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

@@ -1,9 +1,4 @@
 //! HIR-to-source pretty printing.
-//!
-//! # Panics
-//!
-//! All pretty_print methods will panic if they encounter `Partial::Absent` nodes,
-//! as the HIR is expected to be complete for pretty printing.
 
 use crate::HirDb;
 use crate::hir_def::scope_graph::ScopeId;
@@ -18,11 +13,22 @@ fn indent_str(level: usize) -> String {
     "    ".repeat(level)
 }
 
-/// Unwraps a Partial<T>, panicking with context if Absent.
+/// Unwraps a Partial<T>, returning the value or panicking with context.
+///
+/// Absent nodes in the HIR occur when parsing fails (e.g. incomplete source
+/// during editing). In debug builds this fires a debug_assert so tests catch
+/// regressions; in release the panic propagates to the LSP catch_unwind
+/// boundary.
 fn unwrap_partial<T>(partial: Partial<T>, context: &str) -> T {
     match partial {
         Partial::Present(v) => v,
-        Partial::Absent => panic!("HIR pretty_print: missing required node at {}", context),
+        Partial::Absent => {
+            debug_assert!(
+                false,
+                "HIR pretty_print: missing required node at {context}"
+            );
+            panic!("HIR pretty_print: missing required node at {context}")
+        }
     }
 }
 
@@ -30,7 +36,13 @@ fn unwrap_partial<T>(partial: Partial<T>, context: &str) -> T {
 fn unwrap_partial_ref<'a, T>(partial: &'a Partial<T>, context: &str) -> &'a T {
     match partial {
         Partial::Present(v) => v,
-        Partial::Absent => panic!("HIR pretty_print: missing required node at {}", context),
+        Partial::Absent => {
+            debug_assert!(
+                false,
+                "HIR pretty_print: missing required node at {context}"
+            );
+            panic!("HIR pretty_print: missing required node at {context}")
+        }
     }
 }
 
@@ -39,6 +51,27 @@ fn indent_lines(result: &mut String, text: &str, indent_level: usize) {
     for line in text.lines() {
         result.push_str(&indent_str(indent_level));
         result.push_str(line);
+        result.push('\n');
+    }
+}
+
+/// Indents each line of text and returns the indented string.
+fn indent_text(text: &str, indent_level: usize) -> String {
+    text.lines()
+        .map(|line| format!("{}{}", indent_str(indent_level), line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn write_attrs<'db>(
+    result: &mut String,
+    attrs: AttrListId<'db>,
+    db: &dyn HirDb,
+    indent_level: usize,
+) {
+    let attrs_str = attrs.pretty_print(db);
+    if !attrs_str.is_empty() {
+        result.push_str(&indent_text(&attrs_str, indent_level));
         result.push('\n');
     }
 }
@@ -71,6 +104,21 @@ fn indent_continuation(text: &str, indent_level: usize) -> String {
     result
 }
 
+fn format_field_def<'db>(field: &FieldDef<'db>, db: &dyn HirDb, indent_level: usize) -> String {
+    let mut result = String::new();
+    write_attrs(&mut result, field.attributes, db, indent_level);
+
+    let vis = field.vis.pretty_print();
+    let name = unwrap_partial(field.name, "FieldDef::name");
+    let ty = unwrap_partial(field.type_ref, "FieldDef::type_ref");
+    result.push_str(&indent_text(
+        &format!("{}{}: {}", vis, name.data(db), ty.pretty_print(db)),
+        indent_level,
+    ));
+
+    result
+}
+
 // ============================================================================
 // Visibility & Modifiers
 // ============================================================================
@@ -81,18 +129,8 @@ impl Visibility {
         match self {
             Visibility::Public => "pub ",
             Visibility::Private => "",
-        }
-    }
-}
-
-impl ItemModifier {
-    /// Returns the modifier keywords.
-    pub fn pretty_print(self) -> &'static str {
-        match self {
-            ItemModifier::Pub => "pub ",
-            ItemModifier::Unsafe => "unsafe ",
-            ItemModifier::PubAndUnsafe => "pub unsafe ",
-            ItemModifier::None => "",
+            Visibility::PubIngot => "pub(ingot) ",
+            Visibility::PubSuper => "pub(super) ",
         }
     }
 }
@@ -147,7 +185,9 @@ impl<'db> NormalAttr<'db> {
     /// Pretty-prints a normal attribute like `#[foo(bar = "baz")]`.
     pub fn pretty_print(&self, db: &'db dyn HirDb) -> String {
         let path = unwrap_partial(self.path, "Attr::path").pretty_print(db);
-        if self.args.is_empty() {
+        if let Some(value) = &self.value {
+            format!("#[{path} = {}]", value.pretty_print(db))
+        } else if self.args.is_empty() {
             format!("#[{}]", path)
         } else {
             let args = self
@@ -243,7 +283,12 @@ impl<'db> ConstGenericParam<'db> {
             .data(db)
             .to_string();
         let ty = unwrap_partial(self.ty, "ConstGenericParam::ty").pretty_print(db);
-        format!("const {}: {}", name, ty)
+        let mut out = format!("const {name}: {ty}");
+        if let Some(default) = self.default {
+            out.push_str(" = ");
+            out.push_str(&default.pretty_print(db));
+        }
+        out
     }
 }
 
@@ -324,31 +369,37 @@ impl<'db> FuncParam<'db> {
     /// Pretty-prints a function parameter.
     pub fn pretty_print(&self, db: &'db dyn HirDb) -> String {
         let mut result = String::new();
-        let name = unwrap_partial(self.name, "FuncParam::name");
+        let mode_prefix = match self.mode {
+            FuncParamMode::View => "",
+            FuncParamMode::Own => "own ",
+        };
 
-        // Mutability comes first
+        // Mutability comes next
         if self.is_mut {
             result.push_str("mut ");
         }
 
-        // Handle label if different from name
-        if let Some(label) = &self.label {
-            // Only print label separately if different from name
-            if *label != name {
-                result.push_str(&label.pretty_print(db));
-                result.push(' ');
-            }
+        if self.self_ty_fallback {
+            result.push_str(mode_prefix);
         }
 
-        // Name
-        let name = name.pretty_print(db);
-        result.push_str(&name);
+        if self.is_label_suppressed {
+            result.push_str("_ ");
+        }
 
-        // Type (if not a self param with fallback)
+        // Name — may be Absent if parsing failed; use "_" as fallback.
+        match self.name {
+            Partial::Present(name) => result.push_str(&name.pretty_print(db)),
+            Partial::Absent => result.push('_'),
+        }
+
+        // Type (if not a self param with fallback) — use "?" if Absent.
         if !self.self_ty_fallback {
-            let ty = unwrap_partial(self.ty, "FuncParam::ty").pretty_print(db);
             result.push_str(": ");
-            result.push_str(&ty);
+            match self.ty {
+                Partial::Present(ty) => result.push_str(&ty.pretty_print(db)),
+                Partial::Absent => result.push('?'),
+            }
         }
 
         result
@@ -384,19 +435,27 @@ impl<'db> EffectParam<'db> {
 
         // If we have a name binding, print it first
         if let Some(name) = self.name {
+            result.push_str(name.data(db));
+            result.push_str(": ");
             if self.is_mut {
                 result.push_str("mut ");
             }
-            result.push_str(name.data(db));
-            result.push_str(": ");
-            let path = unwrap_partial(self.key_path, "EffectParam::key_path").pretty_print(db);
+            let path = self
+                .key_path
+                .to_opt()
+                .map(|path| path.pretty_print(db))
+                .unwrap_or_else(|| "_".to_string());
             result.push_str(&path);
         } else {
             // No name binding - shorthand form
             if self.is_mut {
                 result.push_str("mut ");
             }
-            let path = unwrap_partial(self.key_path, "EffectParam::key_path").pretty_print(db);
+            let path = self
+                .key_path
+                .to_opt()
+                .map(|path| path.pretty_print(db))
+                .unwrap_or_else(|| "_".to_string());
             result.push_str(&path);
         }
 
@@ -475,8 +534,10 @@ impl<'db> Pat<'db> {
 impl<'db> RecordPatField<'db> {
     /// Pretty-prints a record pattern field.
     pub fn pretty_print(&self, db: &'db dyn HirDb, body: Body<'db>) -> String {
-        let label = unwrap_partial(self.label, "RecordPatField::label");
         let pat = unwrap_partial_ref(self.pat.data(db, body), "RecordPatField::pat");
+        let Some(label) = self.label(db, body) else {
+            return pat.pretty_print(db, body);
+        };
 
         // Check if the pattern is just a binding with the same name as the label
         if let Pat::Path(Partial::Present(path), false) = pat
@@ -540,11 +601,21 @@ impl<'db> Expr<'db> {
 
             Expr::Un(expr, op) => {
                 let expr = unwrap_partial_ref(expr.data(db, body), "Un::expr");
-                format!(
-                    "{}{}",
-                    op.pretty_print(),
-                    expr.pretty_print(db, body, indent)
-                )
+                let op_str = op.pretty_print();
+                if matches!(op, UnOp::Mut | UnOp::Ref) {
+                    format!("{op_str} {}", expr.pretty_print(db, body, indent))
+                } else {
+                    format!("{op_str}{}", expr.pretty_print(db, body, indent))
+                }
+            }
+
+            Expr::Cast(expr, ty) => {
+                let expr = unwrap_partial_ref(expr.data(db, body), "Cast::expr");
+                let ty = ty
+                    .to_opt()
+                    .map(|ty| ty.pretty_print(db))
+                    .unwrap_or_else(|| "<missing>".into());
+                format!("{} as {}", expr.pretty_print(db, body, indent), ty)
             }
 
             Expr::Call(callee, args) => {
@@ -821,6 +892,7 @@ impl ArithBinOp {
             ArithBinOp::BitAnd => "&",
             ArithBinOp::BitOr => "|",
             ArithBinOp::BitXor => "^",
+            ArithBinOp::Range => "..",
         }
     }
 }
@@ -857,6 +929,8 @@ impl UnOp {
             UnOp::Minus => "-",
             UnOp::Not => "!",
             UnOp::BitNot => "~",
+            UnOp::Mut => "mut",
+            UnOp::Ref => "ref",
         }
     }
 }
@@ -887,13 +961,19 @@ impl<'db> Stmt<'db> {
                 result
             }
 
-            Stmt::For(pat, iter, body_expr) => {
+            Stmt::For(pat, iter, body_expr, unroll) => {
                 let pat = unwrap_partial_ref(pat.data(db, body), "For::pat");
                 let iter_expr = unwrap_partial_ref(iter.data(db, body), "For::iter");
                 let body_block = unwrap_partial_ref(body_expr.data(db, body), "For::body");
 
+                let prefix = match unroll {
+                    Some(true) => "#[unroll]\n",
+                    Some(false) => "#[unroll(never)]\n",
+                    None => "",
+                };
                 format!(
-                    "for {} in {} {}",
+                    "{}for {} in {} {}",
+                    prefix,
                     pat.pretty_print(db, body),
                     iter_expr.pretty_print(db, body, indent),
                     body_block.pretty_print(db, body, indent)
@@ -926,6 +1006,36 @@ impl<'db> Stmt<'db> {
             Stmt::Expr(expr_id) => {
                 let expr = unwrap_partial_ref(expr_id.data(db, body), "Stmt::Expr");
                 expr.pretty_print(db, body, indent)
+            }
+        }
+    }
+}
+
+impl Cond {
+    fn pretty_print<'db>(&self, db: &'db dyn HirDb, body: Body<'db>, indent: usize) -> String {
+        match self {
+            Cond::Expr(expr) => {
+                let expr = unwrap_partial_ref(expr.data(db, body), "Cond::Expr");
+                expr.pretty_print(db, body, indent)
+            }
+            Cond::Let(pat, expr) => {
+                let pat = unwrap_partial_ref(pat.data(db, body), "Cond::Let::pat");
+                let expr = unwrap_partial_ref(expr.data(db, body), "Cond::Let::expr");
+                format!(
+                    "let {} = {}",
+                    pat.pretty_print(db, body),
+                    expr.pretty_print(db, body, indent)
+                )
+            }
+            Cond::Bin(lhs, rhs, op) => {
+                let lhs = unwrap_partial_ref(lhs.data(db, body), "Cond::Bin::lhs");
+                let rhs = unwrap_partial_ref(rhs.data(db, body), "Cond::Bin::rhs");
+                format!(
+                    "{} {} {}",
+                    lhs.pretty_print(db, body, indent),
+                    op.pretty_print(),
+                    rhs.pretty_print(db, body, indent)
+                )
             }
         }
     }
@@ -987,22 +1097,33 @@ impl<'db> Func<'db> {
         // Attributes
         result.push_str(&self.attributes(db).pretty_print_with_newline(db));
 
-        // Modifiers (pub, unsafe)
-        result.push_str(self.modifier(db).pretty_print());
+        // Modifiers (pub, unsafe, const)
+        let modifiers = self.modifiers(db);
+        result.push_str(modifiers.vis.pretty_print());
+        if modifiers.is_unsafe {
+            result.push_str("unsafe ");
+        }
+        if modifiers.is_const {
+            result.push_str("const ");
+        }
 
         // fn keyword
         result.push_str("fn ");
 
         // Name
-        let name = unwrap_partial(self.name(db), "Func::name");
-        result.push_str(name.data(db));
+        match self.name(db) {
+            Partial::Present(name) => result.push_str(name.data(db)),
+            Partial::Absent => result.push_str("<anonymous>"),
+        }
 
         // Generic parameters
         result.push_str(&self.generic_params(db).pretty_print_params(db));
 
         // Parameters
-        let params = unwrap_partial(self.params_list(db), "Func::params_list");
-        result.push_str(&params.pretty_print(db));
+        match self.params_list(db) {
+            Partial::Present(params) => result.push_str(&params.pretty_print(db)),
+            Partial::Absent => result.push_str("(..)"),
+        }
 
         // Return type (comes before effects)
         if let Some(ret_ty) = self.ret_type_ref(db) {
@@ -1061,12 +1182,7 @@ impl<'db> FieldDefListId<'db> {
 
         let fields_str = fields
             .iter()
-            .map(|f| {
-                let vis = f.vis.pretty_print();
-                let name = unwrap_partial(f.name, "FieldDef::name");
-                let ty = unwrap_partial(f.type_ref, "FieldDef::type_ref");
-                format!("    {}{}: {}", vis, name.data(db), ty.pretty_print(db))
-            })
+            .map(|f| format_field_def(f, db, 1))
             .collect::<Vec<_>>()
             .join(",\n");
 
@@ -1116,7 +1232,7 @@ impl<'db> VariantDefListId<'db> {
 
         let variants_str = variants
             .iter()
-            .map(|v| format!("    {}", v.pretty_print(db)))
+            .map(|v| indent_text(&v.pretty_print(db), 1))
             .collect::<Vec<_>>()
             .join(",\n");
 
@@ -1127,8 +1243,9 @@ impl<'db> VariantDefListId<'db> {
 impl<'db> VariantDef<'db> {
     /// Pretty-prints a variant definition.
     pub fn pretty_print(&self, db: &dyn HirDb) -> String {
+        let mut result = self.attributes.pretty_print_with_newline(db);
         let name = unwrap_partial(self.name, "VariantDef::name");
-        let mut result = name.data(db).to_string();
+        result.push_str(name.data(db));
 
         match &self.kind {
             VariantKind::Unit => {}
@@ -1179,21 +1296,14 @@ impl<'db> Contract<'db> {
         result.push_str(" {\n");
 
         // Fields
-        for field in self.fields(db).data(db) {
-            let vis = field.vis.pretty_print();
-            let name = unwrap_partial(field.name, "Contract field::name");
-            let ty = unwrap_partial(field.type_ref, "Contract field::type_ref");
-            result.push_str(&format!(
-                "    {}{}: {},\n",
-                vis,
-                name.data(db),
-                ty.pretty_print(db)
-            ));
+        for field in self.hir_fields(db).data(db) {
+            let field_str = format_field_def(field, db, 1);
+            result.push_str(&format!("{},\n", field_str));
         }
 
         // Get child items (init function, etc.)
-        let scope_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
+        let scope_graph = scope.scope_graph(db);
         for item in scope_graph.child_items(scope) {
             if let ItemKind::Func(func) = item {
                 result.push('\n');
@@ -1277,6 +1387,7 @@ impl<'db> Trait<'db> {
 
         // Associated types
         for assoc_ty in self.types(db) {
+            write_attrs(&mut result, assoc_ty.attributes, db, 1);
             result.push_str("    type ");
             let name = unwrap_partial(assoc_ty.name, "AssocTyDecl::name");
             result.push_str(name.data(db));
@@ -1299,6 +1410,7 @@ impl<'db> Trait<'db> {
 
         // Associated consts
         for assoc_const in self.consts(db) {
+            write_attrs(&mut result, assoc_const.attributes, db, 1);
             result.push_str("    const ");
             let name = unwrap_partial(assoc_const.name, "AssocConstDecl::name");
             result.push_str(name.data(db));
@@ -1391,6 +1503,7 @@ impl<'db> ImplTrait<'db> {
 
         // Associated types
         for assoc_ty in self.types(db) {
+            write_attrs(&mut result, assoc_ty.attributes, db, 1);
             result.push_str("    type ");
             let name = unwrap_partial(assoc_ty.name, "AssocTyDef::name");
             result.push_str(name.data(db));
@@ -1402,6 +1515,7 @@ impl<'db> ImplTrait<'db> {
 
         // Associated consts
         for assoc_const in self.hir_consts(db) {
+            write_attrs(&mut result, assoc_const.attributes, db, 1);
             result.push_str("    const ");
             let name = unwrap_partial(assoc_const.name, "AssocConstDef::name");
             result.push_str(name.data(db));
@@ -1492,6 +1606,9 @@ impl<'db> Use<'db> {
     pub fn pretty_print(self, db: &'db dyn HirDb) -> String {
         let mut result = String::new();
 
+        // Attributes
+        result.push_str(&self.attributes(db).pretty_print_with_newline(db));
+
         // Visibility
         result.push_str(self.vis(db).pretty_print());
 
@@ -1559,22 +1676,6 @@ impl<'db> TopLevelMod<'db> {
         print_items_with_extern_blocks(&mut result, db, &items, 0);
         result
     }
-
-    /// Pretty-prints only the desugared output, skipping contract definitions.
-    ///
-    /// This is useful for testing contract desugaring: contracts generate
-    /// synthetic functions during lowering, so printing both the contract
-    /// and its desugared functions would cause duplicates on roundtrip.
-    /// By skipping contracts, we print only the desugared result.
-    pub fn pretty_print_desugared(self, db: &'db dyn HirDb) -> String {
-        let mut result = String::new();
-        let items: Vec<_> = self
-            .children_non_nested(db)
-            .filter(|item| !matches!(item, ItemKind::Contract(_)))
-            .collect();
-        print_items_with_extern_blocks(&mut result, db, &items, 0);
-        result
-    }
 }
 
 /// Prints a list of items, grouping extern functions into extern blocks.
@@ -1616,8 +1717,9 @@ fn print_items_with_extern_blocks<'db>(
     };
 
     for item in items {
-        // Check if this is an extern function (function without body at module level)
+        // Check if this is an extern function (function declared within an `extern { ... }` block)
         if let ItemKind::Func(func) = item
+            && func.is_extern(db)
             && func.body(db).is_none()
         {
             extern_funcs.push(*func);

@@ -1,0 +1,13 @@
+contract Foo {
+    x: i32
+
+    /// Initializes the contract.
+    init() {}
+
+    /// Handles Erc20 messages.
+    recv Erc20 {
+        Balance { addr } -> u256 {
+            0
+        }
+    }
+}

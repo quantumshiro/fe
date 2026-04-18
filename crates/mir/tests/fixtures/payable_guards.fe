@@ -1,0 +1,32 @@
+use std::abi::sol
+
+contract PayableInitAndRecv {
+    #[payable]
+    init() {}
+
+    recv Msg {
+        #[payable]
+        Fund {} {}
+
+        Ping {} {}
+    }
+}
+
+contract NoInitContract {
+    recv NoInitMsg {
+        Ping {} {}
+    }
+}
+
+msg Msg {
+    #[selector = sol("fund()")]
+    Fund,
+
+    #[selector = sol("ping()")]
+    Ping,
+}
+
+msg NoInitMsg {
+    #[selector = sol("ping()")]
+    Ping,
+}

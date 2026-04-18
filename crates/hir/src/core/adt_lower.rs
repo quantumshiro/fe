@@ -15,7 +15,7 @@ pub fn lower_contract_fields<'db>(
     db: &'db dyn HirAnalysisDb,
     contract: Contract<'db>,
 ) -> AdtField<'db> {
-    collect_field_types(db, contract.scope(), contract.fields(db))
+    collect_field_types(db, contract.scope(), contract.hir_fields(db))
 }
 
 /// Lower HIR ADT definition (`struct/enum`) to [`AdtDef`].

@@ -9,13 +9,14 @@ use num_bigint::BigUint;
 
 use super::{
     binder::Binder,
+    const_expr::{ConstExpr, ConstExprId},
     fold::{TyFoldable, TyFolder},
     trait_def::{ImplementorId, TraitInstId},
     ty_def::{ApplicableTyProp, Kind, TyData, TyId, TyVar, TyVarSort, inference_keys},
 };
 use crate::analysis::{
     HirAnalysisDb,
-    ty::const_ty::{ConstTyData, EvaluatedConstTy},
+    ty::const_ty::{ConstTyData, EvaluatedConstTy, normalize_const_tys_for_comparison},
 };
 
 pub(crate) type UnificationTable<'db> = UnificationTableBase<'db, InPlace<InferenceKey<'db>>>;
@@ -92,6 +93,10 @@ where
         self.table.snapshot()
     }
 
+    pub fn commit(&mut self, snapshot: Snapshot<U>) {
+        self.table.commit(snapshot);
+    }
+
     pub fn unify<T>(&mut self, lhs: T, rhs: T) -> UnificationResult
     where
         T: Unifiable<'db>,
@@ -147,6 +152,24 @@ where
             | (_, TyData::Never) => Ok(()),
 
             (TyData::ConstTy(const_ty1), TyData::ConstTy(const_ty2)) => {
+                let const_ty1 = match normalize_const_tys_for_comparison(
+                    self.db,
+                    TyId::const_ty(self.db, *const_ty1),
+                )
+                .data(self.db)
+                {
+                    TyData::ConstTy(const_ty) => *const_ty,
+                    _ => *const_ty1,
+                };
+                let const_ty2 = match normalize_const_tys_for_comparison(
+                    self.db,
+                    TyId::const_ty(self.db, *const_ty2),
+                )
+                .data(self.db)
+                {
+                    TyData::ConstTy(const_ty) => *const_ty,
+                    _ => *const_ty2,
+                };
                 self.unify_ty(const_ty1.ty(self.db), const_ty2.ty(self.db))?;
 
                 match (const_ty1.data(self.db), const_ty2.data(self.db)) {
@@ -158,12 +181,21 @@ where
 
                     (_, ConstTyData::TyVar(var, _)) => self.unify_var_value(var, ty1),
 
+                    (ConstTyData::Hole(..), _) | (_, ConstTyData::Hole(..)) => Ok(()),
+
                     (ConstTyData::TyParam(..), ConstTyData::TyParam(..))
-                    | (ConstTyData::Evaluated(..), ConstTyData::Evaluated(..)) => {
+                    | (ConstTyData::Evaluated(..), ConstTyData::Evaluated(..))
+                    | (ConstTyData::Abstract(..), ConstTyData::Abstract(..)) => {
                         if const_ty1 == const_ty2 {
                             Ok(())
                         } else {
-                            Err(UnificationError::TypeMismatch)
+                            match (const_ty1.data(self.db), const_ty2.data(self.db)) {
+                                (
+                                    ConstTyData::Abstract(expr1, _),
+                                    ConstTyData::Abstract(expr2, _),
+                                ) => self.unify_const_expr(*expr1, *expr2),
+                                _ => Err(UnificationError::TypeMismatch),
+                            }
                         }
                     }
 
@@ -184,6 +216,108 @@ where
                 Err(UnificationError::TypeMismatch)
             }
 
+            _ => Err(UnificationError::TypeMismatch),
+        }
+    }
+
+    fn unify_const_expr(
+        &mut self,
+        expr1: ConstExprId<'db>,
+        expr2: ConstExprId<'db>,
+    ) -> UnificationResult {
+        use ConstExpr::*;
+
+        if expr1 == expr2 {
+            return Ok(());
+        }
+
+        match (expr1.data(self.db), expr2.data(self.db)) {
+            (TraitConst(assoc1), TraitConst(assoc2)) => {
+                if assoc1.name() != assoc2.name() {
+                    return Err(UnificationError::TypeMismatch);
+                }
+                self.unify(assoc1.inst(), assoc2.inst())
+            }
+            (
+                ArithBinOp {
+                    op: op1,
+                    lhs: lhs1,
+                    rhs: rhs1,
+                },
+                ArithBinOp {
+                    op: op2,
+                    lhs: lhs2,
+                    rhs: rhs2,
+                },
+            ) => {
+                if op1 != op2 {
+                    return Err(UnificationError::TypeMismatch);
+                }
+                self.unify_ty(*lhs1, *lhs2)?;
+                self.unify_ty(*rhs1, *rhs2)
+            }
+            (
+                UnOp {
+                    op: op1,
+                    expr: inner1,
+                },
+                UnOp {
+                    op: op2,
+                    expr: inner2,
+                },
+            ) => {
+                if op1 != op2 {
+                    return Err(UnificationError::TypeMismatch);
+                }
+                self.unify_ty(*inner1, *inner2)
+            }
+            (Cast { expr: e1, to: t1 }, Cast { expr: e2, to: t2 }) => {
+                self.unify_ty(*t1, *t2)?;
+                self.unify_ty(*e1, *e2)
+            }
+            (
+                ExternConstFnCall {
+                    func: f1,
+                    generic_args: ga1,
+                    args: a1,
+                },
+                ExternConstFnCall {
+                    func: f2,
+                    generic_args: ga2,
+                    args: a2,
+                },
+            )
+            | (
+                UserConstFnCall {
+                    func: f1,
+                    generic_args: ga1,
+                    args: a1,
+                },
+                UserConstFnCall {
+                    func: f2,
+                    generic_args: ga2,
+                    args: a2,
+                },
+            ) => {
+                if f1 != f2 || ga1.len() != ga2.len() || a1.len() != a2.len() {
+                    return Err(UnificationError::TypeMismatch);
+                }
+
+                for (&g1, &g2) in ga1.iter().zip(ga2.iter()) {
+                    self.unify_ty(g1, g2)?;
+                }
+                for (&arg1, &arg2) in a1.iter().zip(a2.iter()) {
+                    self.unify_ty(arg1, arg2)?;
+                }
+                Ok(())
+            }
+            (LocalBinding(b1), LocalBinding(b2)) => {
+                if b1 == b2 {
+                    Ok(())
+                } else {
+                    Err(UnificationError::TypeMismatch)
+                }
+            }
             _ => Err(UnificationError::TypeMismatch),
         }
     }
@@ -288,7 +422,7 @@ where
                 self.table.unify_var_var(var1.key, var2.key)
             }
 
-            (TyVarSort::String(_), TyVarSort::String(_)) => {
+            (TyVarSort::String { .. }, TyVarSort::String { .. }) => {
                 self.table.unify_var_var(var1.key, var2.key)
             }
 
@@ -346,11 +480,17 @@ where
                 }
             }
 
-            TyVarSort::String(n_var) => {
+            TyVarSort::String { min_len, .. } => {
                 let (base, args) = value.decompose_ty_app(self.db);
 
                 if base.is_never(self.db) {
                     return Ok(());
+                }
+
+                if value.is_core_dyn_string(self.db) {
+                    return self
+                        .table
+                        .unify_var_value(root_var.key, InferenceValue::Bound(value));
                 }
 
                 if !base.is_string(self.db) || args.len() != 1 {
@@ -367,7 +507,7 @@ where
                     return Ok(());
                 };
 
-                if &BigUint::from(n_var) <= n_value.data(self.db) {
+                if &BigUint::from(min_len) <= n_value.data(self.db) {
                     self.table
                         .unify_var_value(root_var.key, InferenceValue::Bound(value))
                 } else {
@@ -532,6 +672,14 @@ where
     fn fold_ty(&mut self, db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> TyId<'db> {
         let (shallow_resolved, key) = match ty.data(db) {
             TyData::TyVar(var) if !self.var_stack.contains(&var.key) => {
+                if var.key.0 as usize >= self.table.len() {
+                    panic!(
+                        "inference key out of bounds in TyVarResolver: key={:?}, table_len={}, ty={}",
+                        var.key,
+                        self.table.len(),
+                        ty.pretty_print(db)
+                    );
+                }
                 match self.table.probe_impl(var.key) {
                     Either::Left(ty) => (ty, var.key),
                     Either::Right(var) => return TyId::ty_var(db, var.sort, var.kind, var.key),
@@ -540,6 +688,14 @@ where
 
             TyData::ConstTy(cty) => match cty.data(db) {
                 ConstTyData::TyVar(var, ty) if !self.var_stack.contains(&var.key) => {
+                    if var.key.0 as usize >= self.table.len() {
+                        panic!(
+                            "inference key out of bounds in const TyVarResolver: key={:?}, table_len={}, const_ty={}",
+                            var.key,
+                            self.table.len(),
+                            ty.pretty_print(db)
+                        );
+                    }
                     match self.table.probe_impl(var.key) {
                         Either::Left(ty) => (ty, var.key),
                         Either::Right(var) => {

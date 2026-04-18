@@ -1,0 +1,53 @@
+use std::evm::{Address, Call, Evm}
+use std::evm::effects::assert
+
+msg VerifierMsg {
+    #[selector = 0x70000001]
+    Verify {
+        a: [u256; 2],
+        b: [[u256; 2]; 2],
+        c: [u256; 2],
+        pub_signals: [u256; 38],
+    } -> bool,
+}
+
+pub contract Verifier {
+    recv VerifierMsg {
+        Verify { a, b, c, pub_signals } -> bool {
+            a[0] == 1 && b[0][0] == 2 && c[0] == 3 && pub_signals[37] == 4
+        }
+    }
+}
+
+msg CallerMsg {
+    #[selector = 0x70000002]
+    Check { target: Address } -> bool,
+}
+
+pub contract Caller uses (call: mut Call) {
+    recv CallerMsg {
+        Check { target } -> bool uses (mut call) {
+            let mut pub_signals: [u256; 38] = [0; 38]
+            pub_signals[37] = 4
+            call.call(
+                addr: target,
+                gas: 500000,
+                value: 0,
+                message: VerifierMsg::Verify {
+                    a: [1, 0],
+                    b: [[2, 0], [0, 0]],
+                    c: [3, 0],
+                    pub_signals: pub_signals,
+                },
+            )
+        }
+    }
+}
+
+#[test]
+fn test_msg_nested_array_arg() uses (evm: mut Evm) {
+    let verifier = evm.create2<Verifier>(value: 0, args: (), salt: 1)
+    let caller = evm.create2<Caller>(value: 0, args: (), salt: 2)
+    let ok: bool = evm.call(addr: caller, gas: 500000, value: 0, message: CallerMsg::Check { target: verifier })
+    assert(ok)
+}

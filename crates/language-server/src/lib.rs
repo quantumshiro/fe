@@ -1,0 +1,189 @@
+mod backend;
+pub mod cli;
+pub mod combined_server;
+mod fallback;
+mod functionality;
+pub mod logging;
+mod lsp_actor;
+mod lsp_diagnostics;
+mod lsp_streams;
+pub(crate) mod panic_context;
+mod server;
+#[cfg(test)]
+mod test_utils;
+mod util;
+mod virtual_files;
+pub mod ws_lsp;
+
+#[cfg(test)]
+mod mock_client_tests;
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use async_compat::CompatExt;
+use async_lsp::client_monitor::ClientProcessMonitorLayer;
+use async_lsp::concurrency::ConcurrencyLayer;
+use async_lsp::panic::CatchUnwindLayer;
+use async_lsp::server::LifecycleLayer;
+use async_std::net::TcpListener;
+use futures::StreamExt;
+use futures::io::AsyncReadExt;
+use server::{setup, setup_service, spawn_backend};
+use tokio::sync::{broadcast, watch};
+use tower::ServiceBuilder;
+use tracing::instrument::WithSubscriber;
+use tracing::{error, info};
+
+pub use backend::DocRegenerateFn;
+pub use logging::setup_panic_hook;
+
+/// Configuration for the combined HTTP+WS doc/LSP server.
+pub struct CombinedServerConfig {
+    pub listener: tokio::net::TcpListener,
+    pub doc_html: String,
+    /// Base URL for the documentation server (e.g. "http://127.0.0.1:9000").
+    /// Passed to Backend so `fe.openDocs` can construct full URLs.
+    pub docs_url: Option<String>,
+    /// Closure for regenerating doc+SCIP data from a db snapshot.
+    pub doc_regenerate_fn: Option<DocRegenerateFn>,
+}
+
+pub async fn run_stdio_server(combined: Option<CombinedServerConfig>) {
+    // Channels for sharing the Backend actor with the combined server
+    let (actor_tx, actor_rx) = watch::channel(None);
+    let (doc_nav_tx, _doc_nav_rx) = broadcast::channel::<String>(64);
+
+    // Doc reload channel: Backend sends reload payloads, combined server forwards to WS clients
+    let (doc_reload_tx, _doc_reload_rx) = broadcast::channel::<String>(16);
+
+    // Extract docs_url and doc_regenerate_fn before moving combined config
+    let docs_url = combined.as_ref().and_then(|c| c.docs_url.clone());
+    let doc_regenerate_fn = combined.as_ref().and_then(|c| c.doc_regenerate_fn.clone());
+
+    // Start the combined server if configured
+    if let Some(config) = combined {
+        let combined_actor_rx = actor_rx.clone();
+        let combined_nav_tx = doc_nav_tx.clone();
+        let combined_reload_tx = doc_reload_tx.clone();
+        tokio::spawn(async move {
+            combined_server::run(
+                config.listener,
+                config.doc_html,
+                combined_actor_rx,
+                combined_nav_tx,
+                combined_reload_tx,
+            )
+            .await;
+        });
+    }
+
+    let doc_nav_tx_for_backend = doc_nav_tx.clone();
+    let doc_reload_tx_for_backend = doc_reload_tx.clone();
+
+    let (server, client) = async_lsp::MainLoop::new_server(|client| {
+        let actor_ref = spawn_backend(
+            client.clone(),
+            "LSP actor".to_string(),
+            Some(doc_nav_tx_for_backend.clone()),
+            doc_regenerate_fn.clone(),
+            Some(doc_reload_tx_for_backend.clone()),
+            docs_url.clone(),
+        );
+        // Publish the actor ref so the combined server can use it
+        let _ = actor_tx.send(Some(actor_ref.clone()));
+
+        let lsp_service = setup_service(actor_ref, client.clone());
+        ServiceBuilder::new()
+            .layer(LifecycleLayer::default())
+            .layer(CatchUnwindLayer::default())
+            .layer(ConcurrencyLayer::default())
+            .layer(ClientProcessMonitorLayer::new(client.clone()))
+            .service(lsp_service)
+    });
+
+    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+    let (stdin, stdout) = (stdin.compat(), stdout.compat());
+
+    let logging = logging::setup_default_subscriber(client);
+    // Emit the startup diagnostic line to the freshly-installed subscriber.
+    // This is the first line in the file log and carries everything
+    // needed to identify which process this is (pid, parent_pid, argv,
+    // cwd, binary path, log file path, version).
+    logging::log_startup_info();
+    match server.run_buffered(stdin, stdout).await {
+        Ok(_) => info!("Server finished successfully"),
+        Err(e) => error!("Server error: {:?}", e),
+    }
+    drop(logging);
+}
+
+pub async fn run_tcp_server(port: u16, timeout: Duration) {
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = TcpListener::bind(&addr)
+        .await
+        .expect("Failed to bind to address");
+    let mut incoming = listener.incoming();
+    let connections_count = Arc::new(AtomicUsize::new(0));
+
+    info!("LSP server is listening on {}", addr);
+
+    while let Some(Ok(stream)) = incoming.next().with_current_subscriber().await {
+        let client_address = stream.peer_addr().unwrap();
+        let connections_count = Arc::clone(&connections_count);
+        let task = async move {
+            let (server, client) = async_lsp::MainLoop::new_server(|client| {
+                let router = setup(client.clone(), format!("LSP actor for {client_address}"));
+                ServiceBuilder::new()
+                    .layer(LifecycleLayer::default())
+                    .layer(CatchUnwindLayer::default())
+                    .layer(ConcurrencyLayer::default())
+                    .layer(ClientProcessMonitorLayer::new(client.clone()))
+                    .service(router)
+            });
+            let logging = logging::setup_default_subscriber(client);
+            let current_connections = connections_count.fetch_add(1, Ordering::SeqCst) + 1;
+            info!(
+                "New client connected. Total clients: {}",
+                current_connections
+            );
+
+            let (read, write) = stream.split();
+            if let Err(e) = server.run_buffered(read, write).await {
+                error!("Server error for client {}: {:?}", client_address, e);
+            } else {
+                info!("Client {} disconnected", client_address);
+            }
+            let current_connections = connections_count.fetch_sub(1, Ordering::SeqCst) - 1;
+            info!(
+                "Client disconnected. Total clients: {}",
+                current_connections
+            );
+            drop(logging);
+        };
+        tokio::spawn(task.with_current_subscriber());
+    }
+
+    let timeout_task = {
+        let connections_count = Arc::clone(&connections_count);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if connections_count.load(Ordering::Relaxed) == 0 {
+                    tokio::time::sleep(timeout).await;
+                    if connections_count.load(Ordering::Relaxed) == 0 {
+                        info!(
+                            "No clients connected for {:?}. Shutting down server.",
+                            timeout
+                        );
+                        std::process::exit(0);
+                    }
+                }
+            }
+        })
+    };
+
+    timeout_task.await.unwrap();
+}

@@ -1,0 +1,12 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/recv_fallback_named_block.fe
+---
+error[8-0078]: fallback arm is only allowed in a bare recv block
+  ┌─ recv_fallback_named_block.fe:9:9
+  │
+9 │         _ {}
+  │         ^ fallback arm `_` is only allowed in `recv { ... }`
+  │
+  = named recv blocks remain exhaustive over their declared msg root

@@ -1,0 +1,30 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/unit_method_call.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %call_unit_method() {
+    block0:
+        call %counter_h872958864d1ad471_increment;
+        return;
+}
+
+func private %counter_h872958864d1ad471_increment() {
+    block0:
+        return;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        call %call_unit_method;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

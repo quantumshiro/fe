@@ -1,0 +1,27 @@
+---
+source: crates/hir/tests/desugar.rs
+expression: output
+input_file: test_files/desugar/event_mixed_data.fe
+---
+use core::prelude::*
+use std::prelude::*
+use std::evm::Address
+
+struct Mixed {
+    from: Address,
+    flag: bool,
+    value: i128,
+}
+
+impl std::evm::Event for Mixed {
+    const TOPIC0: u256 = core::keccak(("Mixed", "(", Address::SOL_TYPE, ",", bool::SOL_TYPE, ",", i128::SOL_TYPE, ")"))
+
+    fn emit<L: std::evm::Log>(own self, _ log: mut L) {
+        let mut enc = std::abi::SolEncoder::new()
+        let data_len = 0 + bool::ENCODED_SIZE + i128::ENCODED_SIZE
+        enc.reserve_head(data_len)
+        (self.flag, self.value).encode(mut enc)
+        let (data_ptr, data_len) = enc.finish()
+        log.log2(offset: data_ptr, len: data_len, topic0: Self::TOPIC0, topic1: self.from.as_topic())
+    }
+}

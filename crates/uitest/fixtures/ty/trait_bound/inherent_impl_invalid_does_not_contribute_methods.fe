@@ -1,0 +1,23 @@
+trait Marker {}
+
+impl Marker for i32 {}
+
+struct Container<T: Marker> {
+    value: T,
+}
+
+impl<T> Container<T> {
+    fn tag(self) -> bool {
+        true
+    }
+}
+
+impl Container<i32> {
+    fn tag(self) -> bool {
+        false
+    }
+}
+
+fn caller(container: Container<i32>) -> bool {
+    container.tag()
+}

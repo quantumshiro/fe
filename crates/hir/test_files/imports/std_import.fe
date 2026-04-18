@@ -1,10 +1,9 @@
-use std::evm::ops::{sload, sstore}
+use std::evm::{assert, revert}
 
-fn increment(slot: u256) {
-    let x = sload(slot)
-    sstore(slot, value: x + 1)
+fn increment(_ val: u256) -> u256 {
+    return val + 1
 }
 
 fn f() {
-    increment(slot: 0)
+    assert(increment(0) == 1)
 }

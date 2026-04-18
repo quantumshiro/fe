@@ -8,24 +8,16 @@ use crate::analysis::{
     },
 };
 
-/// Return `true` if the given `scope` is visible from `from_scope`.
-pub(crate) fn is_scope_visible_from(
-    db: &dyn HirAnalysisDb,
-    scope: ScopeId,
-    from_scope: ScopeId,
-) -> bool {
-    // If resolved is public, then it is visible.
-    if scope.data(db).vis.is_pub() {
-        return true;
-    }
-
-    let Some(def_scope) = (match scope {
+/// Compute the "defining scope" for visibility purposes.
+///
+/// For a private item, this is the scope within which the item is visible.
+/// - For associated functions: the parent of the parent item (i.e. the module containing the impl/trait)
+/// - For trait members: always visible (returns `None` to signal "always visible")
+/// - For fields/variants: the parent of the containing type
+/// - For other items: the direct parent scope
+fn def_scope_for_vis<'db>(db: &'db dyn HirAnalysisDb, scope: ScopeId<'db>) -> Option<ScopeId<'db>> {
+    match scope {
         ScopeId::Item(ItemKind::Func(func)) => {
-            let parent_item = scope.parent_item(db);
-            if matches!(parent_item, Some(ItemKind::Trait(..))) {
-                return true;
-            }
-
             if func.is_associated_func(db) {
                 scope
                     .parent_item(db)
@@ -39,13 +31,57 @@ pub(crate) fn is_scope_visible_from(
             let parent_item = scope.item();
             ScopeId::Item(parent_item).parent(db)
         }
-
         _ => scope.parent(db),
-    }) else {
-        return false;
-    };
+    }
+}
 
-    from_scope.is_transitive_child_of(db, def_scope)
+/// Return `true` if the given `scope` is visible from `from_scope`.
+pub fn is_scope_visible_from(db: &dyn HirAnalysisDb, scope: ScopeId, from_scope: ScopeId) -> bool {
+    use crate::core::hir_def::item::Visibility;
+
+    let vis = scope.data(db).vis;
+
+    // Fast path: unrestricted `pub` is visible everywhere.
+    if vis.is_pub() {
+        return true;
+    }
+
+    // Trait members are always visible regardless of their declared visibility.
+    if matches!(scope, ScopeId::Item(ItemKind::Func(_)))
+        && matches!(scope.parent_item(db), Some(ItemKind::Trait(..)))
+    {
+        return true;
+    }
+
+    match vis {
+        Visibility::Public => unreachable!(),
+
+        Visibility::PubIngot => {
+            // Visible within the same ingot.
+            scope.ingot(db) == from_scope.ingot(db)
+        }
+
+        Visibility::PubSuper => {
+            // Visible within the grandparent scope (parent of the defining module).
+            let Some(def_scope) = def_scope_for_vis(db, scope) else {
+                return false;
+            };
+            match def_scope.parent(db) {
+                Some(parent_of_def) => from_scope.is_transitive_child_of(db, parent_of_def),
+                // At the ingot root, pub(super) behaves like pub(ingot)
+                // (matches Rust where pub(super) at crate root = pub(crate)).
+                None => scope.ingot(db) == from_scope.ingot(db),
+            }
+        }
+
+        Visibility::Private => {
+            // Visible within the defining scope only.
+            let Some(def_scope) = def_scope_for_vis(db, scope) else {
+                return false;
+            };
+            from_scope.is_transitive_child_of(db, def_scope)
+        }
+    }
 }
 
 pub(crate) fn is_ty_visible_from(db: &dyn HirAnalysisDb, ty: TyId, from_scope: ScopeId) -> bool {
@@ -68,7 +104,9 @@ pub(crate) fn is_ty_visible_from(db: &dyn HirAnalysisDb, ty: TyId, from_scope: S
             ConstTyData::TyParam(param, _) => {
                 is_scope_visible_from(db, param.scope(db), from_scope)
             }
+            ConstTyData::Hole(..) => true,
             ConstTyData::Evaluated(_, _) => true,
+            ConstTyData::Abstract(_, _) => true,
             ConstTyData::UnEvaluated { body, .. } => {
                 is_scope_visible_from(db, body.scope(), from_scope)
             }
@@ -84,11 +122,5 @@ pub(crate) fn is_ty_visible_from(db: &dyn HirAnalysisDb, ty: TyId, from_scope: S
 /// Return `true` if the given `use_` is visible from the `ref_scope`.
 pub(super) fn is_use_visible(db: &dyn HirAnalysisDb, ref_scope: ScopeId, use_: Use) -> bool {
     let use_scope = ScopeId::from_item(use_.into());
-
-    if use_scope.data(db).vis.is_pub() {
-        return true;
-    }
-
-    let use_def_scope = use_scope.parent(db).unwrap();
-    ref_scope.is_transitive_child_of(db, use_def_scope)
+    is_scope_visible_from(db, use_scope, ref_scope)
 }

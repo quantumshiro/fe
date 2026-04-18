@@ -1,0 +1,18 @@
+use std::abi::sol
+
+msg WalletMsg {
+    #[selector = sol("peek()")]
+    Peek -> u256,
+}
+
+pub contract Wallet {
+    recv {
+        WalletMsg::Peek {} -> u256 {
+            7
+        }
+
+        _ uses (ctx) {
+            ctx.value()
+        }
+    }
+}

@@ -1,0 +1,33 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/newtype_u8_word_conversion.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_Container_0 = {i8, i256};
+
+func private %newtype_u8_roundtrip(v0.i8) -> i8 {
+    block0:
+        v1.objref<@__fe_obj_Container_0> = obj.alloc @__fe_obj_Container_0;
+        v3.objref<i8> = obj.proj v1 0.i256;
+        obj.store v3 v0;
+        v5.objref<i256> = obj.proj v1 1.i256;
+        obj.store v5 0.i256;
+        v6.objref<i8> = obj.proj v1 0.i256;
+        v7.i8 = obj.load v6;
+        return v7;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v2.i8 = call %newtype_u8_roundtrip 0.i8;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

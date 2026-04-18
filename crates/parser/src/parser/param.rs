@@ -6,7 +6,7 @@ use crate::{ExpectedKind, ParseError, SyntaxKind};
 
 use super::{
     ErrProof, Parser, Recovery, define_scope,
-    expr::parse_expr,
+    expr::{parse_const_generic_expr, parse_expr},
     expr_atom::{BlockExprScope, LitExprScope},
     parse_list,
     path::PathScope,
@@ -39,6 +39,21 @@ impl super::Parse for FnParamScope {
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
         parser.bump_if(SyntaxKind::MutKw);
+        let lookahead = parser.peek_n_non_trivia(2);
+        let allow_ref_self_shorthand = matches!(
+            lookahead.as_slice(),
+            [SyntaxKind::RefKw, SyntaxKind::SelfKw]
+        );
+        let allow_own_self_shorthand = matches!(
+            lookahead.as_slice(),
+            [SyntaxKind::OwnKw, SyntaxKind::SelfKw]
+        );
+        if allow_ref_self_shorthand {
+            parser.bump_expected(SyntaxKind::RefKw);
+        }
+        if allow_own_self_shorthand {
+            parser.bump_expected(SyntaxKind::OwnKw);
+        }
         parser.expect(
             &[
                 SyntaxKind::SelfKw,
@@ -58,7 +73,27 @@ impl super::Parse for FnParamScope {
                     parse_type(parser, None)?;
                 }
             }
-            Some(SyntaxKind::Ident | SyntaxKind::Underscore) => {
+            Some(SyntaxKind::Ident) => {
+                parser.bump();
+
+                if matches!(
+                    parser.current_kind(),
+                    Some(SyntaxKind::Ident | SyntaxKind::Underscore)
+                ) {
+                    parser.error_msg_on_current_token(
+                        "parameter label renaming is not supported; use the parameter name as the label",
+                    );
+                    parser.bump();
+                }
+                if parser.find(
+                    SyntaxKind::Colon,
+                    ExpectedKind::TypeSpecifier(SyntaxKind::FnParam),
+                )? {
+                    parser.bump();
+                    parse_type(parser, None)?;
+                }
+            }
+            Some(SyntaxKind::Underscore) => {
                 parser.bump();
 
                 parser.expect(
@@ -107,7 +142,9 @@ impl super::Parse for GenericParamListScope {
                         parser.parse(TypeGenericParamScope::new(self.disallow_trait_bound))
                     }
                     Some(SyntaxKind::Gt) => Ok(()),
-                    _ => unreachable!(),
+                    // Recovery may land on a list separator or unexpected token;
+                    // treat as empty parameter and let parse_list handle it.
+                    _ => Ok(()),
                 }
             },
         )
@@ -140,6 +177,14 @@ impl super::Parse for ConstGenericParamScope {
         // parse trait bound even though it's not allowed (checked in hir)
         if parser.current_kind() == Some(SyntaxKind::Colon) {
             parser.parse(TypeBoundListScope::new(true))?;
+        }
+
+        if parser.bump_if(SyntaxKind::Eq) {
+            if parser.current_kind() == Some(SyntaxKind::Underscore) {
+                parser.bump_expected(SyntaxKind::Underscore);
+            } else {
+                parse_const_generic_expr(parser)?;
+            }
         }
         Ok(())
     }
@@ -333,12 +378,10 @@ impl super::Parse for GenericArgScope {
         parser.set_newline_as_trivia(false);
 
         // Check if this is an associated type argument (Ident = Type)
-        let is_assoc_type = parser.dry_run(|parser| {
-            parser.current_kind() == Some(SyntaxKind::Ident) && {
-                parser.bump();
-                parser.current_kind() == Some(SyntaxKind::Eq)
-            }
-        });
+        let is_assoc_type = matches!(
+            parser.peek_n_non_trivia(2).as_slice(),
+            [SyntaxKind::Ident, SyntaxKind::Eq]
+        );
 
         if is_assoc_type {
             self.set_kind(SyntaxKind::AssocTypeGenericArg);
@@ -351,7 +394,23 @@ impl super::Parse for GenericArgScope {
             // Parse the type
             parse_type(parser, None)?;
         } else {
+            let is_const_call = parser.dry_run(|parser| {
+                parser
+                    .parse(PathScope::default())
+                    .is_ok_and(|()| parser.current_kind() == Some(SyntaxKind::LParen))
+            });
+
+            if is_const_call {
+                self.set_kind(SyntaxKind::ConstGenericArg);
+                parse_const_generic_expr(parser)?;
+                return Ok(());
+            }
+
             match parser.current_kind() {
+                Some(SyntaxKind::Underscore) => {
+                    self.set_kind(SyntaxKind::ConstGenericArg);
+                    parser.bump_expected(SyntaxKind::Underscore);
+                }
                 Some(SyntaxKind::LBrace) => {
                     self.set_kind(SyntaxKind::ConstGenericArg);
                     parser.parse(BlockExprScope::default())?;
@@ -395,9 +454,10 @@ impl super::Parse for CallArgScope {
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
         parser.set_newline_as_trivia(false);
-        let has_label = parser.dry_run(|parser| {
-            parser.bump_if(SyntaxKind::Ident) && parser.bump_if(SyntaxKind::Colon)
-        });
+        let has_label = matches!(
+            parser.peek_n_non_trivia(2).as_slice(),
+            [SyntaxKind::Ident, SyntaxKind::Colon]
+        );
 
         if has_label {
             parser.bump_expected(SyntaxKind::Ident);

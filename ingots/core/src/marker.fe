@@ -1,0 +1,62 @@
+use super::abi::{Bytes, DynArray, DynString}
+
+// Marker traits for language-level behavior.
+//
+// `Copy` is used by the compiler's ownership model: values of `Copy` types can be
+// duplicated implicitly (e.g. when assigning from a place or passing to an `own`
+// parameter). Values of non-`Copy` types are moved (consumed) implicitly when
+// used in an owned context.
+
+pub trait Copy {}
+
+// Built-in primitive types are trivially copyable.
+impl Copy for () {}
+impl<const N: usize> Copy for String<N> {}
+impl Copy for Bytes {}
+impl Copy for DynString {}
+impl<T> Copy for DynArray<T> {}
+impl<T, const N: usize> Copy for [T; N]
+    where T: Copy
+{}
+
+impl Copy for bool {}
+
+impl Copy for u8 {}
+impl Copy for u16 {}
+impl Copy for u32 {}
+impl Copy for u64 {}
+impl Copy for u128 {}
+impl Copy for u256 {}
+impl Copy for usize {}
+
+impl Copy for i8 {}
+impl Copy for i16 {}
+impl Copy for i32 {}
+impl Copy for i64 {}
+impl Copy for i128 {}
+impl Copy for i256 {}
+impl Copy for isize {}
+
+impl<T0> Copy for (T0,)
+    where T0: Copy
+{}
+
+impl<T0, T1> Copy for (T0, T1)
+    where T0: Copy, T1: Copy
+{}
+
+impl<T0, T1, T2> Copy for (T0, T1, T2)
+    where T0: Copy, T1: Copy, T2: Copy
+{}
+
+impl<T0, T1, T2, T3> Copy for (T0, T1, T2, T3)
+    where T0: Copy, T1: Copy, T2: Copy, T3: Copy
+{}
+
+impl<T0, T1, T2, T3, T4> Copy for (T0, T1, T2, T3, T4)
+    where T0: Copy, T1: Copy, T2: Copy, T3: Copy, T4: Copy
+{}
+
+impl<T0, T1, T2, T3, T4, T5> Copy for (T0, T1, T2, T3, T4, T5)
+    where T0: Copy, T1: Copy, T2: Copy, T3: Copy, T4: Copy, T5: Copy
+{}

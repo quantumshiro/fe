@@ -4,14 +4,15 @@ use salsa::Update;
 use super::{
     const_ty::{ConstTyData, ConstTyId},
     fold::{TyFoldable, TyFolder},
-    ty_def::{TyData, TyId, TyVar},
+    ty_def::{TyData, TyFlags, TyId, TyVar},
     unify::{InferenceKey, UnificationStore, UnificationTableBase},
+    visitor::{TyVisitable, collect_flags},
 };
 use crate::analysis::{HirAnalysisDb, ty::ty_def::collect_variables};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Canonical<T> {
-    pub value: T,
+    value: T,
 }
 
 impl<'db, T> Canonical<T>
@@ -24,30 +25,38 @@ where
         Canonical { value }
     }
 
-    /// Extracts the identity from the canonical value.
-    ///
-    /// This method initializes the unification table with new variables
-    /// based on the canonical value and then returns the canonical value
-    /// itself.
+    /// Materializes the canonical value into the provided table's inference
+    /// universe.
     ///
     /// # Parameters
-    /// - `table`: The unification table to be initialized with new variables.
+    /// - `table`: The unification table that receives fresh vars corresponding
+    ///   to the canonical vars in `self`.
     ///
     /// # Returns
-    /// The canonical value after initializing the unification table.
-    ///
-    /// # Panics
-    /// This function will panic if the `table` is not empty.
+    /// A copy of the canonical value where each canonical var has been
+    /// re-materialized as a fresh var in `table`.
     pub fn extract_identity<S>(self, table: &mut UnificationTableBase<'db, S>) -> T
     where
         S: UnificationStore<'db>,
     {
-        assert!(table.is_empty());
+        // Re-materialize canonical vars through the current table instead of
+        // assuming canonical keys are contiguous and start from zero.
+        let db = table.db;
+        let mut extractor = SolutionExtractor::new(table, FxHashMap::default());
+        self.value.fold_with(db, &mut extractor)
+    }
 
-        for var in collect_variables(table.db, &self.value) {
-            table.new_var(var.sort, &var.kind);
-        }
+    pub fn flags(self, db: &'db dyn HirAnalysisDb) -> TyFlags
+    where
+        T: TyVisitable<'db>,
+    {
+        collect_flags(db, self.value)
+    }
 
+    pub(crate) fn value(self) -> T
+    where
+        T: Copy,
+    {
         self.value
     }
 
@@ -107,27 +116,54 @@ where
 /// [`Solution`] that corresponds to [`Canonical`] query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Canonicalized<'db, T> {
-    pub value: Canonical<T>,
+    original: T,
+    canonical: Canonical<T>,
     // A substitution from canonical type variables to original type variables.
     subst: FxHashMap<TyId<'db>, TyId<'db>>,
 }
 
 impl<'db, T> Canonicalized<'db, T>
 where
-    T: TyFoldable<'db>,
+    T: TyFoldable<'db> + Copy,
 {
     pub fn new(db: &'db dyn HirAnalysisDb, value: T) -> Self {
         let mut canonicalizer = Canonicalizer::default();
-        let value = value.fold_with(db, &mut canonicalizer);
+        let canonical = value.fold_with(db, &mut canonicalizer);
         let map = canonicalizer
             .subst
             .into_iter()
             .map(|(orig_var, canonical_var)| (canonical_var, orig_var))
             .collect();
         Canonicalized {
-            value: Canonical { value },
+            original: value,
+            canonical: Canonical { value: canonical },
             subst: map,
         }
+    }
+
+    pub fn original(&self) -> T {
+        self.original
+    }
+
+    pub fn canonical(&self) -> Canonical<T> {
+        self.canonical
+    }
+
+    pub fn canonicalize_solution<S, U>(
+        &self,
+        db: &'db dyn HirAnalysisDb,
+        table: &mut UnificationTableBase<'db, S>,
+        solution: U,
+    ) -> Solution<U>
+    where
+        S: UnificationStore<'db>,
+        U: TyFoldable<'db> + Clone + Update,
+    {
+        self.canonical.canonicalize_solution(db, table, solution)
+    }
+
+    pub(crate) fn subst(&self) -> &FxHashMap<TyId<'db>, TyId<'db>> {
+        &self.subst
     }
 
     /// Extracts the solution from the canonicalized query.
@@ -199,6 +235,9 @@ impl<'db> TyFolder<'db> for Canonicalizer<'db> {
         if let Some(&canonical) = self.subst.get(&ty) {
             return canonical;
         }
+        if !ty.has_var(db) {
+            return ty;
+        }
 
         match ty.data(db) {
             TyData::TyVar(var) => {
@@ -228,7 +267,7 @@ impl<'db> TyFolder<'db> for Canonicalizer<'db> {
     }
 }
 
-struct SolutionExtractor<'a, 'db, S>
+pub(super) struct SolutionExtractor<'a, 'db, S>
 where
     S: UnificationStore<'db>,
 {
@@ -242,7 +281,7 @@ impl<'a, 'db, S> SolutionExtractor<'a, 'db, S>
 where
     S: UnificationStore<'db>,
 {
-    fn new(
+    pub(super) fn new(
         table: &'a mut UnificationTableBase<'db, S>,
         subst: FxHashMap<TyId<'db>, TyId<'db>>,
     ) -> Self {
@@ -279,5 +318,28 @@ where
 
             _ => ty.super_fold_with(db, self),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Canonical;
+    use crate::analysis::ty::{
+        ty_def::{Kind, TyVarSort},
+        unify::UnificationTable,
+    };
+    use crate::test_db::HirAnalysisTestDb;
+
+    #[test]
+    fn canonical_extract_identity_handles_preseeded_tables() {
+        let db = HirAnalysisTestDb::default();
+        let mut table = UnificationTable::new(&db);
+        let original = table.new_var(TyVarSort::General, &Kind::Star);
+        let canonical = Canonical::new(&db, original);
+
+        let mut scratch = UnificationTable::new(&db);
+        let _ = scratch.new_var(TyVarSort::General, &Kind::Star);
+
+        assert!(canonical.extract_identity(&mut scratch).is_ty_var(&db));
     }
 }

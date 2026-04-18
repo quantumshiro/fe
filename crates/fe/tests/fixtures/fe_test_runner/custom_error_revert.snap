@@ -1,0 +1,18 @@
+---
+source: crates/fe/tests/cli_output.rs
+expression: output
+input_file: tests/fixtures/fe_test_runner/custom_error_revert.fe
+---
+=== STDOUT ===
+PASS  [<time>] test_revert_error_any
+PASS  [<time>] test_revert_panic_selector
+PASS  [<time>] test_revert_panic_overflow
+PASS  [<time>] test_revert_panic_division_by_zero
+PASS  [<time>] test_revert_panic_assert
+PASS  [<time>] test_assert_emits_panic
+PASS  [<time>] test_unwrap_error_variant_emits_selector
+PASS  [<time>] test_unwrap_custom_error_emits_selector
+
+test result: ok. 8 passed; 0 failed
+
+=== EXIT CODE: 0 ===

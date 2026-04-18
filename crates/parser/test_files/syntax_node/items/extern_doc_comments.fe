@@ -2,5 +2,5 @@ extern {
     /// Load a word from memory.
     pub fn mload(_: u256) -> u256
     /// Store a word to memory.
-    pub fn mstore(_: u256, _: u256)
+    pub fn mstore(addr: u256, value: u256)
 }

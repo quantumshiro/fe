@@ -1,0 +1,64 @@
+---
+source: crates/hir/tests/ty_check.rs
+expression: res
+input_file: test_files/ty_check/recv_fallback.fe
+---
+note: 
+  ┌─ recv_fallback.fe:5:5
+  │
+5 │     Count -> u256,
+  │     ^^^^^ () | Count | invalid(Other)
+
+note: 
+   ┌─ recv_fallback.fe:12:9
+   │
+12 │         CounterMsg::Count {} -> u256 uses (count) {
+   │         ^^^^^^^^^^^^^^^^^^^^ Count
+
+note: 
+   ┌─ recv_fallback.fe:12:51
+   │  
+12 │           CounterMsg::Count {} -> u256 uses (count) {
+   │ ╭───────────────────────────────────────────────────^
+13 │ │             count
+14 │ │         }
+   │ ╰─────────^ u256
+
+note: 
+   ┌─ recv_fallback.fe:13:13
+   │
+13 │             count
+   │             ^^^^^ u256
+
+note: 
+   ┌─ recv_fallback.fe:16:9
+   │
+16 │         _ uses (mut count) {
+   │         ^ ()
+
+note: 
+   ┌─ recv_fallback.fe:16:28
+   │  
+16 │           _ uses (mut count) {
+   │ ╭────────────────────────────^
+17 │ │             count += 1
+18 │ │         }
+   │ ╰─────────^ ()
+
+note: 
+   ┌─ recv_fallback.fe:17:13
+   │
+17 │             count += 1
+   │             ^^^^^ u256
+
+note: 
+   ┌─ recv_fallback.fe:17:13
+   │
+17 │             count += 1
+   │             ^^^^^^^^^^ ()
+
+note: 
+   ┌─ recv_fallback.fe:17:22
+   │
+17 │             count += 1
+   │                      ^ u256

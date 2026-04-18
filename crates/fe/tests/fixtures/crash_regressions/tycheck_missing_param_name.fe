@@ -1,0 +1,21 @@
+msg Commands {
+    #[selector = 0x01]
+    GetValue -> u64,
+    #[selector = 0x02]
+    SetValue { value: u64 } -> bool,
+}
+
+pub contract Counter {
+    value: u64,
+
+    recv Commands {
+        GetValue {} -> u64 uses (value) {
+            value
+        pass
+
+        SetValue { value: v } -> bool uses (mut value) {
+            value = v
+            true
+        }
+    }
+}

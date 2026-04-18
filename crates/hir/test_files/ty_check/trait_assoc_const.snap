@@ -1,5 +1,5 @@
 ---
-source: crates/hir-analysis/tests/ty_check.rs
+source: crates/hir/tests/ty_check.rs
 expression: res
 input_file: test_files/ty_check/trait_assoc_const.fe
 ---
@@ -39,3 +39,18 @@ note:
    │
 45 │     UsesDefault::C
    │     ^^^^^^^^^^^^^^ u32
+
+note: 
+   ┌─ trait_assoc_const.fe:56:50
+   │  
+56 │   fn use_assoc_bound_const<T: HasAssoc>() -> usize {
+   │ ╭──────────────────────────────────────────────────^
+57 │ │     T::Assoc::X
+58 │ │ }
+   │ ╰─^ usize
+
+note: 
+   ┌─ trait_assoc_const.fe:57:5
+   │
+57 │     T::Assoc::X
+   │     ^^^^^^^^^^^ usize

@@ -1,0 +1,74 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/const_nested_u8_array.fe
+---
+target = "evm-ethereum-osaka"
+
+global private const [i8; 64] $__fe_const_data_0 = [1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+func private %const_nested_u8_array() -> i8 {
+    block0:
+        v0.objref<[[i8; 2]; 2]> = obj.alloc [[i8; 2]; 2];
+        v1.i256 = sym_addr $__fe_const_data_0;
+        v3.*i256 = alloca i256;
+        v4.i256 = ptr_to_int v3 i256;
+        evm_code_copy v4 v1 1.i256;
+        v5.i256 = mload v4 i256;
+        v7.i256 = evm_byte 0.i256 v5;
+        v8.i8 = trunc v7 i8;
+        v9.objref<[i8; 2]> = obj.index v0 0.i256;
+        v10.objref<i8> = obj.index v9 0.i256;
+        obj.store v10 v8;
+        v11.i256 = sym_addr $__fe_const_data_0;
+        v12.i256 = add v11 1.i256;
+        v13.*i256 = alloca i256;
+        v14.i256 = ptr_to_int v13 i256;
+        evm_code_copy v14 v12 1.i256;
+        v15.i256 = mload v14 i256;
+        v16.i256 = evm_byte 0.i256 v15;
+        v17.i8 = trunc v16 i8;
+        v18.objref<[i8; 2]> = obj.index v0 0.i256;
+        v19.objref<i8> = obj.index v18 1.i256;
+        obj.store v19 v17;
+        v20.i256 = sym_addr $__fe_const_data_0;
+        v22.i256 = add v20 32.i256;
+        v23.*i256 = alloca i256;
+        v24.i256 = ptr_to_int v23 i256;
+        evm_code_copy v24 v22 1.i256;
+        v25.i256 = mload v24 i256;
+        v26.i256 = evm_byte 0.i256 v25;
+        v27.i8 = trunc v26 i8;
+        v28.objref<[i8; 2]> = obj.index v0 1.i256;
+        v29.objref<i8> = obj.index v28 0.i256;
+        obj.store v29 v27;
+        v30.i256 = sym_addr $__fe_const_data_0;
+        v32.i256 = add v30 33.i256;
+        v33.*i256 = alloca i256;
+        v34.i256 = ptr_to_int v33 i256;
+        evm_code_copy v34 v32 1.i256;
+        v35.i256 = mload v34 i256;
+        v36.i256 = evm_byte 0.i256 v35;
+        v37.i8 = trunc v36 i8;
+        v38.objref<[i8; 2]> = obj.index v0 1.i256;
+        v39.objref<i8> = obj.index v38 1.i256;
+        obj.store v39 v37;
+        v40.objref<[i8; 2]> = obj.index v0 1.i256;
+        v41.objref<i8> = obj.index v40 0.i256;
+        v42.i8 = obj.load v41;
+        return v42;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v0.i8 = call %const_nested_u8_array;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+        data $__fe_const_data_0;
+    }
+}

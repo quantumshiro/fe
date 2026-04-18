@@ -1,0 +1,20 @@
+---
+source: crates/fe/tests/cli_output.rs
+expression: output
+input_file: tests/fixtures/cli_output/single_files/borrow_provider_if_error.fe
+---
+=== STDERR ===
+errors in file://<project>/crates/fe/tests/fixtures/cli_output/single_files/borrow_provider_if_error.fe
+
+error[8-0077]: incompatible borrow providers
+   ┌─ borrow_provider_if_error.fe:13:63
+   │
+13 │             let target: mut u256 = if pick { mut value } else { mut local }
+   │                                            -------------      ^^^^^^^^^^^^^ this borrow is memory-backed
+   │                                            │                   
+   │                                            the previous value here is storage-backed
+   │
+   = Fe cannot assign or join `mut`/`ref` values backed by different providers into one value
+
+
+=== EXIT CODE: 1 ===

@@ -12,7 +12,7 @@ pub enum SyntaxKind {
 
     #[regex(r"(\n|\r\n|\r)+")]
     Newline,
-    #[regex(r"[ ]+")]
+    #[regex(r"[ \t]+")]
     WhiteSpace,
     /// `foo`
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
@@ -218,6 +218,12 @@ pub enum SyntaxKind {
     /// `mut`
     #[token("mut")]
     MutKw,
+    /// `ref`
+    #[token("ref")]
+    RefKw,
+    /// `own`
+    #[token("own")]
+    OwnKw,
     /// `use`
     #[token("use")]
     UseKw,
@@ -253,6 +259,8 @@ pub enum SyntaxKind {
     BinExpr,
     /// `!x`
     UnExpr,
+    /// `expr as Type`
+    CastExpr,
     /// `foo(x, y)`
     CallExpr,
     /// `(arg: 1, y)`
@@ -293,6 +301,8 @@ pub enum SyntaxKind {
     WithParam,
     /// `1`
     LitExpr,
+    /// `let pat = expr` (condition-only expression)
+    LetExpr,
     /// `if x { 1 } else { 2 }`
     IfExpr,
     /// `match x { pat => { .. } }`
@@ -413,13 +423,14 @@ pub enum SyntaxKind {
     /// `extern { .. }`
     ExternItemList,
     ItemList,
-
-    /// `pub unsafe `
-    ItemModifier,
+    /// `(ingot)`, `(super)`, `(in path::to::module)`
+    VisRestriction,
 
     // Types. These are non-leaf nodes.
     /// `*i32`
     PtrType,
+    /// `ref T`, `mut T`, `own T`
+    ModeType,
     /// `foo::Type<T, U + 2>`
     PathType,
     /// `Self`
@@ -638,6 +649,8 @@ impl SyntaxKind {
             SyntaxKind::TypeKw => "`type`",
             SyntaxKind::LetKw => "`let`",
             SyntaxKind::MutKw => "`mut`",
+            SyntaxKind::RefKw => "`ref`",
+            SyntaxKind::OwnKw => "`own`",
             SyntaxKind::UseKw => "`use`",
             SyntaxKind::ExternKw => "`extern`",
             SyntaxKind::UnsafeKw => "`unsafe`",
@@ -661,7 +674,7 @@ impl SyntaxKind {
             SyntaxKind::TypeBound => "type bound",
             SyntaxKind::CallArgList => "function call arguments",
 
-            SyntaxKind::InvalidToken => unimplemented!(),
+            SyntaxKind::InvalidToken => "invalid token",
             SyntaxKind::WhiteSpace => "whitespace",
             SyntaxKind::Comment => "comment",
             SyntaxKind::DocComment => "doc comment",
@@ -669,6 +682,7 @@ impl SyntaxKind {
             SyntaxKind::Lit => "literal",
             SyntaxKind::BinExpr => "binary expression",
             SyntaxKind::UnExpr => "unary expression",
+            SyntaxKind::CastExpr => "cast expression",
             SyntaxKind::CallExpr => "function call expression",
             SyntaxKind::CallArg => "function call argument",
             SyntaxKind::MethodCallExpr => "method call expression",
@@ -686,6 +700,7 @@ impl SyntaxKind {
             SyntaxKind::WithParamList => "`with` parameter list",
             SyntaxKind::WithParam => "`with` parameter",
             SyntaxKind::LitExpr => "literal expression",
+            SyntaxKind::LetExpr => "`let` condition expression",
             SyntaxKind::IfExpr => "`if` expression",
             SyntaxKind::MatchExpr => "`match` expression",
             SyntaxKind::WithExpr => "`with` expression",
@@ -743,8 +758,8 @@ impl SyntaxKind {
             SyntaxKind::Extern => "`extern` block",
             SyntaxKind::ExternItemList => "`extern` body",
             SyntaxKind::ItemList => "item list",
-            SyntaxKind::ItemModifier => "item modifier",
             SyntaxKind::PtrType => "pointer type",
+            SyntaxKind::ModeType => "mode type",
             SyntaxKind::SelfType => "`Self` type",
             SyntaxKind::TupleType => "tuple type definition",
             SyntaxKind::NeverType => "never type",
@@ -776,8 +791,9 @@ impl SyntaxKind {
             SyntaxKind::UsesParam => "`uses` parameter",
             SyntaxKind::RecvArmList => "recv arm list",
             SyntaxKind::RecvArm => "recv arm",
+            SyntaxKind::VisRestriction => "visibility restriction",
             SyntaxKind::Root => "module",
-            SyntaxKind::Error => todo!(),
+            SyntaxKind::Error => "error",
         }
     }
 
@@ -850,6 +866,8 @@ impl SyntaxKind {
                 | SyntaxKind::TypeKw
                 | SyntaxKind::LetKw
                 | SyntaxKind::MutKw
+                | SyntaxKind::RefKw
+                | SyntaxKind::OwnKw
                 | SyntaxKind::UseKw
                 | SyntaxKind::ExternKw
                 | SyntaxKind::UnsafeKw

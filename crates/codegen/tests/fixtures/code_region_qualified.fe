@@ -1,0 +1,14 @@
+use std::evm::Evm
+
+#[contract_init(Foo)]
+fn init() uses (evm: mut Evm) {
+    let len = evm.code_region_len(self::runtime)
+    let offset = evm.code_region_offset(self::runtime)
+    evm.codecopy(dest: 0, offset: offset, len: len)
+    evm.return_data(offset: 0, len: len)
+}
+
+#[contract_runtime(Foo)]
+fn runtime() uses (evm: mut Evm) {
+    evm.return_data(offset: 0, len: 0)
+}

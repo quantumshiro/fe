@@ -1,0 +1,16 @@
+#[payable]
+fn foo() {}
+
+#[payable]
+struct Bar {}
+
+#[payable]
+enum Baz { A }
+
+#[payable]
+const X: u32 = 1
+
+extern {
+    #[payable]
+    pub unsafe fn ext()
+}

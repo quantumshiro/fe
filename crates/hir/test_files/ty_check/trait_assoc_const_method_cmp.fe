@@ -1,0 +1,20 @@
+trait Bytes {
+    const N: u256
+
+    fn as_bytes<T: Copy>(self, prefix: T) -> [u8; Self::N]
+}
+
+struct Pair {}
+
+impl Bytes for Pair {
+    const N: u256 = 2
+
+    fn as_bytes<T: Copy>(self, prefix: T) -> [u8; Self::N] {
+        [0, 1]
+    }
+}
+
+fn call_bytes(x: Pair) -> [u8; 2] {
+    let prefix: u8 = 0
+    x.as_bytes(prefix)
+}

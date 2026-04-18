@@ -10,8 +10,8 @@ use parser::ast;
 
 use super::{
     AttrListId, Body, EffectParamListId, FuncParamListId, FuncParamName, GenericParamListId,
-    HirIngot, IdentId, Partial, Pat, PatId, TupleTypeId, TypeBound, TypeId, UseAlias,
-    WhereClauseId,
+    HirIngot, IdentId, InlineAttr, InlineAttrErrorKind, InlineHint, Partial, Pat, PatId,
+    TupleTypeId, TypeBound, TypeId, UseAlias, WhereClauseId,
     scope_graph::{ScopeGraph, ScopeId},
 };
 use crate::{
@@ -88,6 +88,7 @@ impl<'db> ItemKind<'db> {
     /// Returns attributes being applied to this item.
     pub fn attrs(self, db: &'db dyn HirDb) -> Option<AttrListId<'db>> {
         match self {
+            Self::TopMod(top_mod) => top_mod.attributes(db),
             Self::Mod(mod_) => mod_.attributes(db),
             Self::Func(func) => func.attributes(db),
             Self::Struct(struct_) => struct_.attributes(db),
@@ -98,6 +99,7 @@ impl<'db> ItemKind<'db> {
             Self::Trait(trait_) => trait_.attributes(db),
             Self::ImplTrait(impl_trait) => impl_trait.attributes(db),
             Self::Const(const_) => const_.attributes(db),
+            Self::Use(use_) => use_.attributes(db),
             _ => return None,
         }
         .into()
@@ -411,6 +413,10 @@ impl<'db> TopLevelMod<'db> {
         LazyTopModSpan::new(self)
     }
 
+    pub fn attributes(self, db: &'db dyn HirDb) -> AttrListId<'db> {
+        lower::top_mod_attributes_impl(db, self)
+    }
+
     pub fn scope(self) -> ScopeId<'db> {
         ScopeId::from_item(self.into())
     }
@@ -610,10 +616,18 @@ impl<'db> Mod<'db> {
         self,
         db: &'db dyn HirDb,
     ) -> impl Iterator<Item = ItemKind<'db>> + 'db {
-        let s_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
+        let s_graph = scope.scope_graph(db);
         s_graph.child_items(scope)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+pub struct FuncModifiers {
+    pub vis: Visibility,
+    pub is_unsafe: bool,
+    pub is_const: bool,
+    pub is_extern: bool,
 }
 
 #[salsa::tracked]
@@ -629,13 +643,14 @@ pub struct Func<'db> {
     pub(in crate::core) params_list: Partial<FuncParamListId<'db>>,
     pub(crate) effects: EffectParamListId<'db>,
     pub(in crate::core) ret_type_ref: Option<TypeId<'db>>,
-    pub modifier: ItemModifier,
+    pub(in crate::core) modifiers: FuncModifiers,
     pub body: Option<Body<'db>>,
     pub top_mod: TopLevelMod<'db>,
 
     #[return_ref]
     pub origin: HirOrigin<ast::Func>,
 }
+
 impl<'db> Func<'db> {
     pub fn span(self) -> LazyFuncSpan<'db> {
         LazyFuncSpan::new(self)
@@ -646,7 +661,37 @@ impl<'db> Func<'db> {
     }
 
     pub fn vis(self, db: &dyn HirDb) -> Visibility {
-        self.modifier(db).to_visibility()
+        self.modifiers(db).vis
+    }
+
+    pub fn is_unsafe(self, db: &dyn HirDb) -> bool {
+        self.modifiers(db).is_unsafe
+    }
+
+    pub fn is_const(self, db: &dyn HirDb) -> bool {
+        self.modifiers(db).is_const
+    }
+
+    fn inline_attr(self, db: &'db dyn HirDb) -> Option<InlineAttr> {
+        self.attributes(db).inline_attr(db)
+    }
+
+    pub fn inline_hint(self, db: &'db dyn HirDb) -> Option<InlineHint> {
+        match self.inline_attr(db) {
+            Some(InlineAttr::Hint(hint)) => Some(hint),
+            Some(InlineAttr::Error(_)) | None => None,
+        }
+    }
+
+    pub fn inline_attr_error(self, db: &'db dyn HirDb) -> Option<InlineAttrErrorKind> {
+        match self.inline_attr(db) {
+            Some(InlineAttr::Error(kind)) => Some(kind),
+            Some(InlineAttr::Hint(_)) | None => None,
+        }
+    }
+
+    pub fn is_extern(self, db: &dyn HirDb) -> bool {
+        self.modifiers(db).is_extern
     }
 
     pub fn is_method(self, db: &dyn HirDb) -> bool {
@@ -684,7 +729,11 @@ impl<'db> Func<'db> {
 
     pub fn param_label_or_name(self, db: &'db dyn HirDb, idx: usize) -> Option<FuncParamName<'db>> {
         let param = self.params_list(db).to_opt()?.data(db).get(idx)?;
-        param.label.or(param.name.to_opt())
+        if param.is_label_suppressed {
+            Some(FuncParamName::Underscore)
+        } else {
+            param.name.to_opt()
+        }
     }
 
     /// View as a callable definition (if named).
@@ -713,6 +762,7 @@ pub struct Struct<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::Struct>,
 }
+
 impl<'db> Struct<'db> {
     pub fn span(self) -> LazyStructSpan<'db> {
         LazyStructSpan::new(self)
@@ -720,6 +770,10 @@ impl<'db> Struct<'db> {
 
     pub fn scope(self) -> ScopeId<'db> {
         ScopeId::from_item(self.into())
+    }
+
+    pub fn hir_fields(self, db: &'db dyn HirDb) -> FieldDefListId<'db> {
+        self.fields(db)
     }
 
     /// Returns the human readable string of the expected struct initializer.
@@ -746,9 +800,11 @@ pub struct Contract<'db> {
     pub name: Partial<IdentId<'db>>,
     pub(in crate::core) attributes: AttrListId<'db>,
     pub vis: Visibility,
-    pub(in crate::core) fields: FieldDefListId<'db>,
+    pub(in crate::core) hir_fields: FieldDefListId<'db>,
     /// `uses` clause attached to the contract header
     pub effects: EffectParamListId<'db>,
+    /// Optional init block owned by the contract.
+    pub init: Option<ContractInit<'db>>,
     /// Receive handlers declared in the contract
     pub recvs: ContractRecvListId<'db>,
     pub top_mod: TopLevelMod<'db>,
@@ -756,6 +812,7 @@ pub struct Contract<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::Contract>,
 }
+
 impl<'db> Contract<'db> {
     pub fn span(self) -> LazyContractSpan<'db> {
         LazyContractSpan::new(self)
@@ -763,27 +820,6 @@ impl<'db> Contract<'db> {
 
     pub fn scope(self) -> ScopeId<'db> {
         ScopeId::from_item(self.into())
-    }
-
-    pub fn hir_fields(self, db: &'db dyn HirDb) -> FieldDefListId<'db> {
-        self.fields(db)
-    }
-
-    pub fn init_func(self, db: &'db dyn HirDb) -> Option<Func<'db>> {
-        let s_graph = self.top_mod(db).scope_graph(db);
-        let scope = ScopeId::from_item(self.into());
-        s_graph.child_items(scope).find_map(|item| match item {
-            ItemKind::Func(func) => {
-                if let Some(name) = func.name(db).to_opt()
-                    && name.data(db).as_str() == "init"
-                {
-                    Some(func)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        })
     }
 
     pub fn recv_arm(
@@ -799,6 +835,30 @@ impl<'db> Contract<'db> {
             .data(db)
             .get(arm_idx)
             .copied()
+    }
+}
+
+/// Contract-owned init block.
+#[salsa::tracked]
+#[derive(Debug)]
+pub struct ContractInit<'db> {
+    #[id]
+    id: TrackedItemId<'db>,
+
+    pub attributes: AttrListId<'db>,
+    pub params: FuncParamListId<'db>,
+    pub effects: EffectParamListId<'db>,
+    pub body: Body<'db>,
+    pub top_mod: TopLevelMod<'db>,
+
+    #[return_ref]
+    pub(crate) origin: HirOrigin<ast::ContractInit>,
+}
+
+impl<'db> ContractInit<'db> {
+    /// Returns `true` if this init block is marked `#[payable]`.
+    pub fn is_payable(self, db: &'db dyn HirDb) -> bool {
+        self.attributes(db).has_marker_attr(db, "payable")
     }
 }
 
@@ -828,6 +888,7 @@ pub struct ContractRecvArm<'db> {
     pub ret_ty: Option<TypeId<'db>>,
     pub effects: EffectParamListId<'db>,
     pub body: Body<'db>,
+    pub attributes: AttrListId<'db>,
 }
 
 impl<'db> ContractRecvArm<'db> {
@@ -846,6 +907,18 @@ impl<'db> ContractRecvArm<'db> {
             | Pat::Record(Partial::Present(path), ..) => Some(*path),
             _ => None,
         }
+    }
+
+    pub fn is_fallback(&self, db: &'db dyn HirDb) -> bool {
+        matches!(
+            self.pat.data(db, self.body),
+            Partial::Present(Pat::WildCard)
+        )
+    }
+
+    /// Returns `true` if this recv arm is marked `#[payable]`.
+    pub fn is_payable(&self, db: &'db dyn HirDb) -> bool {
+        self.attributes.has_marker_attr(db, "payable")
     }
 }
 
@@ -866,6 +939,7 @@ pub struct Enum<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::Enum>,
 }
+
 impl<'db> Enum<'db> {
     pub fn span(self) -> LazyEnumSpan<'db> {
         LazyEnumSpan::new(self)
@@ -940,6 +1014,7 @@ pub struct TypeAlias<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::TypeAlias>,
 }
+
 impl<'db> TypeAlias<'db> {
     pub fn span(self) -> LazyTypeAliasSpan<'db> {
         LazyTypeAliasSpan::new(self)
@@ -967,6 +1042,7 @@ pub struct Impl<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::Impl>,
 }
+
 impl<'db> Impl<'db> {
     pub fn span(self) -> LazyImplSpan<'db> {
         LazyImplSpan::new(self)
@@ -976,14 +1052,14 @@ impl<'db> Impl<'db> {
         self,
         db: &'db dyn HirDb,
     ) -> impl Iterator<Item = ItemKind<'db>> + 'db {
-        let s_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
+        let s_graph = scope.scope_graph(db);
         s_graph.child_items(scope)
     }
 
     pub fn funcs(self, db: &'db dyn HirDb) -> impl Iterator<Item = Func<'db>> + 'db {
-        let s_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
+        let s_graph = scope.scope_graph(db);
         s_graph.child_items(scope).filter_map(|item| match item {
             ItemKind::Func(func) => Some(func),
             _ => None,
@@ -1023,6 +1099,7 @@ pub struct Trait<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::Trait>,
 }
+
 impl<'db> Trait<'db> {
     pub fn span(self) -> LazyTraitSpan<'db> {
         LazyTraitSpan::new(self)
@@ -1032,8 +1109,8 @@ impl<'db> Trait<'db> {
         self,
         db: &'db dyn HirDb,
     ) -> impl Iterator<Item = ItemKind<'db>> + 'db {
-        let s_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
+        let s_graph = scope.scope_graph(db);
         s_graph.child_items(scope)
     }
 
@@ -1042,8 +1119,8 @@ impl<'db> Trait<'db> {
     }
 
     pub fn methods(self, db: &'db dyn HirDb) -> impl Iterator<Item = Func<'db>> + 'db {
-        let s_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
+        let s_graph = scope.scope_graph(db);
         s_graph.child_items(scope).filter_map(|item| match item {
             ItemKind::Func(func) => Some(func),
             _ => None,
@@ -1064,6 +1141,7 @@ impl<'db> Trait<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AssocTyDecl<'db> {
+    pub attributes: AttrListId<'db>,
     pub name: Partial<IdentId<'db>>,
     pub bounds: Vec<TypeBound<'db>>,
     pub default: Option<TypeId<'db>>,
@@ -1071,6 +1149,7 @@ pub struct AssocTyDecl<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AssocConstDecl<'db> {
+    pub attributes: AttrListId<'db>,
     pub name: Partial<IdentId<'db>>,
     pub ty: Partial<TypeId<'db>>,
     pub default: Option<Partial<Body<'db>>>,
@@ -1096,6 +1175,7 @@ pub struct ImplTrait<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::ImplTrait>,
 }
+
 impl<'db> ImplTrait<'db> {
     pub fn span(self) -> LazyImplTraitSpan<'db> {
         LazyImplTraitSpan::new(self)
@@ -1126,8 +1206,8 @@ impl<'db> ImplTrait<'db> {
         self,
         db: &'db dyn HirDb,
     ) -> impl Iterator<Item = ItemKind<'db>> + 'db {
-        let s_graph = self.top_mod(db).scope_graph(db);
         let scope = ScopeId::from_item(self.into());
+        let s_graph = scope.scope_graph(db);
         s_graph.child_items(scope)
     }
 
@@ -1149,12 +1229,14 @@ impl<'db> ImplTrait<'db> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AssocTyDef<'db> {
+    pub attributes: AttrListId<'db>,
     pub name: Partial<IdentId<'db>>,
     pub(crate) type_ref: Partial<TypeId<'db>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AssocConstDef<'db> {
+    pub attributes: AttrListId<'db>,
     pub name: Partial<IdentId<'db>>,
     pub ty: Partial<TypeId<'db>>,
     pub value: Partial<Body<'db>>,
@@ -1176,6 +1258,7 @@ pub struct Const<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::Const>,
 }
+
 impl<'db> Const<'db> {
     pub fn span(self) -> LazyConstSpan<'db> {
         LazyConstSpan::new(self)
@@ -1196,6 +1279,7 @@ pub struct Use<'db> {
     #[id]
     id: TrackedItemId<'db>,
 
+    pub(in crate::core) attributes: AttrListId<'db>,
     pub path: Partial<super::UsePathId<'db>>,
     pub alias: Option<Partial<UseAlias<'db>>>,
     pub vis: Visibility,
@@ -1204,6 +1288,7 @@ pub struct Use<'db> {
     #[return_ref]
     pub(crate) origin: HirOrigin<ast::Use>,
 }
+
 impl<'db> Use<'db> {
     pub fn span(self) -> LazyUseSpan<'db> {
         LazyUseSpan::new(self)
@@ -1213,7 +1298,7 @@ impl<'db> Use<'db> {
         ScopeId::from_item(self.into())
     }
 
-    pub fn is_prelude_use(self, db: &'db dyn HirDb) -> bool {
+    pub fn is_synthetic_use(self, db: &'db dyn HirDb) -> bool {
         matches!(self.origin(db), &HirOrigin::Synthetic)
     }
 
@@ -1274,19 +1359,13 @@ impl<'db> Use<'db> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ItemModifier {
-    Pub,
-    Unsafe,
-    PubAndUnsafe,
-    None,
-}
-
-impl ItemModifier {
-    pub fn to_visibility(self) -> Visibility {
-        match self {
-            ItemModifier::Pub | ItemModifier::PubAndUnsafe => Visibility::Public,
-            ItemModifier::Unsafe | ItemModifier::None => Visibility::Private,
+impl FuncModifiers {
+    pub fn new(vis: Visibility, is_unsafe: bool, is_const: bool, is_extern: bool) -> Self {
+        Self {
+            vis,
+            is_unsafe,
+            is_const,
+            is_extern,
         }
     }
 }
@@ -1366,7 +1445,7 @@ impl<'db> FieldParent<'db> {
     pub(in crate::core) fn fields_list(self, db: &'db dyn HirDb) -> FieldDefListId<'db> {
         match self {
             FieldParent::Struct(struct_) => struct_.fields(db),
-            FieldParent::Contract(contract) => contract.fields(db),
+            FieldParent::Contract(contract) => contract.hir_fields(db),
             FieldParent::Variant(variant) => match variant.kind(db) {
                 VariantKind::Record(fields) => fields,
                 _ => unreachable!(),
@@ -1468,11 +1547,18 @@ pub enum VariantKind<'db> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Visibility {
+    /// Unrestricted public visibility.
     Public,
+    /// Private to the defining scope.
     Private,
+    /// `pub(ingot)` — visible within the same ingot (like Rust's `pub(crate)`).
+    PubIngot,
+    /// `pub(super)` — visible within the parent module.
+    PubSuper,
 }
 
 impl Visibility {
+    /// Returns true only for unrestricted `pub`.
     pub fn is_pub(self) -> bool {
         self == Self::Public
     }
@@ -1501,10 +1587,11 @@ pub enum TrackedItemVariant<'db> {
     Contract(Partial<IdentId<'db>>),
     Enum(Partial<IdentId<'db>>),
     TypeAlias(Partial<IdentId<'db>>),
-    Impl(Partial<TypeId<'db>>),
+    Impl(u32),
     Trait(Partial<IdentId<'db>>),
-    ImplTrait(Partial<TraitRefId<'db>>, Partial<TypeId<'db>>),
+    ImplTrait(u32),
     Const(Partial<IdentId<'db>>),
+    ContractInit,
     ContractRecvArm { recv_idx: u32, arm_idx: u32 },
     Use(Partial<super::UsePathId<'db>>),
     FuncBody,

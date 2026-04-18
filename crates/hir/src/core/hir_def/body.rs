@@ -12,8 +12,8 @@ use rustc_hash::FxHashMap;
 use salsa::Update;
 
 use super::{
-    Expr, ExprId, Func, ItemKind, Partial, Pat, PatId, Stmt, StmtId, TopLevelMod, TrackedItemId,
-    scope_graph::ScopeId,
+    Cond, CondId, Expr, ExprId, Func, ItemKind, Partial, Pat, PatId, Stmt, StmtId, TopLevelMod,
+    TrackedItemId, scope_graph::ScopeId,
 };
 use crate::{
     HirDb,
@@ -38,6 +38,8 @@ pub struct Body<'db> {
     #[return_ref]
     pub exprs: NodeStore<ExprId, Partial<Expr<'db>>>,
     #[return_ref]
+    pub conds: NodeStore<CondId, Partial<Cond>>,
+    #[return_ref]
     pub pats: NodeStore<PatId, Partial<Pat<'db>>>,
     pub top_mod: TopLevelMod<'db>,
 
@@ -61,7 +63,7 @@ impl<'db> Body<'db> {
     /// Returns `Some(func)` if this body belongs to a function, `None` otherwise
     /// (e.g., for anonymous/closure bodies or const bodies).
     pub fn containing_func(self, db: &'db dyn HirDb) -> Option<Func<'db>> {
-        let scope_graph = self.top_mod(db).scope_graph(db);
+        let scope_graph = self.scope().scope_graph(db);
         for item in scope_graph.items_dfs(db) {
             if let ItemKind::Func(func) = item
                 && func.body(db) == Some(self)

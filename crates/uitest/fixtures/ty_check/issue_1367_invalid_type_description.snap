@@ -1,0 +1,17 @@
+---
+source: crates/uitest/tests/ty_check.rs
+assertion_line: 27
+expression: diags
+input_file: fixtures/ty_check/issue_1367_invalid_type_description.fe
+---
+error[2-0002]: `Item` is not found
+   ┌─ issue_1367_invalid_type_description.fe:27:39
+   │
+27 │     fn get(ref self, i: usize) -> ref Item {
+   │                                       ^^^^ `Item` is not found
+
+error[8-0012]: undefined variable
+   ┌─ issue_1367_invalid_type_description.fe:28:34
+   │
+28 │         self.source[self.start + I]
+   │                                  ^ undefined variable `I`

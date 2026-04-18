@@ -1,0 +1,78 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/cast_u8_usize_cmp.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %cast_u8_usize_cmp(v0.objref<[i8; 8]>, v1.i256, v2.i256) -> i8 {
+    block0:
+        v4.i1 = lt v1 8.i256;
+        v5.i1 = is_zero v4;
+        br v5 block7 block8;
+
+    block1:
+        return 1.i8;
+
+    block2:
+        v19.i256 = zext v12 i256;
+        v20.i1 = call %usize_ha12462c6d36e68b0_eq_he50383edd273619f_eq v2 v19;
+        br v20 block3 block4;
+
+    block3:
+        return 2.i8;
+
+    block4:
+        v24.i256 = zext v12 i256;
+        v25.i1 = call %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_gt v2 v24;
+        br v25 block5 block6;
+
+    block5:
+        return 3.i8;
+
+    block6:
+        return 0.i8;
+
+    block7:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 50.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block8:
+        v11.objref<i8> = obj.index v0 v1;
+        v12.i8 = obj.load v11;
+        v14.i256 = zext v12 i256;
+        v15.i1 = call %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_lt v2 v14;
+        br v15 block1 block2;
+}
+
+func private %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_lt(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = lt v0 v1;
+        return v2;
+}
+
+func private %usize_ha12462c6d36e68b0_eq_he50383edd273619f_eq(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = eq v0 v1;
+        return v2;
+}
+
+func private %usize_ha12462c6d36e68b0_ord_h264f6d6d75097a_gt(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = gt v0 v1;
+        return v2;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v2.i8 = call %cast_u8_usize_cmp undef.objref<[i8; 8]> 0.i256 0.i256;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

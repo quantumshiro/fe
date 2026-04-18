@@ -1,0 +1,5 @@
+#[test(should_revert, selector = 0x123456789a)]
+fn test_selector_too_wide() {
+    let code: u256 = 1
+    revert(code)
+}

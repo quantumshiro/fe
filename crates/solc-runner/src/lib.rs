@@ -16,6 +16,8 @@ pub struct YulcError(pub String);
 pub struct ContractBytecode {
     pub bytecode: String,
     pub runtime_bytecode: String,
+    pub bytecode_opcodes: Option<String>,
+    pub runtime_bytecode_opcodes: Option<String>,
 }
 
 /// Compiles an iterator of `(name, yul_source)` pairs using `solc`.
@@ -51,8 +53,21 @@ pub fn compile_single_contract(
     optimize: bool,
     verify_runtime_bytecode: bool,
 ) -> Result<ContractBytecode, YulcError> {
+    compile_single_contract_with_solc(name, yul_src, optimize, verify_runtime_bytecode, None)
+}
+
+/// Compiles a single contract by forwarding the Yul source to a specific `solc` binary.
+///
+/// When `solc_path` is `None`, falls back to `FE_SOLC_PATH` and then `solc` on `PATH`.
+pub fn compile_single_contract_with_solc(
+    name: &str,
+    yul_src: &str,
+    optimize: bool,
+    verify_runtime_bytecode: bool,
+    solc_path: Option<&str>,
+) -> Result<ContractBytecode, YulcError> {
     let input_json = build_standard_json(yul_src, optimize)?;
-    let solc_output = run_solc(&input_json)?;
+    let solc_output = run_solc_with_path(&input_json, solc_path)?;
     parse_contract_output(name, &solc_output, verify_runtime_bytecode)
 }
 
@@ -78,6 +93,8 @@ fn build_standard_json(yul_src: &str, optimize: bool) -> Result<String, YulcErro
                     "*": [
                         "evm.bytecode.object",
                         "evm.deployedBytecode.object",
+                        "evm.bytecode.opcodes",
+                        "evm.deployedBytecode.opcodes",
                         "evm.bytecode.sourceMap",
                         "evm.deployedBytecode.sourceMap"
                     ]
@@ -95,8 +112,12 @@ fn build_standard_json(yul_src: &str, optimize: bool) -> Result<String, YulcErro
 ///
 /// Returns the raw stdout emitted by `solc`, or a [`YulcError`] if the process fails or produces
 /// invalid UTF-8.
-fn run_solc(input: &str) -> Result<String, YulcError> {
-    let solc_path = env::var(SOLC_ENV).unwrap_or_else(|_| "solc".into());
+fn run_solc_with_path(input: &str, solc_path: Option<&str>) -> Result<String, YulcError> {
+    let solc_path = solc_path
+        .map(str::to_string)
+        .or_else(|| env::var(SOLC_ENV).ok())
+        .unwrap_or_else(|| "solc".into());
+
     let mut child = Command::new(&solc_path)
         .arg("--standard-json")
         .stdin(Stdio::piped())
@@ -181,6 +202,11 @@ fn parse_contract_output(
 
     let runtime_bytecode = extract_object(contract, &["evm", "deployedBytecode", "object"])
         .unwrap_or_else(|| "null".into());
+    let bytecode_opcodes = extract_object(contract, &["evm", "bytecode", "opcodes"])
+        .filter(|opcodes| !opcodes.is_empty() && opcodes != "null");
+    let runtime_bytecode_opcodes =
+        extract_object(contract, &["evm", "deployedBytecode", "opcodes"])
+            .filter(|opcodes| !opcodes.is_empty() && opcodes != "null");
 
     if verify_runtime_bytecode && (runtime_bytecode == "null" || runtime_bytecode.is_empty()) {
         return Err(YulcError(
@@ -191,6 +217,8 @@ fn parse_contract_output(
     Ok(ContractBytecode {
         bytecode,
         runtime_bytecode,
+        bytecode_opcodes,
+        runtime_bytecode_opcodes,
     })
 }
 
@@ -235,6 +263,14 @@ mod tests {
         assert_eq!(value["language"], "Yul");
         assert_eq!(value["settings"]["optimizer"]["enabled"], false);
         assert_eq!(value["sources"]["input.yul"]["content"], "{ sstore(0, 0) }");
+        let outputs = value["settings"]["outputSelection"]["*"]["*"]
+            .as_array()
+            .expect("output selection is array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(outputs.contains(&"evm.bytecode.opcodes"));
+        assert!(outputs.contains(&"evm.deployedBytecode.opcodes"));
     }
 
     #[test]

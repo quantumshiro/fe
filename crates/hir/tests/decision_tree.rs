@@ -5,9 +5,8 @@ use dir_test::{Fixture, dir_test};
 use fe_hir::analysis::ty::{
     decision_tree::{DecisionTree, Projection, ProjectionPath, build_decision_tree},
     pattern_analysis::PatternMatrix,
-    simplified_pattern::ConstructorKind,
+    pattern_ir::ConstructorKind,
     ty_check::{TypedBody, check_func_body},
-    ty_def::{TyData, TyId},
 };
 use fe_hir::hir_def::LitKind;
 use fe_hir::test_db::{HirAnalysisTestDb, HirPropertyFormatter};
@@ -39,10 +38,10 @@ fn convert_to_ascii_tree<'db>(
             lines.push(format!("Execute arm #{}", leaf_node.arm_index));
 
             // Add bindings if present
-            for ((name, _idx), path) in &leaf_node.bindings {
+            for (binding, path) in &leaf_node.bindings {
                 lines.push(format!(
                     "  {} ← {}",
-                    name.data(db),
+                    binding.name.data(db),
                     render_projection_path(db, path)
                 ));
             }
@@ -196,27 +195,14 @@ impl<'db> Visitor<'db> for DecisionTreeVisitor<'db, '_> {
         if let Expr::Match(_scrutinee, arms) = expr
             && let Some(arms) = arms.clone().to_opt()
         {
-            let body = ctxt.body();
-            let patterns: Vec<_> = arms
+            let typed_body = self.typed_body.as_ref().unwrap();
+            let roots: Vec<_> = arms
                 .iter()
-                .filter_map(|arm| arm.pat.data(self.db, body).clone().to_opt())
+                .filter_map(|arm| typed_body.pattern_root(arm.pat))
                 .collect();
 
-            if !patterns.is_empty() {
-                // Get the actual scrutinee type from the typed body
-                let scrutinee_ty = if let Some(ref typed_body) = self.typed_body {
-                    typed_body.expr_ty(self.db, *_scrutinee)
-                } else {
-                    TyId::new(self.db, TyData::Never)
-                };
-
-                let matrix = PatternMatrix::from_hir_patterns(
-                    self.db,
-                    &patterns,
-                    body,
-                    body.scope(),
-                    scrutinee_ty,
-                );
+            if !roots.is_empty() {
+                let matrix = PatternMatrix::from_roots(typed_body.pattern_store(), &roots);
 
                 let tree = build_decision_tree(self.db, &matrix);
                 let visualization = render_decision_tree(self.db, &tree);

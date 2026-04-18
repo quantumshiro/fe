@@ -1,0 +1,7 @@
+fn helper(x: u64, y: u64) -> u(64-1) {
+    x + y
+}
+
+pub fn call_helper() -> u64 {
+    helper(1, 2)
+}

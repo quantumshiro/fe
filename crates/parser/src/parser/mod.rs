@@ -4,10 +4,11 @@ pub(crate) use item::ItemListScope;
 use smallvec::SmallVec;
 
 use self::token_stream::{BackTrackableTokenStream, LexicalToken, TokenStream};
-use crate::{ExpectedKind, GreenNode, ParseError, SyntaxKind, TextRange, syntax_node::SyntaxNode};
+use crate::{ExpectedKind, GreenNode, SyntaxKind, TextRange, syntax_node::SyntaxNode};
 
 pub mod token_stream;
 
+pub use crate::ParseError;
 pub use pat::parse_pat;
 
 pub mod attr;
@@ -26,6 +27,23 @@ pub mod use_tree;
 mod expr_atom;
 
 type Checkpoint = rowan::Checkpoint;
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RecoveryMode {
+    #[default]
+    Recover,
+    NoRecover,
+}
+
+impl RecoveryMode {
+    pub fn new(use_recovery: bool) -> Self {
+        if use_recovery {
+            Self::Recover
+        } else {
+            Self::NoRecover
+        }
+    }
+}
 
 /// Parser to build a rowan syntax tree.
 pub struct Parser<S: TokenStream> {
@@ -46,11 +64,15 @@ pub struct Parser<S: TokenStream> {
     /// The dry run states which holds the each state of the parser when it
     /// enters dry run mode.
     dry_run_states: Vec<DryRunState<S>>,
+    dry_run_next_trivias_pool: Vec<VecDeque<S::Token>>,
+
+    /// Whether or not to recover from syntax errors automatically.
+    recovery_mode: RecoveryMode,
 }
 
 impl<S: TokenStream> Parser<S> {
     /// Create a parser with the given token stream.
-    pub fn new(stream: S) -> Self {
+    pub fn new(stream: S, recovery_mode: RecoveryMode) -> Self {
         Self {
             stream: BackTrackableTokenStream::new(stream),
             builder: rowan::GreenNodeBuilder::new(),
@@ -61,6 +83,8 @@ impl<S: TokenStream> Parser<S> {
             is_newline_trivia: true,
             next_trivias: VecDeque::new(),
             dry_run_states: Vec::new(),
+            dry_run_next_trivias_pool: Vec::new(),
+            recovery_mode,
         }
     }
 
@@ -122,6 +146,12 @@ impl<S: TokenStream> Parser<S> {
 
     fn scope_aux_recovery(&mut self) -> &mut SmallVec<SyntaxKind, 4> {
         &mut self.parents.last_mut().unwrap().aux_recovery_tokens
+    }
+
+    pub(super) fn in_scope_set(&self, scopes: &[SyntaxKind]) -> bool {
+        self.parents
+            .last()
+            .is_some_and(|scope| scopes.contains(&scope.scope.syntax_kind()))
     }
 
     pub fn expect_and_pop_recovery_stack(&mut self) -> Result<(), Recovery<ErrProof>> {
@@ -344,11 +374,13 @@ impl<S: TokenStream> Parser<S> {
     {
         // Enters the dry run mode.
         self.stream.set_bt_point();
+        let mut next_trivias = self.dry_run_next_trivias_pool.pop().unwrap_or_default();
+        next_trivias.clone_from(&self.next_trivias);
         self.dry_run_states.push(DryRunState {
             pos: self.current_pos,
             end_of_prev_token: self.end_of_prev_token,
             err_num: self.errors.len(),
-            next_trivias: self.next_trivias.clone(),
+            next_trivias,
             err: false,
         });
 
@@ -360,9 +392,23 @@ impl<S: TokenStream> Parser<S> {
         self.errors.truncate(state.err_num);
         self.current_pos = state.pos;
         self.end_of_prev_token = state.end_of_prev_token;
-        self.next_trivias = state.next_trivias;
+        let next_trivias = std::mem::replace(&mut self.next_trivias, state.next_trivias);
+        self.recycle_dry_run_next_trivias(next_trivias);
 
         r
+    }
+
+    fn recycle_dry_run_next_trivias(&mut self, mut next_trivias: VecDeque<S::Token>) {
+        // Keep a small pool to amortize dry-run allocations without retaining
+        // unbounded buffer memory from pathological inputs.
+        if self.dry_run_next_trivias_pool.len() >= 8 {
+            return;
+        }
+
+        if next_trivias.capacity() <= 256 {
+            next_trivias.clear();
+            self.dry_run_next_trivias_pool.push(next_trivias);
+        }
     }
 
     /// Bumps the current token and its leading trivias.
@@ -436,6 +482,10 @@ impl<S: TokenStream> Parser<S> {
     /// Returns the index of the scope that matched the recovery token,
     /// and the total string length of the unexpected tokens.
     fn recover(&mut self) -> (Option<ScopeIndex>, Option<rowan::TextSize>) {
+        if self.recovery_mode == RecoveryMode::NoRecover {
+            return (None, None);
+        }
+
         let mut unexpected = None;
         let mut match_scope_index = None;
         while let Some(kind) = self.current_kind() {
@@ -594,10 +644,39 @@ impl<S: TokenStream> Parser<S> {
         tokens
     }
 
-    /// Skip trivias, then peek the next two tokens.
+    /// Skip leading trivias, then peek the next two raw tokens.
     pub fn peek_two(&mut self) -> (Option<SyntaxKind>, Option<SyntaxKind>) {
         let (a, b, _) = self.peek_three();
         (a, b)
+    }
+
+    /// Peek up to `n` non-trivia tokens, skipping trivia before and between
+    /// tokens.
+    pub fn peek_n_non_trivia(&mut self, n: usize) -> SmallVec<SyntaxKind, 4> {
+        self.stream.set_bt_point();
+
+        let mut next_trivia_index = 0;
+        let mut tokens = SmallVec::new();
+        while tokens.len() < n {
+            let next = if let Some(tok) = self.next_trivias.get(next_trivia_index) {
+                next_trivia_index += 1;
+                Some(tok.syntax_kind())
+            } else {
+                self.stream.next().map(|tok| tok.syntax_kind())
+            };
+
+            let Some(kind) = next else {
+                break;
+            };
+
+            if self.is_trivia(kind) {
+                continue;
+            }
+            tokens.push(kind);
+        }
+
+        self.stream.backtrack();
+        tokens
     }
 
     /// Add the `msg` to the error list, at `current_pos`.

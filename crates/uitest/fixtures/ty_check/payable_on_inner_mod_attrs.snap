@@ -1,0 +1,16 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/payable_on_inner_mod_attrs.fe
+---
+error[13-0001]: `#[payable]` is only valid on `init` blocks and `recv` arms (found on module)
+  ┌─ payable_on_inner_mod_attrs.fe:1:1
+  │
+1 │ #![payable]
+  │ ^^^^^^^^^^^ move this attribute to an `init` block or `recv` arm
+
+error[13-0001]: `#[payable]` is only valid on `init` blocks and `recv` arms (found on module)
+  ┌─ payable_on_inner_mod_attrs.fe:6:5
+  │
+6 │     #![payable]
+  │     ^^^^^^^^^^^ move this attribute to an `init` block or `recv` arm

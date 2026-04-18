@@ -1,0 +1,6 @@
+---
+source: crates/uitest/tests/mir_check.rs
+expression: res
+input_file: fixtures/mir_check/move_view_param_generic.fe
+---
+

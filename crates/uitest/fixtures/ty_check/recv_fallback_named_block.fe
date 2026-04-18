@@ -1,0 +1,11 @@
+msg CounterMsg {
+    #[selector = 0x01]
+    Count,
+}
+
+pub contract Counter {
+    recv CounterMsg {
+        Count {} {}
+        _ {}
+    }
+}

@@ -1,0 +1,3 @@
+fn negated_int_literal_out_of_range() {
+    let x: i8 = -129
+}

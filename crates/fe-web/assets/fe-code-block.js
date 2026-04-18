@@ -1,0 +1,725 @@
+// <fe-code-block> — Custom element for syntax-highlighted Fe code blocks.
+//
+// Raw source text lives in the light DOM and is never destroyed. The
+// rendered (highlighted + SCIP-annotated) version lives in an open
+// shadow root, so `element.textContent` always returns the original code.
+//
+// Call `element.refresh()` to re-render with fresh ScipStore data.
+//
+// Attributes:
+//   lang         — language name (default "fe")
+//   line-numbers — show line number gutter
+//   collapsed    — start collapsed with <details>/<summary>
+//   symbol       — doc path (e.g. "mylib::Game/struct") to fetch source from FE_DOC_INDEX
+//   region       — extract a named region (// #region name ... // #endregion name) from source
+//   data-file    — SCIP source file path for positional symbol resolution
+//   data-line-offset — 0-based line offset for source excerpts (maps local line 0 to file line N)
+//   data-scope   — SCIP scope path for signature code blocks (set by server)
+
+// Shared stylesheet adopted by all <fe-code-block> shadow roots.
+// Only includes fe-highlight.css (syntax + layout), NOT the full page styles,
+// so that CSS custom properties from the host page inherit through the
+// shadow boundary without being overridden by a copied :root block.
+var _codeBlockSheet = null;
+
+function _getCodeBlockSheet() {
+  if (_codeBlockSheet) return _codeBlockSheet;
+  try {
+    _codeBlockSheet = new CSSStyleSheet();
+    // Look for the highlight-specific <style> tag first (static site injects
+    // it separately). Fall back to scanning for fe-highlight content.
+    var css = "";
+    var styles = document.querySelectorAll("style");
+    for (var i = 0; i < styles.length; i++) {
+      var text = styles[i].textContent || "";
+      if (text.indexOf(".hl-keyword") !== -1 && text.indexOf(".fe-code-block-wrapper") !== -1) {
+        css = text;
+        break;
+      }
+    }
+    // Also check linked stylesheets (e.g. <link rel="stylesheet" href="fe-highlight.css">)
+    if (!css) {
+      try {
+        var sheets = document.styleSheets;
+        for (var s = 0; s < sheets.length; s++) {
+          try {
+            var rules = sheets[s].cssRules || sheets[s].rules;
+            if (!rules) continue;
+            var sheetText = "";
+            var hasHighlight = false;
+            for (var r = 0; r < rules.length; r++) {
+              var ruleText = rules[r].cssText || "";
+              sheetText += ruleText + "\n";
+              if (ruleText.indexOf(".hl-keyword") !== -1) hasHighlight = true;
+            }
+            if (hasHighlight) {
+              css = sheetText;
+              break;
+            }
+          } catch (_) {
+            // CORS: can't read cross-origin stylesheet rules
+          }
+        }
+      } catch (_) {}
+    }
+    // If no highlight stylesheet found, use all page styles as fallback
+    if (!css) {
+      for (var j = 0; j < styles.length; j++) {
+        css += styles[j].textContent + "\n";
+      }
+    }
+    _codeBlockSheet.replaceSync(css);
+  } catch (e) {
+    _codeBlockSheet = null;
+  }
+  return _codeBlockSheet;
+}
+
+// Invalidate cached sheet (e.g. after live reload rebuilds styles).
+function _invalidateCodeBlockSheet() {
+  _codeBlockSheet = null;
+}
+
+/**
+ * Extract a named region from source text.
+ * Regions are delimited by `// #region name` and `// #endregion name` comments.
+ * The delimiter lines themselves are excluded from the output.
+ * Returns the original source if the region is not found.
+ */
+function _extractRegion(source, name) {
+  var lines = source.split("\n");
+  var startPattern = new RegExp("^\\s*//\\s*#region\\s+" + _regexEscape(name) + "\\s*$");
+  var endPattern = new RegExp("^\\s*//\\s*#endregion\\s+" + _regexEscape(name) + "\\s*$");
+
+  var collecting = false;
+  var result = [];
+  for (var i = 0; i < lines.length; i++) {
+    if (!collecting && startPattern.test(lines[i])) {
+      collecting = true;
+      continue;
+    }
+    if (collecting && endPattern.test(lines[i])) {
+      break;
+    }
+    if (collecting) {
+      result.push(lines[i]);
+    }
+  }
+
+  if (result.length === 0) return source;
+
+  // Dedent: find minimum leading whitespace and strip it
+  var minIndent = Infinity;
+  for (var j = 0; j < result.length; j++) {
+    if (result[j].trim().length === 0) continue;
+    var m = result[j].match(/^(\s*)/);
+    if (m && m[1].length < minIndent) minIndent = m[1].length;
+  }
+  if (minIndent > 0 && minIndent < Infinity) {
+    for (var k = 0; k < result.length; k++) {
+      result[k] = result[k].substring(minIndent);
+    }
+  }
+
+  // Trim trailing empty lines
+  while (result.length > 0 && result[result.length - 1].trim() === "") {
+    result.pop();
+  }
+
+  return result.join("\n");
+}
+
+function _regexEscape(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+class FeCodeBlock extends HTMLElement {
+  static get observedAttributes() { return ["symbol", "region", "src", "base", "link-filter"]; }
+
+  attributeChangedCallback(name, oldVal, newVal) {
+    if (oldVal === newVal || !this.shadowRoot) return;
+    if (name === "symbol") {
+      this._rawSource = null;
+      this._resolveSymbol();
+    }
+    if (name === "src") {
+      this._loadSrc();
+      return; // _loadSrc triggers _render after fetch
+    }
+    this._render();
+  }
+
+  connectedCallback() {
+    // Preserve raw source from light DOM (only on first connect)
+    if (this._rawSource == null) {
+      this._rawSource = this.textContent;
+    }
+
+    // If `symbol` attribute is set, resolve source text from FE_DOC_INDEX
+    this._resolveSymbol();
+
+    // Create shadow root once
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+      var sheet = _getCodeBlockSheet();
+      if (sheet) {
+        this.shadowRoot.adoptedStyleSheets = [sheet];
+      } else {
+        // Fallback: clone page styles into shadow root
+        var pageStyles = document.querySelectorAll("style");
+        for (var i = 0; i < pageStyles.length; i++) {
+          this.shadowRoot.appendChild(pageStyles[i].cloneNode(true));
+        }
+      }
+    }
+
+    this._render();
+
+    // If `src` attribute is set, fetch docs.json and re-render with SCIP data
+    this._loadSrc();
+  }
+
+  /**
+   * Load docs.json via the `src` attribute. Uses the shared fetch cache so
+   * multiple components pointing at the same URL share one request.
+   * Stores a per-component ScipStore reference so different code blocks can
+   * use different SCIP datasets.
+   */
+  _loadSrc() {
+    var src = this.getAttribute("src");
+    if (!src) return;
+    var self = this;
+    feLoadSrc(src).then(function (result) {
+      if (result.scip) {
+        self._scip = result.scip;
+      }
+      if (result.index) {
+        self._index = result.index;
+      }
+      self._resolveSymbol();
+      self._render();
+    });
+  }
+
+  /** Look up an item by path in per-component or global index. */
+  _findItem(path) {
+    var index = this._index || window.FE_DOC_INDEX;
+    if (!index || !index.items) return null;
+    for (var i = 0; i < index.items.length; i++) {
+      if (index.items[i].path === path) return index.items[i];
+    }
+    return null;
+  }
+
+  /**
+   * Resolve the `symbol` attribute against FE_DOC_INDEX.
+   * Populates _rawSource from the item's source_text and sets data-file
+   * from the item's source location for SCIP interactivity.
+   */
+  _resolveSymbol() {
+    var symbolPath = this.getAttribute("symbol");
+    if (!symbolPath) return;
+
+    // If we have a per-component index from `src`, use it; otherwise wait for global
+    var index = this._index || window.FE_DOC_INDEX;
+    if (!index || !index.items) {
+      var self = this;
+      if (!feWhenReady(function () { self._resolveSymbol(); self._render(); })) return;
+    }
+
+    var item = this._findItem(symbolPath);
+    if (item) {
+      if (item.source_text) {
+        this._rawSource = item.source_text;
+      } else if (item.signature) {
+        this._rawSource = item.signature;
+      }
+      if (item.source && item.source.display_file && !this.getAttribute("data-file")) {
+        this.setAttribute("data-file", item.source.display_file);
+      }
+    }
+  }
+
+  /** Re-render with current ScipStore (e.g. after live reload). */
+  refresh() {
+    // Re-adopt styles in case they changed
+    var sheet = _getCodeBlockSheet();
+    if (sheet && this.shadowRoot) {
+      this.shadowRoot.adoptedStyleSheets = [sheet];
+    }
+    this._render();
+  }
+
+  _render() {
+    var shadow = this.shadowRoot;
+    if (!shadow) return;
+
+    var lang = this.getAttribute("lang") || "fe";
+    var showLineNumbers = this.hasAttribute("line-numbers");
+    var collapsed = this.hasAttribute("collapsed");
+    var source = this._rawSource || "";
+
+    // Extract named region if specified
+    var regionName = this.getAttribute("region");
+    if (regionName && source) {
+      source = _extractRegion(source, regionName);
+    }
+
+    var wrapper = document.createElement("div");
+    wrapper.className = "fe-code-block-wrapper";
+
+    var pre = document.createElement("pre");
+    pre.className = "fe-code-pre";
+
+    var code = document.createElement("code");
+    code.className = "language-" + lang;
+
+    // Client-side highlighting via tree-sitter WASM (pure syntax coloring)
+    if (lang === "fe" && window.FeHighlighter && window.FeHighlighter.isReady()) {
+      code.innerHTML = window.FeHighlighter.highlightFe(source);
+      this._highlighted = true;
+    } else {
+      code.textContent = source;
+      this._highlighted = false;
+
+      // If highlighter not ready yet, listen for it and re-render once
+      if (lang === "fe" && !this._waitingForHighlighter) {
+        this._waitingForHighlighter = true;
+        var self = this;
+        document.addEventListener("fe-highlighter-ready", function onReady() {
+          document.removeEventListener("fe-highlighter-ready", onReady);
+          self._waitingForHighlighter = false;
+          self._render();
+        });
+      }
+    }
+
+    // Clear shadow root (preserves light DOM / raw source)
+    // Keep style elements if we used the fallback clone approach
+    var existingStyles = shadow.querySelectorAll("style");
+    shadow.innerHTML = "";
+    for (var si = 0; si < existingStyles.length; si++) {
+      shadow.appendChild(existingStyles[si]);
+    }
+
+    if (showLineNumbers) {
+      var lines = code.innerHTML.split("\n");
+      // Trim trailing empty line from trailing newline in source
+      if (lines.length > 1 && lines[lines.length - 1] === "") {
+        lines = lines.slice(0, -1);
+      }
+      var gutter = document.createElement("div");
+      gutter.className = "fe-line-numbers";
+      gutter.setAttribute("aria-hidden", "true");
+      for (var i = 1; i <= lines.length; i++) {
+        var span = document.createElement("span");
+        span.textContent = i;
+        gutter.appendChild(span);
+      }
+      wrapper.appendChild(gutter);
+    }
+
+    pre.appendChild(code);
+    wrapper.appendChild(pre);
+
+    if (collapsed) {
+      var details = document.createElement("details");
+      var summary = document.createElement("summary");
+      summary.textContent = lang + " code";
+      details.appendChild(summary);
+      details.appendChild(wrapper);
+      shadow.appendChild(details);
+    } else {
+      shadow.appendChild(wrapper);
+    }
+
+    // If SCIP is available, make highlighted spans interactive
+    this._scipAnnotated = false;
+    this._setupScipInteraction(code);
+
+    // Walk highlighted spans and add type links via ScipStore name lookup
+    // (fallback for code blocks without data-file or where positional resolution
+    // didn't annotate anything)
+    if (!this._scipAnnotated) {
+      this._setupNameBasedLinking(code);
+    }
+
+    // Listen for live diagnostics from LSP
+    this._setupLspDiagnostics(code);
+  }
+
+  /** Check if a doc path matches the link-filter glob pattern. */
+  _matchesLinkFilter(docPath) {
+    var linkFilter = this.getAttribute("link-filter");
+    if (!linkFilter) return true;
+    var patterns = linkFilter.split(",");
+    for (var p = 0; p < patterns.length; p++) {
+      var pat = patterns[p].trim();
+      if (!pat) continue;
+      if (pat.endsWith("*")) {
+        if (docPath.indexOf(pat.slice(0, -1)) === 0) return true;
+      } else {
+        if (docPath === pat) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Add click-to-navigate and hover highlighting on spans using ScipStore. */
+  _setupScipInteraction(codeEl) {
+    var scip = this._scip || window.FE_SCIP;
+    if (!scip) return;
+
+    var file = this.getAttribute("data-file") || this.getAttribute("data-scope");
+    if (!file) return;
+
+    var self = this;
+
+    // Path 1: Source file blocks with positional span attributes (data-line/data-col)
+    var lineSpans = codeEl.querySelectorAll("span[data-line]");
+    if (lineSpans.length > 0) {
+      // Pre-assign role-aware CSS classes to all positional spans
+      for (var i = 0; i < lineSpans.length; i++) {
+        var span = lineSpans[i];
+        var l = parseInt(span.getAttribute("data-line"), 10);
+        var c = parseInt(span.getAttribute("data-col"), 10);
+        var occ = scip.resolveOccurrence(file, l, c);
+        if (occ) {
+          var hash = scip.symbolHash(occ.sym);
+          span.classList.add("sym-" + hash);
+          if (occ.def) span.classList.add("sym-d-" + hash);
+          else span.classList.add("sym-r-" + hash);
+          span.setAttribute("data-sym", occ.sym);
+        }
+      }
+    } else if (this._highlighted) {
+      // Path 2: Tree-sitter highlighted blocks — resolve spans via character offset
+      var source = this._rawSource || "";
+      if (!source) return;
+
+      // Line offset for source excerpts (data-line-offset is 0-based)
+      var lineOffset = parseInt(this.getAttribute("data-line-offset") || "0", 10);
+
+      // Build line-start index for offset→(line,col) conversion
+      var lineStarts = [0];
+      for (var si = 0; si < source.length; si++) {
+        if (source.charCodeAt(si) === 10) lineStarts.push(si + 1);
+      }
+
+      function charToLineCol(pos) {
+        var lo = 0, hi = lineStarts.length - 1;
+        while (lo < hi) {
+          var mid = (lo + hi + 1) >>> 1;
+          if (lineStarts[mid] <= pos) lo = mid;
+          else hi = mid - 1;
+        }
+        return [lo + lineOffset, pos - lineStarts[lo]];
+      }
+
+      function annotateEl(el, startOff) {
+        var lc = charToLineCol(startOff);
+        var occ = scip.resolveOccurrence(file, lc[0], lc[1]);
+        if (occ) {
+          var hash = scip.symbolHash(occ.sym);
+          el.classList.add("sym-" + hash);
+          if (occ.def) el.classList.add("sym-d-" + hash);
+          else el.classList.add("sym-r-" + hash);
+          el.setAttribute("data-sym", occ.sym);
+          return true;
+        }
+        return false;
+      }
+
+      // Walk DOM tree tracking character offset, resolve spans and bare text
+      var offset = 0;
+      var annotated = false;
+      var pendingWraps = []; // [{textNode, startInNode, length, occ}]
+      function walk(node) {
+        var children = node.childNodes;
+        for (var ci = 0; ci < children.length; ci++) {
+          var child = children[ci];
+          if (child.nodeType === 3) { // TEXT_NODE
+            // Scan text for SCIP occurrences on identifier-like tokens
+            var text = child.textContent;
+            var re = /[A-Za-z_][A-Za-z0-9_]*/g;
+            var m;
+            while ((m = re.exec(text)) !== null) {
+              var tokOff = offset + m.index;
+              var lc = charToLineCol(tokOff);
+              var occ = scip.resolveOccurrence(file, lc[0], lc[1]);
+              if (occ) {
+                pendingWraps.push({
+                  textNode: child, startInNode: m.index, length: m[0].length, occ: occ
+                });
+              }
+            }
+            offset += text.length;
+          } else if (child.nodeType === 1) { // ELEMENT_NODE
+            var startOff = offset;
+            if (child.tagName === "SPAN" || child.tagName === "A") {
+              if (annotateEl(child, startOff)) annotated = true;
+            }
+            walk(child);
+          }
+        }
+      }
+      walk(codeEl);
+
+      // Apply text-node wraps (iterate backwards to preserve offsets)
+      for (var wi = pendingWraps.length - 1; wi >= 0; wi--) {
+        var pw = pendingWraps[wi];
+        // Split text node and wrap the token in a span
+        var before = pw.textNode.textContent.substring(0, pw.startInNode);
+        var token = pw.textNode.textContent.substring(pw.startInNode, pw.startInNode + pw.length);
+        var after = pw.textNode.textContent.substring(pw.startInNode + pw.length);
+        var span = document.createElement("span");
+        span.textContent = token;
+        var hash = scip.symbolHash(pw.occ.sym);
+        span.classList.add("sym-" + hash);
+        if (pw.occ.def) span.classList.add("sym-d-" + hash);
+        else span.classList.add("sym-r-" + hash);
+        span.setAttribute("data-sym", pw.occ.sym);
+        var parent = pw.textNode.parentNode;
+        if (after) parent.insertBefore(document.createTextNode(after), pw.textNode.nextSibling);
+        parent.insertBefore(span, pw.textNode.nextSibling);
+        if (before) {
+          pw.textNode.textContent = before;
+        } else {
+          parent.removeChild(pw.textNode);
+        }
+        annotated = true;
+      }
+
+      if (annotated) self._scipAnnotated = true;
+    }
+
+    var _matchesLinkFilter = self._matchesLinkFilter.bind(self);
+
+    // Universal event handlers for any span with data-sym
+    codeEl.addEventListener("click", function (e) {
+      var target = e.target;
+      if (target.tagName !== "SPAN" && target.tagName !== "A") return;
+      var sym = target.getAttribute("data-sym");
+      if (!sym) {
+        // Fallback: try data-line/data-col for legacy spans
+        var lineAttr = target.getAttribute("data-line");
+        var colAttr = target.getAttribute("data-col");
+        if (lineAttr && colAttr) {
+          sym = scip.resolveSymbol(file, parseInt(lineAttr, 10), parseInt(colAttr, 10));
+        }
+      }
+      if (sym) {
+        var docPath = scip.docUrl(sym);
+        if (!docPath || !_matchesLinkFilter(docPath)) return;
+
+        // Prevent the <a> href from firing — we handle navigation
+        e.preventDefault();
+
+        // Dispatch cancelable event — host page can preventDefault() and handle differently
+        var ev = new CustomEvent("fe-navigate", {
+          bubbles: true, composed: true, cancelable: true,
+          detail: { symbol: sym, docPath: docPath }
+        });
+        if (!self.dispatchEvent(ev)) return;
+
+        // Default navigation: use base attribute, FE_DOCS_BASE global, or hash
+        var base = self.getAttribute("base") || window.FE_DOCS_BASE || "";
+        if (base) {
+          location.href = base + "#" + docPath;
+        } else {
+          location.hash = "#" + docPath;
+        }
+      }
+    });
+
+    codeEl.addEventListener("mouseover", function (e) {
+      var target = e.target;
+      if (target.tagName !== "SPAN" && target.tagName !== "A") return;
+
+      var sym = target.getAttribute("data-sym");
+      if (!sym) {
+        var lineAttr = target.getAttribute("data-line");
+        var colAttr = target.getAttribute("data-col");
+        if (lineAttr && colAttr) {
+          sym = scip.resolveSymbol(file, parseInt(lineAttr, 10), parseInt(colAttr, 10));
+        }
+      }
+      if (!sym) return;
+
+      // Tooltip from SCIP metadata
+      var info = scip.symbolInfo(sym);
+      if (info) {
+        try {
+          var parsed = JSON.parse(info);
+          target.title = parsed.display_name || sym;
+        } catch (_) {}
+      }
+
+      var symDocUrl = scip.docUrl(sym);
+      target.style.cursor = (symDocUrl && _matchesLinkFilter(symDocUrl)) ? "pointer" : "default";
+      feHighlight(scip.symbolHash(sym));
+    });
+
+    codeEl.addEventListener("mouseout", function (e) {
+      if (e.target.tagName === "SPAN" || e.target.tagName === "A") {
+        e.target.style.cursor = "";
+        feUnhighlight();
+      }
+    });
+  }
+
+  /** CSS classes on highlighted spans that represent linkable names. */
+  static LINKABLE_CLASSES = [
+    "hl-type", "hl-type-builtin", "hl-type-interface", "hl-type-enum-variant", "hl-function"
+  ];
+
+  /**
+   * Walk highlighted spans, look up type/function names in ScipStore,
+   * and wrap matches in <a> links with hover highlighting.
+   */
+  _setupNameBasedLinking(codeEl) {
+    var scip = this._scip || window.FE_SCIP;
+    if (!scip) return;
+    var self = this;
+
+    var linkableSet = {};
+    for (var i = 0; i < FeCodeBlock.LINKABLE_CLASSES.length; i++) {
+      linkableSet[FeCodeBlock.LINKABLE_CLASSES[i]] = true;
+    }
+
+    var spans = codeEl.querySelectorAll("span");
+    for (var si = 0; si < spans.length; si++) {
+      var span = spans[si];
+      // Check if this span has a linkable highlight class
+      var isLinkable = false;
+      for (var ci = 0; ci < span.classList.length; ci++) {
+        if (linkableSet[span.classList[ci]]) { isLinkable = true; break; }
+      }
+      if (!isLinkable) continue;
+
+      var text = span.textContent;
+      // Strip generic params if present (e.g. "AbiDecoder<A" → "AbiDecoder")
+      var ltIdx = text.indexOf("<");
+      var lookupName = ltIdx > 0 ? text.slice(0, ltIdx) : text;
+      if (!lookupName) continue;
+
+      var match = this._scipLookupName(scip, lookupName);
+      if (!match) continue;
+
+      // Respect link-filter: don't create link anchors for filtered-out symbols
+      if (!this._matchesLinkFilter(match.doc_url)) continue;
+
+      // Create an anchor wrapping the identifier text
+      var a = document.createElement("a");
+      var navBase = this.getAttribute("base") || window.FE_DOCS_BASE || "";
+      a.href = navBase ? navBase + "#" + match.doc_url : "#" + match.doc_url;
+      a.className = span.className + " type-link";
+
+      var symClass = scip.symbolClass(match.symbol);
+      a.classList.add(symClass);
+
+      if (ltIdx > 0) {
+        // Only link the identifier part, keep generic params in the span
+        a.textContent = lookupName;
+        // Replace span content: <a>Name</a><genericSuffix>
+        span.textContent = text.slice(ltIdx);
+        span.parentNode.insertBefore(a, span);
+      } else {
+        a.textContent = text;
+        span.parentNode.replaceChild(a, span);
+      }
+
+      // Click: dispatch fe-navigate instead of browser default link navigation
+      a.setAttribute("data-sym", match.symbol);
+      (function (docUrl, sym) {
+        a.addEventListener("click", function (clickEvt) {
+          clickEvt.preventDefault();
+          var ev = new CustomEvent("fe-navigate", {
+            bubbles: true, composed: true, cancelable: true,
+            detail: { symbol: sym, docPath: docUrl }
+          });
+          if (!self.dispatchEvent(ev)) return;
+          var base = self.getAttribute("base") || window.FE_DOCS_BASE || "";
+          if (base) location.href = base + "#" + docUrl;
+          else location.hash = "#" + docUrl;
+        });
+      })(match.doc_url, match.symbol);
+
+      // Hover: highlight all same-symbol occurrences
+      var symHash = scip.symbolHash(match.symbol);
+      a.addEventListener("mouseenter", (function (h) {
+        return function () { feHighlight(h); };
+      })(symHash));
+      a.addEventListener("mouseleave", feUnhighlight);
+
+      // Tooltip from SCIP docs
+      var info = scip.symbolInfo(match.symbol);
+      if (info) {
+        try {
+          var parsed = JSON.parse(info);
+          if (parsed.documentation && parsed.documentation.length > 0) {
+            a.title = parsed.documentation[0].replace(/```[\s\S]*?```/g, "").trim();
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  /** Look up a name in ScipStore. Returns {doc_url, symbol} or null. */
+  _scipLookupName(scip, name) {
+    try {
+      var results = JSON.parse(scip.search(name));
+      for (var i = 0; i < results.length; i++) {
+        if (results[i].display_name === name && results[i].doc_url) {
+          return results[i];
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /** Listen for LSP diagnostics and underline affected lines. */
+  _setupLspDiagnostics(codeEl) {
+    var file = this.getAttribute("data-file");
+    if (!file) return;
+
+    // Remove previous listener to avoid accumulation across re-renders
+    if (this._diagHandler) {
+      document.removeEventListener("fe-diagnostics", this._diagHandler);
+    }
+
+    var shadow = this.shadowRoot;
+    this._diagHandler = function (e) {
+      var detail = e.detail;
+      if (!detail.uri || !detail.uri.endsWith(file)) return;
+
+      var old = shadow.querySelectorAll(".fe-diagnostic-marker");
+      for (var i = 0; i < old.length; i++) old[i].remove();
+
+      var diags = detail.diagnostics || [];
+      for (var j = 0; j < diags.length; j++) {
+        var diag = diags[j];
+        var line = diag.range && diag.range.start ? diag.range.start.line : -1;
+        if (line < 0) continue;
+
+        var marker = document.createElement("div");
+        marker.className = "fe-diagnostic-marker";
+        marker.setAttribute("data-severity", diag.severity || 1);
+        marker.textContent = diag.message || "";
+        marker.title = diag.message || "";
+        marker.style.cssText = "color: var(--diag-color, #e55); font-size: 0.85em; padding-left: 2ch;";
+        codeEl.parentNode.appendChild(marker);
+      }
+    };
+    document.addEventListener("fe-diagnostics", this._diagHandler);
+  }
+
+  disconnectedCallback() {
+    if (this._diagHandler) {
+      document.removeEventListener("fe-diagnostics", this._diagHandler);
+      this._diagHandler = null;
+    }
+  }
+}
+
+customElements.define("fe-code-block", FeCodeBlock);

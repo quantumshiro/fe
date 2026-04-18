@@ -1,0 +1,12 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/recv_fallback_return_type.fe
+---
+error[8-0080]: fallback arm cannot declare a return type
+  ┌─ recv_fallback_return_type.fe:3:14
+  │
+3 │         _ -> u256 {}
+  │              ^^^^ remove the return type from this fallback arm
+  │
+  = fallback arms are unit-returning in this version

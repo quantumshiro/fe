@@ -18,13 +18,12 @@ pub async fn handle_code_action(
     backend: &Backend,
     params: CodeActionParams,
 ) -> Result<Option<CodeActionResponse>, ResponseError> {
-    let file_path_str = params.text_document.uri.path();
-    let url = url::Url::from_file_path(file_path_str).map_err(|()| {
-        ResponseError::new(
-            async_lsp::ErrorCode::INTERNAL_ERROR,
-            format!("Invalid file path: {file_path_str}"),
-        )
-    })?;
+    let lsp_uri = params.text_document.uri.clone();
+    if backend.is_virtual_uri(&lsp_uri) {
+        return Ok(None);
+    }
+
+    let url = backend.map_client_uri_to_internal(lsp_uri.clone());
 
     let file = backend
         .db
@@ -53,20 +52,16 @@ pub async fn handle_code_action(
         start,
         end,
         file_text,
-        &url,
+        &lsp_uri,
         &mut actions,
     );
 
-    if actions.is_empty() {
-        Ok(None)
-    } else {
-        // Convert CodeAction to CodeActionOrCommand
-        let response: Vec<CodeActionOrCommand> = actions
-            .into_iter()
-            .map(CodeActionOrCommand::CodeAction)
-            .collect();
-        Ok(Some(response))
-    }
+    // Convert CodeAction to CodeActionOrCommand
+    let response: Vec<CodeActionOrCommand> = actions
+        .into_iter()
+        .map(CodeActionOrCommand::CodeAction)
+        .collect();
+    Ok(Some(response))
 }
 
 /// Collect code actions for adding return type annotations to functions.

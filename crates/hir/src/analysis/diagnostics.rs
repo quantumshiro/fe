@@ -8,28 +8,174 @@ use crate::analysis::{
     name_resolution::diagnostics::{ImportDiag, PathResDiag},
     ty::{
         diagnostics::{
-            BodyDiag, DefConflictError, FuncBodyDiag, ImplDiag, TraitConstraintDiag,
-            TraitLowerDiag, TyDiagCollection, TyLowerDiag,
+            BodyDiag, CallConstraintDiagInfo, DefConflictError, FuncBodyDiag, ImplDiag,
+            TraitConstraintDiag, TraitLowerDiag, TyDiagCollection, TyLowerDiag,
         },
         trait_def::TraitInstId,
         ty_check::{EffectParamOwner, RecordLike},
-        ty_def::{TyData, TyVarSort},
+        ty_def::{TyData, TyId, TyVarSort},
     },
 };
 use crate::{
     ParserError, SpannedHirDb,
-    hir_def::{CallableDef, FieldIndex, GenericParamOwner, PathKind, Trait},
+    hir_def::{CallableDef, FieldIndex, GenericParamOwner, PathKind, Trait, params::FuncParamMode},
     span::LazySpan,
 };
 use common::diagnostics::{
     CompleteDiagnostic, DiagnosticPass, GlobalErrorCode, LabelStyle, Severity, Span, SpanKind,
-    SubDiagnostic,
+    SubDiagnostic, cmp_complete_diagnostics,
 };
 use either::Either;
 use itertools::Itertools;
+use parser::TextRange;
 use std::cmp::Ordering;
 
 use common::file::File;
+
+fn pretty_print_ty_for_mismatch<'db>(db: &'db dyn SpannedHirAnalysisDb, ty: TyId<'db>) -> String {
+    match ty.data(db) {
+        TyData::TyVar(_) | TyData::TyParam(_) => ty.pretty_print(db).to_string(),
+        TyData::AssocTy(assoc_ty) => {
+            let self_ty = pretty_print_ty_for_mismatch(db, assoc_ty.trait_.self_ty(db));
+            format!(
+                "<{} as {}>::{}",
+                self_ty,
+                assoc_ty.trait_.pretty_print(db, false),
+                assoc_ty.name.data(db)
+            )
+        }
+        TyData::QualifiedTy(trait_inst) => {
+            let self_ty = pretty_print_ty_for_mismatch(db, trait_inst.self_ty(db));
+            format!("<{} as {}>", self_ty, trait_inst.pretty_print(db, false))
+        }
+        TyData::TyApp(_, _) => pretty_print_ty_app_for_mismatch(db, ty),
+        TyData::TyBase(base) => {
+            use crate::analysis::ty::ty_def::TyBase;
+
+            match base {
+                TyBase::Adt(adt) => adt
+                    .scope(db)
+                    .pretty_path(db)
+                    .unwrap_or_else(|| ty.pretty_print(db).to_string()),
+                TyBase::Contract(contract) => contract
+                    .scope()
+                    .pretty_path(db)
+                    .unwrap_or_else(|| ty.pretty_print(db).to_string()),
+                TyBase::Prim(_) | TyBase::Func(_) => ty.pretty_print(db).to_string(),
+            }
+        }
+        TyData::ConstTy(_) => ty.pretty_print(db).to_string(),
+        TyData::Never => "!".to_string(),
+        TyData::Invalid(cause) => format!("invalid({})", cause.pretty_print(db)),
+    }
+}
+
+fn pretty_print_ty_app_for_mismatch<'db>(
+    db: &'db dyn SpannedHirAnalysisDb,
+    ty: TyId<'db>,
+) -> String {
+    use crate::analysis::ty::ty_def::{PrimTy, TyBase};
+
+    let (base, args) = ty.decompose_ty_app(db);
+    match base.data(db) {
+        TyData::TyBase(TyBase::Prim(PrimTy::BorrowMut)) => {
+            let Some(inner) = args.first().copied() else {
+                return "mut <missing>".to_string();
+            };
+            format!("mut {}", pretty_print_ty_for_mismatch(db, inner))
+        }
+        TyData::TyBase(TyBase::Prim(PrimTy::BorrowRef)) => {
+            let Some(inner) = args.first().copied() else {
+                return "ref <missing>".to_string();
+            };
+            format!("ref {}", pretty_print_ty_for_mismatch(db, inner))
+        }
+        TyData::TyBase(TyBase::Prim(PrimTy::View)) => {
+            let Some(inner) = args.first().copied() else {
+                return "view <missing>".to_string();
+            };
+            format!("view {}", pretty_print_ty_for_mismatch(db, inner))
+        }
+        TyData::TyBase(TyBase::Prim(PrimTy::Array)) => {
+            let Some(elem) = args.first().copied() else {
+                return "[<missing>; <missing>]".to_string();
+            };
+            let Some(len) = args.get(1).copied() else {
+                return format!("[{}; <missing>]", pretty_print_ty_for_mismatch(db, elem));
+            };
+            format!(
+                "[{}; {}]",
+                pretty_print_ty_for_mismatch(db, elem),
+                pretty_print_ty_for_mismatch(db, len)
+            )
+        }
+        TyData::TyBase(TyBase::Prim(PrimTy::Tuple(_))) => {
+            let mut rendered = String::from("(");
+            if let Some((first, rest)) = args.split_first() {
+                rendered.push_str(&pretty_print_ty_for_mismatch(db, *first));
+                for arg in rest {
+                    rendered.push_str(", ");
+                    rendered.push_str(&pretty_print_ty_for_mismatch(db, *arg));
+                }
+            }
+            rendered.push(')');
+            rendered
+        }
+        _ => {
+            let mut rendered = pretty_print_ty_for_mismatch(db, base);
+            if let Some((first, rest)) = args.split_first() {
+                rendered.push('<');
+                rendered.push_str(&pretty_print_ty_for_mismatch(db, *first));
+                for arg in rest {
+                    rendered.push_str(", ");
+                    rendered.push_str(&pretty_print_ty_for_mismatch(db, *arg));
+                }
+                rendered.push('>');
+            }
+            rendered
+        }
+    }
+}
+
+fn format_type_mismatch_message<'db>(
+    db: &'db dyn SpannedHirAnalysisDb,
+    expected: TyId<'db>,
+    given: TyId<'db>,
+) -> String {
+    let expected_plain = expected.pretty_print(db);
+    let given_plain = given.pretty_print(db);
+    if expected_plain != given_plain {
+        return format!("expected `{expected_plain}`, but `{given_plain}` is given");
+    }
+
+    let expected_detailed = pretty_print_ty_for_mismatch(db, expected);
+    let given_detailed = pretty_print_ty_for_mismatch(db, given);
+    if expected_detailed != given_detailed {
+        return format!("expected `{expected_detailed}`, but `{given_detailed}` is given");
+    }
+
+    format!("expected `{expected_plain}`, but `{given_plain}` is given")
+}
+
+fn primary_diag(
+    severity: Severity,
+    message: &str,
+    label: &str,
+    span: Option<Span>,
+    error_code: GlobalErrorCode,
+) -> CompleteDiagnostic {
+    CompleteDiagnostic::new(
+        severity,
+        message.to_string(),
+        vec![SubDiagnostic::new(
+            LabelStyle::Primary,
+            label.to_string(),
+            span,
+        )],
+        vec![],
+        error_code,
+    )
+}
 
 fn cmp_trait_inst_by_name<'db>(
     db: &'db dyn SpannedHirAnalysisDb,
@@ -43,6 +189,43 @@ fn cmp_trait_inst_by_name<'db>(
         let b_self = b.self_ty(db).pretty_print(db).to_string();
         a_self.cmp(&b_self)
     })
+}
+
+fn format_method_param_ty<'db>(
+    db: &'db dyn SpannedHirAnalysisDb,
+    callable: CallableDef<'db>,
+    param_idx: usize,
+    ty: TyId<'db>,
+) -> String {
+    let ty = ty.pretty_print(db).to_string();
+    let Some(param) = (match callable {
+        CallableDef::Func(func) => func.params(db).nth(param_idx),
+        CallableDef::VariantCtor(_) => None,
+    }) else {
+        return ty;
+    };
+
+    let mut rendered = String::new();
+    if param.is_mut(db) {
+        rendered.push_str("mut ");
+    }
+    if param.mode(db) == FuncParamMode::Own && !ty.starts_with("own ") {
+        rendered.push_str("own ");
+    }
+    rendered.push_str(&ty);
+    rendered
+}
+
+fn format_call_constraint_source<'db>(
+    db: &'db dyn SpannedHirAnalysisDb,
+    required_by: &CallConstraintDiagInfo<'db>,
+) -> String {
+    let callable_name = required_by
+        .callable_def
+        .name(db)
+        .map(|name| name.data(db).to_string())
+        .unwrap_or_else(|| "callable".to_string());
+    format!("required by this bound on `{callable_name}`")
 }
 
 /// All diagnostics accumulated in salsa-db should implement
@@ -95,10 +278,7 @@ where
     let config = term::Config::default();
 
     let mut completes: Vec<_> = diags.into_iter().map(|diag| diag.to_complete(db)).collect();
-    completes.sort_by(|lhs, rhs| match lhs.error_code.cmp(&rhs.error_code) {
-        std::cmp::Ordering::Equal => lhs.primary_span().cmp(&rhs.primary_span()),
-        ord => ord,
-    });
+    completes.sort_by(cmp_complete_diagnostics);
 
     for diag in completes {
         term::emit(
@@ -236,6 +416,94 @@ impl DiagnosticVoucher for ParserError {
     }
 }
 
+impl DiagnosticVoucher for crate::ArithmeticAttrError {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        let span = Span::new(self.file, self.primary_range, SpanKind::Original);
+        let (local_code, message, label, notes) = match &self.kind {
+            crate::ArithmeticAttrErrorKind::ArithmeticAttrOnUnsupportedItem { item_kind } => (
+                1,
+                format!(
+                    "`#[arithmetic(...)]` is only valid on functions and modules (found on {item_kind})"
+                ),
+                "move this attribute to a function or module item".to_string(),
+                vec![
+                    "ingot and workspace arithmetic configuration is not implemented in this slice"
+                        .to_string(),
+                ],
+            ),
+            crate::ArithmeticAttrErrorKind::InvalidArithmeticAttrForm => (
+                2,
+                "invalid `#[arithmetic]` attribute form".to_string(),
+                "expected `#[arithmetic(checked)]` or `#[arithmetic(unchecked)]`".to_string(),
+                vec![],
+            ),
+        };
+
+        CompleteDiagnostic::new(
+            Severity::Error,
+            message,
+            vec![SubDiagnostic::new(LabelStyle::Primary, label, Some(span))],
+            notes,
+            GlobalErrorCode::new(DiagnosticPass::ArithmeticAttr, local_code),
+        )
+    }
+}
+
+impl DiagnosticVoucher for crate::PayableError {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        let span = Span::new(self.file, self.primary_range, SpanKind::Original);
+        let (local_code, message, label) = match &self.kind {
+            crate::PayableErrorKind::PayableAttrOnUnsupportedItem { item_kind } => (
+                1,
+                format!(
+                    "`#[payable]` is only valid on `init` blocks and `recv` arms (found on {item_kind})"
+                ),
+                "move this attribute to an `init` block or `recv` arm".to_string(),
+            ),
+            crate::PayableErrorKind::PayableAttrOnMsgVariant => (
+                3,
+                "`#[payable]` must be placed on the corresponding `recv` arm, not the `msg` variant"
+                    .to_string(),
+                "move this attribute to the matching `recv` arm".to_string(),
+            ),
+            crate::PayableErrorKind::InvalidPayableAttrForm => (
+                2,
+                "invalid `#[payable]` attribute form".to_string(),
+                "expected `#[payable]` with no arguments".to_string(),
+            ),
+            crate::PayableErrorKind::UnknownAttrOnContractEntry {
+                attr_name,
+                entry_kind,
+            } => {
+                if *entry_kind == "recv block" {
+                    (
+                        4,
+                        format!("unknown attribute `#[{attr_name}]` on recv block"),
+                        "remove this attribute; `recv` blocks do not support normal attributes"
+                            .to_string(),
+                    )
+                } else {
+                    (
+                        4,
+                        format!(
+                            "unknown attribute `#[{attr_name}]` on {entry_kind} (only `#[payable]` is allowed)"
+                        ),
+                        "remove this attribute or use `#[payable]`".to_string(),
+                    )
+                }
+            }
+        };
+
+        CompleteDiagnostic::new(
+            Severity::Error,
+            message,
+            vec![SubDiagnostic::new(LabelStyle::Primary, label, Some(span))],
+            vec![],
+            GlobalErrorCode::new(DiagnosticPass::PayableAttr, local_code),
+        )
+    }
+}
+
 impl DiagnosticVoucher for crate::SelectorError {
     fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
         use crate::SelectorErrorKind;
@@ -319,6 +587,213 @@ impl DiagnosticVoucher for crate::SelectorError {
             notes,
             error_code,
         }
+    }
+}
+
+impl DiagnosticVoucher for crate::EventError {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        use crate::EventErrorKind;
+
+        let primary_span = Span::new(self.file, self.primary_range, SpanKind::Original);
+
+        let (code, message, label, notes) = match &self.kind {
+            EventErrorKind::EventAttrOnNonStruct { item_kind } => (
+                1,
+                format!("`#[event]` is only valid on structs (found on {item_kind})"),
+                "`#[event]` must be placed on a `struct` item".to_string(),
+                vec!["move `#[event]` to a struct declaration".to_string()],
+            ),
+            EventErrorKind::InvalidEventAttrForm => (
+                2,
+                "invalid `#[event]` attribute form".to_string(),
+                "expected `#[event]` without arguments".to_string(),
+                vec!["remove arguments and use `#[event]`".to_string()],
+            ),
+            EventErrorKind::GenericEventStruct => (
+                3,
+                "`#[event]` structs must be non-generic".to_string(),
+                "generics are not supported on `#[event]` structs".to_string(),
+                vec!["remove generic parameters from the event struct".to_string()],
+            ),
+            EventErrorKind::IndexedAttrOutsideEventStruct => (
+                4,
+                "`#[indexed]` is only valid within `#[event]` structs".to_string(),
+                "move `#[indexed]` inside a `#[event]` struct".to_string(),
+                vec!["mark the struct with `#[event]` or remove `#[indexed]`".to_string()],
+            ),
+            EventErrorKind::InvalidIndexedAttrForm => (
+                5,
+                "invalid `#[indexed]` attribute form".to_string(),
+                "expected `#[indexed]` without arguments".to_string(),
+                vec!["remove arguments and use `#[indexed]`".to_string()],
+            ),
+            EventErrorKind::TooManyIndexedFields { indexed_count } => (
+                6,
+                "too many indexed fields in event".to_string(),
+                format!("EVM supports at most 3 indexed fields (found {indexed_count})"),
+                vec!["remove `#[indexed]` from fields until there are at most 3".to_string()],
+            ),
+            EventErrorKind::UnsupportedFieldType { ty } => (
+                7,
+                "unsupported event field type".to_string(),
+                format!("`{ty}` is not supported as an event field"),
+                vec!["event field types must be named types (e.g. `u256`, `Address`)".to_string()],
+            ),
+        };
+
+        let error_code = GlobalErrorCode::new(DiagnosticPass::EventLower, code);
+
+        CompleteDiagnostic::new(
+            Severity::Error,
+            message,
+            vec![SubDiagnostic::new(
+                LabelStyle::Primary,
+                label,
+                Some(primary_span),
+            )],
+            notes,
+            error_code,
+        )
+    }
+}
+
+impl DiagnosticVoucher for crate::ErrorDiagnostic {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        use crate::ErrorDiagnosticKind;
+
+        let primary_span = Span::new(self.file, self.primary_range, SpanKind::Original);
+
+        let (code, message, label, notes) = match &self.kind {
+            ErrorDiagnosticKind::ErrorAttrOnNonStruct { item_kind } => (
+                1,
+                format!("`#[error]` is only valid on structs (found on {item_kind})"),
+                "`#[error]` must be placed on a `struct` item".to_string(),
+                vec!["move `#[error]` to a struct declaration".to_string()],
+            ),
+            ErrorDiagnosticKind::InvalidErrorAttrForm => (
+                2,
+                "invalid `#[error]` attribute form".to_string(),
+                "expected `#[error]` without arguments".to_string(),
+                vec!["remove arguments and use `#[error]`".to_string()],
+            ),
+            ErrorDiagnosticKind::GenericErrorStruct => (
+                3,
+                "`#[error]` structs must be non-generic".to_string(),
+                "generics are not supported on `#[error]` structs".to_string(),
+                vec!["remove generic parameters from the error struct".to_string()],
+            ),
+            ErrorDiagnosticKind::UnsupportedFieldType { ty } => (
+                4,
+                "unsupported error field type".to_string(),
+                format!("`{ty}` is not supported as an error field"),
+                vec!["error field types must be named types (e.g. `u256`, `Address`)".to_string()],
+            ),
+            ErrorDiagnosticKind::EventErrorAttrConflict => (
+                5,
+                "`#[error]` cannot be combined with `#[event]`".to_string(),
+                "`#[error]` conflicts with `#[event]` on the same struct".to_string(),
+                vec!["split this into separate structs or remove one attribute".to_string()],
+            ),
+        };
+
+        let error_code = GlobalErrorCode::new(DiagnosticPass::ErrorLower, code);
+
+        CompleteDiagnostic::new(
+            Severity::Error,
+            message,
+            vec![SubDiagnostic::new(
+                LabelStyle::Primary,
+                label,
+                Some(primary_span),
+            )],
+            notes,
+            error_code,
+        )
+    }
+}
+
+impl DiagnosticVoucher for crate::InlineAttrError {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        use crate::hir_def::InlineAttrErrorKind;
+
+        let primary_span = Span::new(self.file, self.primary_range, SpanKind::Original);
+        let func_name = self.func_name.as_deref().unwrap_or("<anonymous>");
+
+        let (code, message, label, notes) = match self.kind {
+            InlineAttrErrorKind::Duplicate => (
+                1,
+                format!("duplicate `#[inline]` attribute on function `{func_name}`"),
+                "remove the extra `#[inline]` attribute".to_string(),
+                vec![
+                    "functions support at most one inline hint".to_string(),
+                    "use one of `#[inline]`, `#[inline(always)]`, or `#[inline(never)]`"
+                        .to_string(),
+                ],
+            ),
+            InlineAttrErrorKind::InvalidForm => (
+                2,
+                format!("invalid `#[inline]` attribute on function `{func_name}`"),
+                "expected `#[inline]`, `#[inline(always)]`, or `#[inline(never)]`".to_string(),
+                vec![
+                    "supported inline hints are `#[inline]`, `#[inline(always)]`, and `#[inline(never)]`"
+                        .to_string(),
+                ],
+            ),
+        };
+
+        let error_code = GlobalErrorCode::new(DiagnosticPass::InlineAttr, code);
+
+        CompleteDiagnostic::new(
+            Severity::Error,
+            message,
+            vec![SubDiagnostic::new(
+                LabelStyle::Primary,
+                label,
+                Some(primary_span),
+            )],
+            notes,
+            error_code,
+        )
+    }
+}
+
+impl DiagnosticVoucher for crate::LoopUnrollAttrError {
+    fn to_complete(&self, _db: &dyn SpannedHirAnalysisDb) -> CompleteDiagnostic {
+        use crate::hir_def::LoopUnrollAttrErrorKind;
+
+        let primary_span = Span::new(self.file, self.primary_range, SpanKind::Original);
+
+        let (code, message, label, notes) = match self.kind {
+            LoopUnrollAttrErrorKind::Duplicate => (
+                1,
+                "duplicate loop unroll attribute on `for` loop".to_string(),
+                "remove the extra loop unroll attribute".to_string(),
+                vec!["use at most one of `#[unroll]` or `#[unroll(never)]`".to_string()],
+            ),
+            LoopUnrollAttrErrorKind::InvalidForm => (
+                2,
+                "invalid loop unroll attribute on `for` loop".to_string(),
+                "expected `#[unroll]` or `#[unroll(never)]`".to_string(),
+                vec![
+                    "supported loop unroll hints are `#[unroll]` and `#[unroll(never)]`"
+                        .to_string(),
+                ],
+            ),
+        };
+
+        let error_code = GlobalErrorCode::new(DiagnosticPass::LoopUnrollAttr, code);
+
+        CompleteDiagnostic::new(
+            Severity::Error,
+            message,
+            vec![SubDiagnostic::new(
+                LabelStyle::Primary,
+                label,
+                Some(primary_span),
+            )],
+            notes,
+            error_code,
+        )
     }
 }
 
@@ -415,13 +890,21 @@ impl DiagnosticVoucher for PathResDiag<'_> {
 
             Self::NotFound(prim_span, ident) => {
                 let ident = ident.data(db);
+                let span = prim_span.resolve(db).or_else(|| {
+                    let top_mod = prim_span.top_mod(db)?;
+                    Some(Span::new(
+                        top_mod.file(db),
+                        TextRange::new(0.into(), 0.into()),
+                        SpanKind::NotFound,
+                    ))
+                });
                 CompleteDiagnostic {
                     severity,
                     message: format!("`{ident}` is not found"),
                     sub_diagnostics: vec![SubDiagnostic {
                         style: LabelStyle::Primary,
                         message: format!("`{ident}` is not found"),
-                        span: prim_span.resolve(db),
+                        span,
                     }],
                     notes: vec![],
                     error_code,
@@ -518,15 +1001,15 @@ impl DiagnosticVoucher for PathResDiag<'_> {
 
                 let mut cand_spans: Vec<_> = candidates
                     .iter()
-                    .filter_map(|(span, from_prelude)| {
-                        span.resolve(db).map(|resolved| (resolved, *from_prelude))
+                    .filter_map(|(span, from_implicit)| {
+                        span.resolve(db).map(|resolved| (resolved, *from_implicit))
                     })
                     .collect();
                 cand_spans.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
                 diags.extend(cand_spans.into_iter().enumerate().map(
-                    |(i, (span, from_prelude))| {
-                        let label = if from_prelude {
-                            format!("candidate {} (from prelude)", i + 1)
+                    |(i, (span, from_implicit))| {
+                        let label = if from_implicit {
+                            format!("candidate {} (from implicit import)", i + 1)
                         } else {
                             format!("candidate {}", i + 1)
                         };
@@ -598,6 +1081,18 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                     error_code,
                 }
             }
+
+            Self::InfiniteBoundRecursion(span, msg) => CompleteDiagnostic {
+                severity,
+                message: "infinite trait bound recursion".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: msg.to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
 
             Self::InvalidPathSegment {
                 span: prim_span,
@@ -769,6 +1264,21 @@ impl DiagnosticVoucher for PathResDiag<'_> {
                     error_code,
                 }
             }
+
+            Self::TraitConstHoleArg { span, ident } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: format!(
+                    "layout hole `_` is not allowed in trait generic arguments for `{}`",
+                    ident.data(db)
+                ),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "replace `_` with an explicit const argument".to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
 
             Self::TypeMustBeKnown(span) => CompleteDiagnostic {
                 severity: Severity::Error,
@@ -1285,38 +1795,6 @@ impl DiagnosticVoucher for TyLowerDiag<'_> {
                 }
             }
 
-            Self::DuplicateArgLabel(func, idxs) => {
-                let views: Vec<_> = func.params(db).collect();
-                let name = views[idxs[0] as usize]
-                    .label_eagerly(db)
-                    .expect("param label")
-                    .data(db);
-
-                let spans = idxs.iter().map(|i| {
-                    let i = *i as usize;
-                    let s = func.span().params().clone().param(i);
-                    if views[i].label(db).is_some() {
-                        s.label().resolve(db)
-                    } else {
-                        s.name().resolve(db)
-                    }
-                });
-
-                let message = if let Some(name) = func.name(db).to_opt() {
-                    format!("duplicate argument label in function `{}`", name.data(db))
-                } else {
-                    "duplicate argument label in function definition".into()
-                };
-
-                CompleteDiagnostic {
-                    severity: Severity::Error,
-                    message,
-                    sub_diagnostics: duplicate_name_subdiags(name, spans),
-                    notes: vec![],
-                    error_code,
-                }
-            }
-
             Self::DuplicateFieldName(parent, idxs) => {
                 let name = parent
                     .fields(db)
@@ -1405,7 +1883,7 @@ impl DiagnosticVoucher for TyLowerDiag<'_> {
                 message: "invalid const parameter type".to_string(),
                 sub_diagnostics: vec![SubDiagnostic {
                     style: LabelStyle::Primary,
-                    message: "only integer or bool types are allowed as a const parameter type"
+                    message: "only integer, bool, or unit-variant enum types are allowed as a const parameter type"
                         .to_string(),
                     span: span.resolve(db),
                 }],
@@ -1475,17 +1953,157 @@ impl DiagnosticVoucher for TyLowerDiag<'_> {
                 error_code,
             },
 
-            Self::InvalidConstTyExpr(span) => CompleteDiagnostic {
+            Self::ConstHoleInValuePosition { span, ty } => {
+                let mut sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "this type contains an inferred const (`_`)".to_string(),
+                    span: span.resolve(db),
+                }];
+                if let Some(name_span) = ty.name_span(db) {
+                    let type_name = ty.base_ty(db).pretty_print(db);
+                    sub_diagnostics.push(SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format!("`{type_name}` is defined here"),
+                        span: name_span.resolve(db),
+                    });
+                }
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: "type with inferred const generic parameter `_` can not be used here".to_string(),
+                    sub_diagnostics,
+                    notes: vec![
+                        "specify an explicit const generic argument".to_string(),
+                    ],
+                    error_code,
+                }
+            }
+
+            Self::OwnParamCannotBeBorrow { span, ty } => CompleteDiagnostic {
                 severity: Severity::Error,
-                message: "the expression is not supported yet in a const type context".to_string(),
+                message: "invalid `own` parameter".to_string(),
                 sub_diagnostics: vec![SubDiagnostic {
                     style: LabelStyle::Primary,
-                    message: "only literal expression is supported".to_string(),
+                    message: format!(
+                        "`own` parameters must have owned types (found `{}`)",
+                        ty.pretty_print(db)
+                    ),
                     span: span.resolve(db),
                 }],
-                notes: vec![],
+                notes: vec![
+                    "remove `own`, or change the parameter type to an owned type".to_string(),
+                ],
                 error_code,
             },
+
+            Self::InvalidMutParamPrefixWithoutOwnType { span } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "invalid `mut` parameter syntax".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "`mut x: T` is only allowed when `T` is `own ...`".to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec![
+                    "use `x: mut T` for mutable borrow parameters".to_string(),
+                    "or use `mut x: own T` for mutable owned parameters".to_string(),
+                ],
+                error_code,
+            },
+
+            Self::MixedRefSelfPrefixWithExplicitType { span } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "invalid mixed receiver syntax".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "`ref self: ...` cannot be used with an explicit `self` type"
+                        .to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec![
+                    "use shorthand receiver syntax instead: `ref self`".to_string(),
+                    "or move the mode into the type and remove the prefix: `self: ref ...`"
+                        .to_string(),
+                ],
+                error_code,
+            },
+
+            Self::MixedOwnSelfPrefixWithExplicitType { span } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "invalid mixed receiver syntax".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "`own self: ...` cannot be used with an explicit `self` type"
+                        .to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec![
+                    "use shorthand receiver syntax instead: `own self`".to_string(),
+                    "or move the mode into the type and remove the prefix: `self: own ...`"
+                        .to_string(),
+                ],
+                error_code,
+            },
+
+            Self::InvalidMutSelfPrefixWithExplicitType { span } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "invalid mixed receiver syntax".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "`mut self: ...` is only allowed as `mut self: own X` where `X` is not bare `Self`".to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec!["for a mutable owned receiver, use shorthand receiver syntax: `mut own self`".to_string()],
+                error_code,
+            },
+
+            Self::InvalidConstTyExpr(span) => primary_diag(
+                Severity::Error,
+                "the expression is not supported in a const type context",
+                "expected a literal, const, or const fn call",
+                span.resolve(db),
+                error_code,
+            ),
+
+            Self::ConstEvalUnsupported(span) => primary_diag(
+                Severity::Error,
+                "the expression cannot be evaluated at compile time",
+                "unsupported in const evaluation",
+                span.resolve(db),
+                error_code,
+            ),
+
+            Self::ConstEvalNonConstCall(span) => primary_diag(
+                Severity::Error,
+                "non-const function call in const context",
+                "calls in const context must be `const fn`",
+                span.resolve(db),
+                error_code,
+            ),
+
+            Self::ConstEvalDivisionByZero(span) => primary_diag(
+                Severity::Error,
+                "division by zero in const context",
+                "cannot divide by zero",
+                span.resolve(db),
+                error_code,
+            ),
+
+            Self::ConstEvalStepLimitExceeded(span) => primary_diag(
+                Severity::Error,
+                "const evaluation exceeded the step limit",
+                "const evaluation takes too many steps",
+                span.resolve(db),
+                error_code,
+            ),
+
+            Self::ConstEvalRecursionLimitExceeded(span) => primary_diag(
+                Severity::Error,
+                "const evaluation exceeded the recursion limit",
+                "const evaluation recurses too deeply",
+                span.resolve(db),
+                error_code,
+            ),
 
             Self::NonTrailingDefaultGenericParam(span) => CompleteDiagnostic {
                 severity: Severity::Error,
@@ -1559,11 +2177,7 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                 message: "type mismatch".to_string(),
                 sub_diagnostics: vec![SubDiagnostic {
                     style: LabelStyle::Primary,
-                    message: format!(
-                        "expected `{}`, but `{}` is given",
-                        expected.pretty_print(db),
-                        given.pretty_print(db),
-                    ),
+                    message: format_type_mismatch_message(db, *expected, *given),
                     span: span.resolve(db),
                 }],
                 error_code,
@@ -1604,12 +2218,36 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                 error_code,
             },
 
+            Self::BindingsInOrPat(span) => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "bindings in `|` patterns are not supported".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "split this into separate arms or remove the binding".to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
+
             Self::DuplicatedRestPat(span) => CompleteDiagnostic {
                 severity: Severity::Error,
                 message: "duplicate `..` in pattern".to_string(),
                 sub_diagnostics: vec![SubDiagnostic {
                     style: LabelStyle::Primary,
                     message: "`..` can be used only once".to_string(),
+                    span: span.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
+
+            Self::UnexpectedRestPat(span) => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "unexpected `..` in pattern".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "`..` is only allowed inside tuple and record patterns".to_string(),
                     span: span.resolve(db),
                 }],
                 notes: vec![],
@@ -1861,6 +2499,7 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                 let is_labeled = effect.and_then(|e| e.name).is_some();
                 let is_contract_scoped_uses = match owner {
                     EffectParamOwner::Contract(_) => false,
+                    EffectParamOwner::ContractInit { .. } => true,
                     EffectParamOwner::ContractRecvArm { .. } => true,
                     EffectParamOwner::Func(func) => matches!(
                         func.scope().parent_item(db),
@@ -1900,6 +2539,61 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                         ],
                         error_code,
                     }
+                }
+            }
+
+            Self::ContractRootEffectTraitNotImplemented {
+                owner,
+                idx,
+                root_ty,
+                trait_req,
+            } => {
+                let span = owner.effect_param_path_span(db, *idx).resolve(db);
+                let root = root_ty.pretty_print(db);
+
+                CompleteDiagnostic {
+                    severity,
+                    message: "unsupported contract effect".to_string(),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "contract root effect `{root}` does not implement `{}`",
+                            trait_req.pretty_print(db, false),
+                        ),
+                        span,
+                    }],
+                    notes: vec![format!(
+                        "contract-scoped trait effects must be implemented by the target `RootEffect` (`{root}`)"
+                    )],
+                    error_code,
+                }
+            }
+
+            Self::ContractRootEffectTypeNotZeroSized {
+                owner,
+                key,
+                idx,
+                given,
+            } => {
+                let idx = *idx;
+                let span = owner.effect_param_path_span(db, idx).resolve(db);
+                let key_str = key.pretty_print(db);
+                let given_str = given.pretty_print(db);
+
+                CompleteDiagnostic {
+                    severity,
+                    message: "unsupported contract effect".to_string(),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "contract-scoped type effects must be zero-sized, but `{key_str}` resolves to `{given_str}`"
+                        ),
+                        span,
+                    }],
+                    notes: vec![
+                        "use a trait effect (implemented by the target `RootEffect`) or use a zero-sized type".to_string(),
+                    ],
+                    error_code,
                 }
             }
 
@@ -2042,6 +2736,52 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                 }
             }
 
+            Self::EffectProviderMismatch {
+                primary,
+                func,
+                key,
+                expected,
+                given,
+                provided_span,
+            } => {
+                let func_name = func
+                    .name(db)
+                    .to_opt()
+                    .map(|n| n.data(db).to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string());
+                let key_str = key.pretty_print(db);
+                let expected_ty = expected.pretty_print(db).to_string();
+                let given_ty = given.pretty_print(db).to_string();
+
+                let mut sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "expected effect provider `{}`, found `{}` for `{}`",
+                        expected_ty, given_ty, key_str
+                    ),
+                    span: primary.resolve(db),
+                }];
+
+                if let Some(span) = provided_span.as_ref().map(|s| s.resolve(db)) {
+                    sub_diagnostics.push(SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format!("effect `{}` is provided here", key_str),
+                        span,
+                    });
+                }
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "effect provider mismatch for `{}` when calling `{}`",
+                        key_str, func_name
+                    ),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+
             Self::EffectTraitUnsatisfied {
                 primary,
                 func,
@@ -2083,6 +2823,62 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                         key_str, func_name, trait_str
                     ),
                     sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+
+            Self::WithEffectTraitUnsatisfied {
+                primary,
+                key,
+                trait_req,
+                given,
+            } => {
+                let key_str = key.pretty_print(db);
+                let trait_str = trait_req.pretty_print(db, false);
+                let given_ty = given.pretty_print(db).to_string();
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "keyed effect binding `{}` requires `{}` to implement `{}`",
+                        key_str, given_ty, trait_str
+                    ),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "`{}` does not implement `{}` for effect `{}`",
+                            given_ty, trait_str, key_str
+                        ),
+                        span: primary.resolve(db),
+                    }],
+                    notes: vec![],
+                    error_code,
+                }
+            }
+
+            Self::WithEffectTypeUnsatisfied {
+                primary,
+                key,
+                expected,
+                given,
+            } => {
+                let key_str = key.pretty_print(db);
+                let expected_ty = pretty_print_ty_for_mismatch(db, *expected);
+                let given_ty = pretty_print_ty_for_mismatch(db, *given);
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "keyed effect binding `{key_str}` requires a provider compatible with `{expected_ty}`, but `{given_ty}` is given",
+                    ),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "`{given_ty}` is not compatible with keyed effect `{key_str}`",
+                        ),
+                        span: primary.resolve(db),
+                    }],
                     notes: vec![],
                     error_code,
                 }
@@ -2140,9 +2936,40 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     error_code,
                 }
             }
+            Self::IncompatibleBorrowProviders {
+                primary,
+                previous,
+                previous_provider,
+                current_provider,
+            } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "incompatible borrow providers".to_string(),
+                sub_diagnostics: vec![
+                    SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "this borrow is {}-backed",
+                            current_provider.pretty()
+                        ),
+                        span: primary.resolve(db),
+                    },
+                    SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format!(
+                            "the previous value here is {}-backed",
+                            previous_provider.pretty()
+                        ),
+                        span: previous.resolve(db),
+                    },
+                ],
+                notes: vec![
+                    "Fe cannot assign or join `mut`/`ref` values backed by different providers into one value".to_string(),
+                ],
+                error_code,
+            },
             Self::TypeMustBeKnown(span) => CompleteDiagnostic {
                 severity: Severity::Error,
-                message: "type must be known here".to_string(),
+                message: "type must be known".to_string(),
                 sub_diagnostics: vec![SubDiagnostic {
                     style: LabelStyle::Primary,
                     message: "type must be known here".to_string(),
@@ -2152,6 +2979,67 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                 error_code,
             },
 
+            Self::ConstValueMustBeKnown(span) => primary_diag(
+                severity,
+                "const value must be resolvable during type checking",
+                "requires fully-resolved const value",
+                span.resolve(db),
+                error_code,
+            ),
+
+            Self::InvalidCast {
+                primary,
+                from,
+                to,
+                hint,
+            } => {
+                let notes = if let Some(hint) = hint {
+                    // Use the specific hint instead of the generic downcast suggestion.
+                    vec![hint.clone()]
+                } else if from.is_bool(db) || to.is_bool(db) {
+                    vec!["casts involving `bool` are not supported".to_string()]
+                } else {
+                    vec![concat!(
+                        "try using `.downcast()` for checked narrowing/sign changes, ",
+                        "or `.downcast_truncate()` / `.downcast_saturate()` / `.downcast_unchecked()`"
+                    )
+                    .to_string()]
+                };
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: "cast is not provably lossless".to_string(),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "cannot cast `{}` to `{}` with `as`",
+                            from.pretty_print(db),
+                            to.pretty_print(db),
+                        ),
+                        span: primary.resolve(db),
+                    }],
+                    notes,
+                    error_code,
+                }
+            }
+            Self::IntLiteralOutOfRange {
+                primary,
+                literal,
+                ty,
+            } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "integer literal out of range".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "`{literal}` is not representable in `{}`",
+                        ty.pretty_print(db),
+                    ),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
             Self::AccessedFieldNotFound {
                 primary,
                 given_ty,
@@ -2215,6 +3103,187 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     error_code,
                 }
             }
+            Self::UnsupportedUnaryPlus(primary) => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "unary `+` is not supported".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "remove the unary `+`".to_string(),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
+
+            Self::BorrowFromNonPlace { primary } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "cannot borrow from this expression".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "expected a place expression".to_string(),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
+
+            Self::CannotBorrowMut { primary, binding } => {
+                let mut sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "cannot borrow as `mut`".to_string(),
+                    span: primary.resolve(db),
+                }];
+
+                if let Some((name, span)) = binding {
+                    sub_diagnostics.push(SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format!("try changing to `let mut {}`", name.data(db)),
+                        span: span.resolve(db),
+                    });
+                }
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: "mutable borrow requires a mutable place".to_string(),
+                    sub_diagnostics,
+                    notes: vec![],
+                    error_code,
+                }
+            }
+
+            Self::BorrowArgMustBePlace { primary, kind } => {
+                let kw = match kind {
+                    crate::analysis::ty::ty_def::BorrowKind::Mut => "mut",
+                    crate::analysis::ty::ty_def::BorrowKind::Ref => "ref",
+                };
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: format!("`{kw}` argument must be a place"),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "temporaries and literal values cannot be used where `{kw}` is expected"
+                        ),
+                        span: primary.resolve(db),
+                    }],
+                    notes: vec![format!(
+                        "help: bind the value to a named local first, then pass `{kw} <place>`"
+                    )],
+                    error_code,
+                }
+            }
+
+            Self::ExplicitBorrowRequired {
+                primary,
+                kind,
+                suggestion,
+            } => {
+                let kw = match kind {
+                    crate::analysis::ty::ty_def::BorrowKind::Mut => "mut",
+                    crate::analysis::ty::ty_def::BorrowKind::Ref => "ref",
+                };
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: "explicit borrow required".to_string(),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!("this argument must be explicitly borrowed as `{kw}`"),
+                        span: primary.resolve(db),
+                    }],
+                    notes: vec![
+                        suggestion
+                            .as_ref()
+                            .map(|s| format!("help: try `{s}`"))
+                            .unwrap_or_else(|| format!("help: try `{kw} <place>`")),
+                    ],
+                    error_code,
+                }
+            }
+
+            Self::OwnParamCannotBeBorrow { primary, ty } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "invalid `own` parameter".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "`own` parameters must have owned types (found `{}`)",
+                        ty.pretty_print(db)
+                    ),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![
+                    "remove `own`, or change the parameter type to an owned type".to_string(),
+                ],
+                error_code,
+            },
+
+            Self::MutableBindingCannotBeCapability { primary, ty } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "invalid mutable local binding".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "`let mut` local bindings must be owned values (found `{}`)",
+                        ty.pretty_print(db)
+                    ),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![
+                    "remove `mut` from the local binding to keep a handle".to_string(),
+                    "or bind an owned value instead (for non-`Copy` values, use an explicit `.clone()`)".to_string(),
+                ],
+                error_code,
+            },
+
+            Self::OwnArgMustBeOwnedMove {
+                primary,
+                kind,
+                given,
+            } => {
+                let kind = match kind {
+                    crate::analysis::ty::ty_def::CapabilityKind::Mut => "mut",
+                    crate::analysis::ty::ty_def::CapabilityKind::Ref => "ref",
+                    crate::analysis::ty::ty_def::CapabilityKind::View => "view",
+                };
+
+                CompleteDiagnostic {
+                    severity: Severity::Error,
+                    message: "`own` argument requires an owned movable value".to_string(),
+                    sub_diagnostics: vec![SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: format!(
+                            "this expression has `{kind} {}` capability and cannot be moved as owned here",
+                            given.pretty_print(db)
+                        ),
+                        span: primary.resolve(db),
+                    }],
+                    notes: vec![
+                        "pass an owned place value, or change the callee parameter mode to borrow/view"
+                            .to_string(),
+                    ],
+                    error_code,
+                }
+            }
+
+            Self::ArrayRepeatRequiresCopy { primary, ty } => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "array repetition requires `Copy`".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: format!(
+                        "the element type `{}` does not implement `Copy`",
+                        ty.pretty_print(db)
+                    ),
+                    span: primary.resolve(db),
+                }],
+                notes: vec![
+                    "build the array with an explicit literal, or use a `Copy` element type"
+                        .to_string(),
+                ],
+                error_code,
+            },
 
             Self::NonAssignableExpr(primary) => CompleteDiagnostic {
                 severity: Severity::Error,
@@ -2558,12 +3627,24 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                 }
             }
 
-            Self::AmbiguousTraitInst { primary, cands } => {
+            Self::AmbiguousTraitInst {
+                primary,
+                cands,
+                required_by,
+            } => {
                 let mut sub_diagnostics = vec![SubDiagnostic {
                     style: LabelStyle::Primary,
                     message: "multiple implementations are found".to_string(),
                     span: primary.resolve(db),
                 }];
+
+                if let Some(required_by) = required_by {
+                    sub_diagnostics.push(SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format_call_constraint_source(db, required_by),
+                        span: required_by.bound_span.resolve(db),
+                    });
+                }
 
                 let mut sorted: Vec<_> = cands.iter().copied().collect();
                 sorted.sort_by_key(|a| a.pretty_print(db, false));
@@ -2924,6 +4005,164 @@ impl DiagnosticVoucher for BodyDiag<'_> {
                     error_code,
                 }
             }
+            BodyDiag::RecvFallbackOnlyInBareBlock { primary } => {
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "fallback arm `_` is only allowed in `recv { ... }`".to_string(),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "fallback arm is only allowed in a bare recv block".to_string(),
+                    sub_diagnostics,
+                    notes: vec![
+                        "named recv blocks remain exhaustive over their declared msg root"
+                            .to_string(),
+                    ],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvDuplicateFallback { primary, first_use } => {
+                let sub_diagnostics = vec![
+                    SubDiagnostic {
+                        style: LabelStyle::Primary,
+                        message: "duplicate fallback arm".to_string(),
+                        span: primary.resolve(db),
+                    },
+                    SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: "first fallback arm declared here".to_string(),
+                        span: first_use.resolve(db),
+                    },
+                ];
+                CompleteDiagnostic {
+                    severity,
+                    message: "duplicate fallback arm".to_string(),
+                    sub_diagnostics,
+                    notes: vec!["a contract can define at most one fallback arm".to_string()],
+                    error_code,
+                }
+            }
+            BodyDiag::RecvFallbackReturnTypeNotAllowed { primary } => {
+                let sub_diagnostics = vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "remove the return type from this fallback arm".to_string(),
+                    span: primary.resolve(db),
+                }];
+                CompleteDiagnostic {
+                    severity,
+                    message: "fallback arm cannot declare a return type".to_string(),
+                    sub_diagnostics,
+                    notes: vec!["fallback arms are unit-returning in this version".to_string()],
+                    error_code,
+                }
+            }
+
+            BodyDiag::ConstFnEffectsNotAllowed(primary) => primary_diag(
+                severity,
+                "effects are not allowed in a `const fn`",
+                "remove the `uses (...)` clause",
+                primary.resolve(db),
+                error_code,
+            ),
+
+            BodyDiag::ConstFnWithNotAllowed(primary) => primary_diag(
+                severity,
+                "`with` expressions are not allowed in a `const fn`",
+                "`with` is not supported in const evaluation",
+                primary.resolve(db),
+                error_code,
+            ),
+
+            BodyDiag::ConstFnLoopNotAllowed(primary) => primary_diag(
+                severity,
+                "loops are not allowed in a `const fn`",
+                "loops are not supported in const evaluation (MVP)",
+                primary.resolve(db),
+                error_code,
+            ),
+
+            BodyDiag::ConstFnMatchNotAllowed(primary) => primary_diag(
+                severity,
+                "`match` is not allowed in a `const fn`",
+                "`match` is not supported in const evaluation (MVP)",
+                primary.resolve(db),
+                error_code,
+            ),
+
+            BodyDiag::ConstFnAssignmentNotAllowed(primary) => primary_diag(
+                severity,
+                "assignment is not allowed in a `const fn`",
+                "mutation is not supported in const evaluation (MVP)",
+                primary.resolve(db),
+                error_code,
+            ),
+
+            BodyDiag::ConstFnAggregateNotAllowed(primary) => primary_diag(
+                severity,
+                "aggregate operations are not allowed in a `const fn`",
+                "aggregates are not supported in const evaluation (MVP)",
+                primary.resolve(db),
+                error_code,
+            ),
+
+            BodyDiag::ConstFnMutableBindingNotAllowed(primary) => primary_diag(
+                severity,
+                "`mut` bindings are not allowed in a `const fn`",
+                "mutation is not supported in const evaluation (MVP)",
+                primary.resolve(db),
+                error_code,
+            ),
+
+            BodyDiag::ConstFnNonConstCall { primary, callee } => {
+                let name = callee
+                    .name(db)
+                    .map(|n| n.data(db).as_str())
+                    .unwrap_or("<unknown>");
+                CompleteDiagnostic::new(
+                    severity,
+                    "non-const call in `const fn`".to_string(),
+                    vec![
+                        SubDiagnostic::new(
+                            LabelStyle::Primary,
+                            format!("`{name}` is not a `const fn`"),
+                            primary.resolve(db),
+                        ),
+                        SubDiagnostic::new(
+                            LabelStyle::Secondary,
+                            "callee defined here".to_string(),
+                            callee.name_span().resolve(db),
+                        ),
+                    ],
+                    vec![],
+                    error_code,
+                )
+            }
+
+            BodyDiag::ConstFnEffectfulCall { primary, callee } => {
+                let name = callee
+                    .name(db)
+                    .map(|n| n.data(db).as_str())
+                    .unwrap_or("<unknown>");
+                CompleteDiagnostic::new(
+                    severity,
+                    "effectful call in `const fn`".to_string(),
+                    vec![
+                        SubDiagnostic::new(
+                            LabelStyle::Primary,
+                            format!("`{name}` requires effects"),
+                            primary.resolve(db),
+                        ),
+                        SubDiagnostic::new(
+                            LabelStyle::Secondary,
+                            "callee defined here".to_string(),
+                            callee.name_span().resolve(db),
+                        ),
+                    ],
+                    vec![],
+                    error_code,
+                )
+            }
         }
     }
 }
@@ -2989,6 +4228,18 @@ impl DiagnosticVoucher for TraitLowerDiag<'_> {
                     error_code,
                 }
             }
+
+            Self::CyclicTraitRef(impl_trait) => CompleteDiagnostic {
+                severity: Severity::Error,
+                message: "cyclic trait reference prevented lowering this impl".to_string(),
+                sub_diagnostics: vec![SubDiagnostic {
+                    style: LabelStyle::Primary,
+                    message: "trait lowering entered a dependency cycle here".to_string(),
+                    span: impl_trait.span().trait_ref().resolve(db),
+                }],
+                notes: vec![],
+                error_code,
+            },
         }
     }
 }
@@ -3060,6 +4311,7 @@ impl DiagnosticVoucher for TraitConstraintDiag<'_> {
                 span,
                 primary_goal,
                 unsat_subgoal,
+                required_by,
             } => {
                 let msg = format!(
                     "`{}` doesn't implement `{}`",
@@ -3085,6 +4337,14 @@ impl DiagnosticVoucher for TraitConstraintDiag<'_> {
                         style: LabelStyle::Secondary,
                         message: subgoal.to_string(),
                         span: span.resolve(db),
+                    });
+                }
+
+                if let Some(required_by) = required_by {
+                    sub_diagnostics.push(SubDiagnostic {
+                        style: LabelStyle::Secondary,
+                        message: format_call_constraint_source(db, required_by),
+                        span: required_by.bound_span.resolve(db),
                     });
                 }
 
@@ -3329,6 +4589,8 @@ impl DiagnosticVoucher for ImplDiag<'_> {
                 param_idx,
             } => {
                 let method_name = impl_m.name(db).expect("methods have names").data(db);
+                let expected = format_method_param_ty(db, *trait_m, *param_idx, *trait_m_ty);
+                let found = format_method_param_ty(db, *impl_m, *param_idx, *impl_m_ty);
 
                 CompleteDiagnostic {
                     severity,
@@ -3336,11 +4598,7 @@ impl DiagnosticVoucher for ImplDiag<'_> {
                     sub_diagnostics: vec![
                         SubDiagnostic {
                             style: LabelStyle::Primary,
-                            message: format!(
-                                "expected `{}`, found `{}`",
-                                trait_m_ty.pretty_print(db),
-                                impl_m_ty.pretty_print(db)
-                            ),
+                            message: format!("expected `{expected}`, found `{found}`"),
                             span: impl_m.param_span(*param_idx).resolve(db),
                         },
                         SubDiagnostic {

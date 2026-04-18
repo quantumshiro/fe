@@ -1,0 +1,10 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/payable_on_recv_block.fe
+---
+error[13-0001]: `#[payable]` is only valid on `init` blocks and `recv` arms (found on recv block)
+  ┌─ payable_on_recv_block.fe:9:5
+  │
+9 │     #[payable]
+  │     ^^^^^^^^^^ move this attribute to an `init` block or `recv` arm

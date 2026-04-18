@@ -1,0 +1,15 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/keccak_requires_as_bytes.fe
+---
+error[6-0003]: trait bound is not satisfied
+    ┌─ keccak_requires_as_bytes.fe:5:5
+    │
+  5 │     core::keccak(x)
+    │     ^^^^^^^^^^^^ `NotBytes` doesn't implement `AsBytes`
+    │
+    ┌─ src/bytes.fe:443:24
+    │
+443 │ pub const fn keccak<T: AsBytes>(_ x: T) -> u256 {
+    │                        ------- required by this bound on `keccak`

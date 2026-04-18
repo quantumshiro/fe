@@ -1,0 +1,9 @@
+contract C {
+    #[payable(foo)]
+    init() {}
+}
+
+contract D {
+    #[payable = 1]
+    init() {}
+}

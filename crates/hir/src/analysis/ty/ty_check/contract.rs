@@ -6,6 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{TypedBody, owner::BodyOwner};
 
+use num_traits::ToPrimitive;
+
 use crate::{
     analysis::{
         HirAnalysisDb,
@@ -13,14 +15,17 @@ use crate::{
         ty::{
             adt_def::AdtRef,
             canonical::Canonical,
+            const_ty::{ConstTyData, EvaluatedConstTy},
             corelib::resolve_core_trait,
+            ctfe::{CtfeConfig, CtfeInterpreter},
             diagnostics::{BodyDiag, FuncBodyDiag, TraitConstraintDiag, TyDiagCollection},
-            normalize::normalize_ty,
             trait_def::TraitInstId,
             trait_def::impls_for_ty,
-            trait_resolution::{GoalSatisfiability, PredicateListId, is_goal_satisfiable},
+            trait_resolution::{
+                GoalSatisfiability, PredicateListId, TraitSolveCx, is_goal_satisfiable,
+            },
             ty_check::check_body,
-            ty_def::TyId,
+            ty_def::{PrimTy, TyBase, TyData, TyId},
         },
     },
     hir_def::{Contract, IdentId, ItemKind, Mod, PathId, Struct, scope_graph::ScopeId},
@@ -41,7 +46,11 @@ pub enum VariantResError<'db> {
 
 /// Returns true if a struct implements the core MsgVariant trait.
 fn implements_msg_variant<'db>(db: &'db dyn HirAnalysisDb, struct_: Struct<'db>) -> bool {
-    let msg_variant_trait = resolve_core_trait(db, struct_.scope(), &["message", "MsgVariant"]);
+    let Some(msg_variant_trait) =
+        resolve_core_trait(db, struct_.scope(), &["message", "MsgVariant"])
+    else {
+        return false;
+    };
 
     let adt_def = AdtRef::from(struct_).as_adt(db);
     let ty = TyId::adt(db, adt_def);
@@ -78,12 +87,11 @@ fn resolve_sol_abi_ty<'db>(
 #[allow(clippy::too_many_arguments)]
 fn check_ty_decodable<'db>(
     db: &'db dyn HirAnalysisDb,
-    contract_ingot: common::ingot::Ingot<'db>,
+    solve_cx: TraitSolveCx<'db>,
     decode_trait: crate::hir_def::Trait<'db>,
     sol_ty: TyId<'db>,
     ty: TyId<'db>,
     span: DynLazySpan<'db>,
-    assumptions: PredicateListId<'db>,
     diags: &mut Vec<FuncBodyDiag<'db>>,
 ) {
     if ty.has_invalid(db) {
@@ -94,12 +102,11 @@ fn check_ty_decodable<'db>(
         for elem in ty.field_types(db) {
             check_ty_decodable(
                 db,
-                contract_ingot,
+                solve_cx,
                 decode_trait,
                 sol_ty,
                 elem,
                 span.clone(),
-                assumptions,
                 diags,
             );
         }
@@ -111,16 +118,13 @@ fn check_ty_decodable<'db>(
     }
 
     let inst = TraitInstId::new(db, decode_trait, vec![ty, sol_ty], IndexMap::new());
-    let canonical_inst = Canonical::new(db, inst);
-
-    if let GoalSatisfiability::UnSat(_) =
-        is_goal_satisfiable(db, contract_ingot, canonical_inst, assumptions)
-    {
+    if let GoalSatisfiability::UnSat(_) = is_goal_satisfiable(db, solve_cx, inst) {
         diags.push(
             TyDiagCollection::from(TraitConstraintDiag::TraitBoundNotSat {
                 span,
                 primary_goal: inst,
                 unsat_subgoal: None,
+                required_by: None,
             })
             .into(),
         );
@@ -135,33 +139,25 @@ fn check_recv_variant_param_types_decodable<'db>(
     assumptions: PredicateListId<'db>,
     diags: &mut Vec<FuncBodyDiag<'db>>,
 ) {
-    let contract_ingot = contract.top_mod(db).ingot(db);
-
     let Some(sol_ty) = resolve_sol_abi_ty(db, contract.scope(), assumptions) else {
         return;
     };
-    let decode_trait = resolve_core_trait(db, contract.scope(), &["abi", "Decode"]);
+    let Some(decode_trait) = resolve_core_trait(db, contract.scope(), &["abi", "Decode"]) else {
+        return;
+    };
+    let solve_cx = TraitSolveCx::new(db, contract.scope()).with_assumptions(assumptions);
 
-    let msg_variant_trait = resolve_core_trait(db, contract.scope(), &["message", "MsgVariant"]);
-    let msg_variant_inst = TraitInstId::new(
-        db,
-        msg_variant_trait,
-        vec![variant.ty, sol_ty],
-        IndexMap::new(),
-    );
-
-    let args_assoc = TyId::assoc_ty(db, msg_variant_inst, IdentId::new(db, "Args".to_string()));
-    let args_ty = normalize_ty(db, args_assoc, contract.scope(), assumptions);
-    check_ty_decodable(
-        db,
-        contract_ingot,
-        decode_trait,
-        sol_ty,
-        args_ty,
-        span,
-        assumptions,
-        diags,
-    );
+    for field_ty in variant.ty.field_types(db) {
+        check_ty_decodable(
+            db,
+            solve_cx,
+            decode_trait,
+            sol_ty,
+            field_ty,
+            span.clone(),
+            diags,
+        );
+    }
 }
 
 /// Returns all variant structs in a msg module (structs that implement MsgVariant).
@@ -301,7 +297,26 @@ fn check_named_recv_block<'db>(
     };
 
     for (arm_idx, arm) in recv.arms.data(db).iter().enumerate() {
-        let pat_span: DynLazySpan<'db> = recv_span.clone().arms().arm(arm_idx).pat().into();
+        let arm_span = recv_span.clone().arms().arm(arm_idx);
+        let pat_span: DynLazySpan<'db> = arm_span.clone().pat().into();
+
+        if arm.is_fallback(db) {
+            diags.push(
+                BodyDiag::RecvFallbackOnlyInBareBlock {
+                    primary: pat_span.clone(),
+                }
+                .into(),
+            );
+            if arm.ret_ty.is_some() {
+                diags.push(
+                    BodyDiag::RecvFallbackReturnTypeNotAllowed {
+                        primary: arm_span.ret_ty().into(),
+                    }
+                    .into(),
+                );
+            }
+            continue;
+        }
 
         let Some(path) = arm.variant_path(db) else {
             continue;
@@ -411,7 +426,20 @@ fn check_bare_recv_block<'db>(
     let mut checked_decode = FxHashSet::<Struct<'db>>::default();
 
     for (arm_idx, arm) in recv.arms.data(db).iter().enumerate() {
-        let pat_span: DynLazySpan<'db> = recv_span.clone().arms().arm(arm_idx).pat().into();
+        let arm_span = recv_span.clone().arms().arm(arm_idx);
+        let pat_span: DynLazySpan<'db> = arm_span.clone().pat().into();
+
+        if arm.is_fallback(db) {
+            if arm.ret_ty.is_some() {
+                diags.push(
+                    BodyDiag::RecvFallbackReturnTypeNotAllowed {
+                        primary: arm_span.ret_ty().into(),
+                    }
+                    .into(),
+                );
+            }
+            continue;
+        }
 
         let Some(path) = arm.variant_path(db) else {
             continue;
@@ -478,6 +506,7 @@ pub fn check_contract_recv_blocks<'db>(
 ) -> Vec<FuncBodyDiag<'db>> {
     let mut diags = Vec::new();
     let mut seen_msg_blocks = FxHashMap::<Mod<'db>, (DynLazySpan<'db>, IdentId<'db>)>::default();
+    let mut seen_fallback: Option<DynLazySpan<'db>> = None;
 
     // Track selectors across ALL recv blocks: selector -> (span, variant_name, struct)
     // We store the struct to correctly identify duplicates - comparing by name alone fails
@@ -494,6 +523,25 @@ pub fn check_contract_recv_blocks<'db>(
     for (idx, recv) in contract.recvs(db).data(db).iter().enumerate() {
         let recv_span = contract.span().recv(idx);
         let path_span = recv_span.clone().path();
+
+        for (arm_idx, arm) in recv.arms.data(db).iter().enumerate() {
+            if !arm.is_fallback(db) {
+                continue;
+            }
+
+            let pat_span: DynLazySpan<'db> = recv_span.clone().arms().arm(arm_idx).pat().into();
+            if let Some(first_use) = &seen_fallback {
+                diags.push(
+                    BodyDiag::RecvDuplicateFallback {
+                        primary: pat_span,
+                        first_use: first_use.clone(),
+                    }
+                    .into(),
+                );
+            } else {
+                seen_fallback = Some(pat_span);
+            }
+        }
 
         // Check if this is a named recv block
         if let Some(msg_mod) = resolve_recv_msg_mod(
@@ -536,7 +584,10 @@ pub fn check_contract_recv_blocks<'db>(
                 let variant_span: DynLazySpan<'db> = variant.span().name().into();
 
                 // Check selector conflicts
-                if let Some(selector) = get_variant_selector(db, variant) {
+                let variant_ty = TyId::adt(db, AdtRef::from(variant).as_adt(db));
+                if let Some(selector) =
+                    eval_msg_variant_selector(db, variant_ty, variant.scope(), &mut diags)
+                {
                     check_selector_conflict(
                         selector,
                         variant,
@@ -557,6 +608,10 @@ pub fn check_contract_recv_blocks<'db>(
             for (arm_idx, arm) in recv.arms.data(db).iter().enumerate() {
                 let pat_span: DynLazySpan<'db> = recv_span.clone().arms().arm(arm_idx).pat().into();
 
+                if arm.is_fallback(db) {
+                    continue;
+                }
+
                 let Some(path) = arm.variant_path(db) else {
                     continue;
                 };
@@ -567,7 +622,9 @@ pub fn check_contract_recv_blocks<'db>(
                     };
 
                     // Check selector conflicts
-                    if let Some(selector) = get_variant_selector(db, resolved.variant_struct) {
+                    if let Some(selector) =
+                        eval_msg_variant_selector(db, resolved.ty, contract.scope(), &mut diags)
+                    {
                         check_selector_conflict(
                             selector,
                             resolved.variant_struct,
@@ -637,43 +694,69 @@ fn check_handler_conflict<'db>(
     }
 }
 
-/// Gets the selector value from a msg variant struct by reading the SELECTOR const
-/// from its MsgVariant impl. Used for cross-recv-block duplicate detection.
-fn get_variant_selector<'db>(db: &'db dyn HirAnalysisDb, struct_: Struct<'db>) -> Option<u32> {
-    use crate::hir_def::{Expr, LitKind};
-    use num_traits::ToPrimitive;
+/// Evaluates a msg variant's `SELECTOR` associated const via CTFE.
+pub(crate) fn eval_msg_variant_selector<'db>(
+    db: &'db dyn HirAnalysisDb,
+    variant_ty: TyId<'db>,
+    scope: ScopeId<'db>,
+    diags: &mut Vec<FuncBodyDiag<'db>>,
+) -> Option<u32> {
+    let msg_variant_trait = resolve_core_trait(db, scope, &["message", "MsgVariant"])?;
 
-    // Find the MsgVariant trait
-    let msg_variant_trait = resolve_core_trait(db, struct_.scope(), &["message", "MsgVariant"]);
+    let canonical_ty = Canonical::new(db, variant_ty);
+    let scope_ingot = scope.ingot(db);
+    let search_ingots = [
+        Some(scope_ingot),
+        variant_ty.ingot(db).filter(|&ingot| ingot != scope_ingot),
+    ];
+    let implementor = search_ingots.into_iter().flatten().find_map(|ingot| {
+        impls_for_ty(db, ingot, canonical_ty)
+            .iter()
+            .find(|impl_| impl_.skip_binder().trait_def(db) == msg_variant_trait)
+            .copied()
+    })?;
+    let impl_ = implementor.skip_binder();
 
-    // Get the impl for this struct
-    let adt_def = AdtRef::from(struct_).as_adt(db);
-    let ty = TyId::adt(db, adt_def);
-    let canonical_ty = Canonical::new(db, ty);
-    let ingot = struct_.top_mod(db).ingot(db);
-
-    let impl_ = impls_for_ty(db, ingot, canonical_ty)
-        .iter()
-        .find(|impl_| impl_.skip_binder().trait_def(db).eq(&msg_variant_trait))?
-        .skip_binder();
-
-    // Get the SELECTOR const from the impl
     let selector_name = IdentId::new(db, "SELECTOR".to_string());
-    let hir_impl = impl_.hir_impl_trait(db);
-
-    let selector_const = hir_impl
+    let selector_const = impl_
+        .hir_impl_trait(db)
         .hir_consts(db)
         .iter()
         .find(|c| c.name.to_opt() == Some(selector_name))?;
 
-    // Extract the literal value from the const body
     let body = selector_const.value.to_opt()?;
-    let root_expr = body.expr(db);
-    let expr = body.exprs(db).get(root_expr)?.clone().to_opt()?;
+    if matches!(
+        body.expr(db).data(db, body),
+        crate::hir_def::Partial::Absent
+    ) {
+        return None;
+    }
 
-    match expr {
-        Expr::Lit(LitKind::Int(int_id)) => int_id.data(db).to_u32(),
-        _ => None,
+    let expected_ty = TyId::new(db, TyData::TyBase(TyBase::Prim(PrimTy::U32)));
+    let result = super::check_anon_const_body(db, body, expected_ty);
+    diags.extend(result.0.clone());
+    if !result.0.is_empty() {
+        return None;
+    }
+
+    let mut interp = CtfeInterpreter::new(db, CtfeConfig::default());
+    let const_ty = match interp.eval_const_body(body, result.1.clone()) {
+        Ok(const_ty) => const_ty,
+        Err(cause) => {
+            let ty = TyId::invalid(db, cause);
+            if let Some(diag) = ty.emit_diag(db, body.span().into()) {
+                diags.push(diag.into());
+            }
+            return None;
+        }
+    };
+
+    match const_ty.data(db) {
+        ConstTyData::Evaluated(EvaluatedConstTy::LitInt(int_id), _) => int_id.data(db).to_u32(),
+        _ => {
+            diags.push(BodyDiag::ConstValueMustBeKnown(body.span().into()).into());
+            None
+        }
     }
 }
 
@@ -692,6 +775,14 @@ pub fn check_contract_recv_arm_body<'db>(
             arm_idx,
         },
     )
+}
+
+#[salsa::tracked(return_ref)]
+pub fn check_contract_init_body<'db>(
+    db: &'db dyn HirAnalysisDb,
+    contract: Contract<'db>,
+) -> (Vec<FuncBodyDiag<'db>>, TypedBody<'db>) {
+    check_body(db, BodyOwner::ContractInit { contract })
 }
 
 pub(super) fn resolve_recv_msg_mod<'db>(
@@ -750,15 +841,24 @@ pub(super) fn get_msg_variant_return_type<'db>(
     variant_ty: TyId<'db>,
     scope: ScopeId<'db>,
 ) -> Option<TyId<'db>> {
-    let msg_variant_trait = resolve_core_trait(db, scope, &["message", "MsgVariant"]);
+    let msg_variant_trait = resolve_core_trait(db, scope, &["message", "MsgVariant"])?;
 
     let canonical_ty = Canonical::new(db, variant_ty);
-    let ingot = scope.ingot(db);
+    let scope_ingot = scope.ingot(db);
+    let search_ingots = [
+        Some(scope_ingot),
+        variant_ty.ingot(db).filter(|&ingot| ingot != scope_ingot),
+    ];
 
-    // Find the MsgVariant impl specifically
-    let msg_variant_impl = impls_for_ty(db, ingot, canonical_ty)
-        .iter()
-        .find(|impl_| impl_.skip_binder().trait_def(db).eq(&msg_variant_trait))?;
+    // Find the MsgVariant impl specifically, probing both:
+    // - the call-site ingot (for local traits implemented for external types), and
+    // - the receiver type's ingot (for external traits implemented in the type's ingot).
+    let msg_variant_impl = search_ingots.into_iter().flatten().find_map(|ingot| {
+        impls_for_ty(db, ingot, canonical_ty)
+            .iter()
+            .find(|impl_| impl_.skip_binder().trait_def(db).eq(&msg_variant_trait))
+            .copied()
+    })?;
 
     // Get the Return associated type from the impl
     let return_name = IdentId::new(db, "Return".to_string());

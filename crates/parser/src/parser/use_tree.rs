@@ -1,4 +1,4 @@
-use std::{cell::Cell, convert::identity, rc::Rc};
+use std::{cell::Cell, rc::Rc};
 
 use crate::{ParseError, SyntaxKind, TextRange, parser::path::is_path_segment};
 
@@ -57,7 +57,7 @@ impl super::Parse for UseTreeListScope {
 }
 
 define_scope! {
-    UsePathScope{ is_glob: Rc<Cell<bool>>},
+    pub(super) UsePathScope{ is_glob: Rc<Cell<bool>>},
     UsePath,
     (Colon2)
 }
@@ -69,12 +69,10 @@ impl super::Parse for UsePathScope {
         parser.parse(UsePathSegmentScope::default())?;
 
         loop {
-            let is_path_segment = parser.dry_run(|parser| {
-                parser.bump_if(SyntaxKind::Colon2)
-                    && parser
-                        .parse_ok(UsePathSegmentScope::default())
-                        .is_ok_and(identity)
-            });
+            let is_path_segment = matches!(
+                parser.peek_n_non_trivia(2).as_slice(),
+                [SyntaxKind::Colon2, kind] if is_use_path_segment(*kind)
+            );
             if is_path_segment {
                 if self.is_glob.get() {
                     parser.error_msg_on_current_token("can't specify path after `*`");

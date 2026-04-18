@@ -1,0 +1,10 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/negated_int_literal_out_of_range.fe
+---
+error[8-0074]: integer literal out of range
+  ┌─ negated_int_literal_out_of_range.fe:2:17
+  │
+2 │     let x: i8 = -129
+  │                 ^^^^ `-129` is not representable in `i8`

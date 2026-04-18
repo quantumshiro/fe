@@ -1,0 +1,27 @@
+use std::evm::effects::assert
+
+msg TestMsg {
+    #[selector = 0x01000001]
+    Check { points: [u256; 8] } -> u256,
+}
+
+pub contract C {
+    recv TestMsg {
+        Check { points } -> u256 {
+            let _ = points[0]
+            0
+        }
+    }
+}
+
+#[test]
+fn test_msg_array_arg() uses (evm: mut Evm) {
+    let c = evm.create2<C>(value: 0, args: (), salt: 0)
+    let out: u256 = evm.call(
+        addr: c,
+        gas: 100000,
+        value: 0,
+        message: TestMsg::Check { points: [0, 0, 0, 0, 0, 0, 0, 0] },
+    )
+    assert(out == 0)
+}

@@ -8,9 +8,7 @@ use act_locally::actor::ActorRef;
 use act_locally::message::MessageKey;
 use act_locally::types::ActorError;
 use serde_json::Value;
-use tracing::info;
 
-// use async_lsp::can_handle::CanHandle;
 use async_lsp::{AnyEvent, AnyNotification, AnyRequest, Error, LspService, ResponseError};
 use std::any::TypeId;
 use tower::Service;
@@ -45,34 +43,85 @@ impl<S: 'static> Service<AnyRequest> for LspActorService<S> {
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
         let method = req.method.clone();
-        info!("got LSP request: {method:?}");
+        let request_id = format!("{:?}", req.id);
         let actor_ref = self.actor_ref.clone();
         let dispatcher = self.dispatcher.clone();
-        let method_log = method.clone().to_owned();
-        let result = Box::pin(async move {
-            let dispatcher = dispatcher.as_ref();
-            let ask = actor_ref.ask::<_, Self::Response, _>(dispatcher, req);
-            let lsp_result: Result<Self::Response, _> = ask.await.map_err(|e| match e {
-                ActorError::HandlerNotFound => ResponseError::new(
-                    async_lsp::ErrorCode::METHOD_NOT_FOUND,
-                    "Method not found".to_string(),
-                ),
-                _ => ResponseError::new(
-                    async_lsp::ErrorCode::INTERNAL_ERROR,
-                    format!("There was an internal error... {e:?}"),
-                ),
-            });
-            info!("Prepared LSP response for: {method_log:?}");
-            lsp_result
-        });
-        info!("Prepared future for LSP request: {method:?}");
-        result
+        Box::pin(async move {
+            // Push a panic context frame for the duration of the ask. If the
+            // main-loop-thread side of the request machinery (serialization,
+            // dispatcher, error mapping) panics, the panic hook will include
+            // this frame in panics-<pid>.log.
+            //
+            // LIMITATION: this frame lives in the main loop thread's
+            // thread-local stack. Panics in the actor handler itself run on
+            // the actor thread and won't see it. Covering actor-thread
+            // panics properly requires either a helper at each handler call
+            // site or an upstream patch to act-locally. See design notes in
+            // `panic_context.rs` and the follow-up tracked in the LSP
+            // observability work.
+            let _pctx =
+                crate::panic_context::enter(format!("LSP request: {method} (id={request_id})"));
+
+            // Per-request observability — verbose by default. The point of
+            // the file log is to be able to reconstruct the order of
+            // operations after a session goes wrong; sparse logs defeat
+            // that. Disk growth is bounded by `gc_old_log_files()` at
+            // startup which retains only the most recent
+            // `FE_LSP_LOG_RETENTION` files (default 50).
+            let t_start = std::time::Instant::now();
+            tracing::info!(
+                target: "fe::lsp::request",
+                method = %method,
+                request_id = %request_id,
+                "→ request"
+            );
+
+            let result = actor_ref
+                .ask::<_, Value, _>(dispatcher.as_ref(), req)
+                .await
+                .map_err(|e| match e {
+                    ActorError::HandlerNotFound => ResponseError::new(
+                        async_lsp::ErrorCode::METHOD_NOT_FOUND,
+                        "Method not found".to_string(),
+                    ),
+                    _ => ResponseError::new(
+                        async_lsp::ErrorCode::INTERNAL_ERROR,
+                        format!("There was an internal error... {e:?}"),
+                    ),
+                });
+
+            let elapsed_ms = t_start.elapsed().as_millis() as u64;
+            match &result {
+                Ok(_) => {
+                    tracing::info!(
+                        target: "fe::lsp::request",
+                        method = %method,
+                        request_id = %request_id,
+                        elapsed_ms,
+                        "← response ok"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "fe::lsp::request",
+                        method = %method,
+                        request_id = %request_id,
+                        elapsed_ms,
+                        error = %e.message,
+                        code = ?e.code,
+                        "← response error"
+                    );
+                }
+            }
+            result
+        })
     }
 }
 
 impl<S: 'static> LspService for LspActorService<S> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
         let method = notif.method.clone();
+        let _pctx = crate::panic_context::enter(format!("LSP notification: {method}"));
         let dispatcher = self.dispatcher.clone();
         match self.actor_ref.tell(dispatcher.as_ref(), notif) {
             Ok(()) => ControlFlow::Continue(()),
@@ -89,6 +138,7 @@ impl<S: 'static> LspService for LspActorService<S> {
 
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<async_lsp::Result<()>> {
         let type_name = event.type_name();
+        let _pctx = crate::panic_context::enter(format!("LSP event: {type_name:?}"));
         let dispatcher = self.dispatcher.clone();
         match self.actor_ref.tell(dispatcher.as_ref(), event) {
             Ok(()) => ControlFlow::Continue(()),
@@ -128,7 +178,7 @@ impl<S> CanHandle<AnyEvent> for LspActorService<S> {
     fn can_handle(&self, event: &AnyEvent) -> bool {
         self.dispatcher
             .wrappers
-            .contains_key(&LspActorKey::from(event.inner_type_id()))
+            .contains_key(&LspActorKey::from(event.inner().type_id()))
     }
 }
 

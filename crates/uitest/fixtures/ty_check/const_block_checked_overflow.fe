@@ -1,0 +1,10 @@
+fn bad_call() {}
+
+struct U8<const N: u8> {}
+
+const BAD: u8 = {
+    bad_call()
+    1
+}
+
+fn bad(_x: U8<BAD>) {}

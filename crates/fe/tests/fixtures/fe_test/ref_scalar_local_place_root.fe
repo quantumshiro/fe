@@ -1,0 +1,9 @@
+fn read_value(_ v: ref u256) -> u256 {
+    v
+}
+
+#[test]
+fn test_ref_scalar_local_place_root() {
+    let x: u256 = 7
+    assert(read_value(ref x) == 7)
+}

@@ -1,0 +1,30 @@
+trait Seq {
+    type Item
+
+    fn len(self) -> usize
+    fn get(ref self, i: usize) -> ref Self::Item
+}
+
+struct Slice {
+    source: ref [u256; 8],
+    start: usize,
+    len: usize,
+}
+
+impl Slice {
+    fn new(source: ref [u256; 8], start: usize, len: usize) -> Slice {
+        Slice { source, start, len }
+    }
+}
+
+impl Seq for Slice {
+    type Item = u256
+
+    fn len(self) -> usize {
+        self.len
+    }
+
+    fn get(ref self, i: usize) -> ref Item {
+        self.source[self.start + I]
+    }
+}

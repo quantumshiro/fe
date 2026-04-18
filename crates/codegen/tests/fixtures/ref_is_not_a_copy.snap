@@ -1,0 +1,291 @@
+---
+source: crates/codegen/tests/yul.rs
+expression: output
+input_file: tests/fixtures/ref_is_not_a_copy.fe
+---
+object "code_region_test_ref_is_not_a_copy" {
+  code {
+    function $assert($b) {
+      let v0 := iszero($b)
+      if v0 {
+        $revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1)
+      }
+      leave
+    }
+    function $checked_add_u256($a, $b) -> ret {
+      let v0 := $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b)
+      ret := v0
+      leave
+    }
+    function $checked_add_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+      let v0 := $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($a, $b)
+      let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word(v0)
+      let v2 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+      let v3 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt(v1, v2)
+      let v4 := v3
+      if v4 {
+        revert(0, 0)
+      }
+      ret := v0
+      leave
+    }
+    function $checked_sub_u256($a, $b) -> ret {
+      let v0 := $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b)
+      ret := v0
+      leave
+    }
+    function $checked_sub_unsigned_impl__u256__3271ca15373d4483($a, $b) -> ret {
+      let v0 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($b)
+      let v1 := $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($a)
+      let v2 := $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt(v0, v1)
+      let v3 := v2
+      if v3 {
+        revert(0, 0)
+      }
+      let v4 := $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($a, $b)
+      ret := v4
+      leave
+    }
+    function $encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd($selector, $message) -> ret {
+      let v0 := 4
+      let v1 := shl(224, $selector)
+      let v2 := iszero(0)
+      if v2 {
+        let v3 := $checked_add_u256(v0, 32)
+        let v4 := v3
+        let v5 := mload(64)
+        if iszero(v5) {
+          v5 := 0x80
+        }
+        mstore(64, add(v5, v4))
+        mstore(v5, v1)
+        let v6 := $checked_add_u256(v5, v0)
+        $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr($message, v6)
+        let v7 := mload(0x40)
+        if iszero(v7) {
+          v7 := 0x80
+        }
+        mstore(0x40, add(v7, 64))
+        mstore(v7, v5)
+        mstore(add(v7, 32), v4)
+        ret := v7
+        leave
+      }
+      if iszero(v2) {
+        let v8 := $checked_add_u256(v0, 32)
+        let v9 := v8
+        let v10 := $solencoder_h1b9228b90dad6928_new()
+        let v11 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head(v10, v9)
+        mstore(v11, v1)
+        let v12 := $checked_add_u256(v11, v0)
+        mstore(add(v10, 32), v12)
+        let v13 := $checked_add_u256(v11, v0)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos(v10, v13)
+        $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd($message, v10)
+        let v14 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish(v10)
+        ret := v14
+        leave
+      }
+    }
+    function $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($value, $e) {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(0x40, add(v0, 32))
+      mstore(v0, $e)
+      let v1 := 0
+      if v1 {
+        let v2 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($e)
+        let v3 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($e, 32)
+        let v4 := $checked_sub_u256(v3, v2)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, v4)
+        let v5 := $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($e)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v3)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v3)
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($e, v2)
+        $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($e, v5)
+        leave
+      }
+      if iszero(v1) {
+        $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($value, mload(v0))
+        leave
+      }
+    }
+    function $live_view($d) -> ret {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(0x40, add(v0, 64))
+      mstore(v0, $d)
+      mstore(add(v0, 32), add($d, 32))
+      ret := v0
+      leave
+    }
+    function $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode__SolEncoder_h1b9228b90dad6928__d11112905deefcdd($self, $e) {
+      $encode_field__Sol_hfd482bb803ad8c5f_u256_SolEncoder_h1b9228b90dad6928__636972f1f7e9ec11($self, $e)
+      leave
+    }
+    function $panic_ha52de99593162ef0_encode_hf98aaef2e32b4927_encode_to_ptr($self, $ptr) {
+      $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr)
+      leave
+    }
+    function $revert_error__Panic_ha52de99593162ef0__5b08f6f9d7badccd($error) {
+      let v0 := $encode_calldata__Panic_ha52de99593162ef0__5b08f6f9d7badccd(1313373041, $error)
+      let v1 := mload(v0)
+      let v2 := v1
+      let v3 := mload(add(v0, 32))
+      let v4 := v3
+      revert(v2, v4)
+    }
+    function $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $value) {
+      mstore($ptr, $value)
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_append_tail($self, $bytes) -> ret {
+      let v0 := mload(64)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(64, add(v0, $bytes))
+      mstore(add($self, 96), add(v0, $bytes))
+      ret := v0
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_base($self) -> ret {
+      let v0 := mload(add($self, 32))
+      ret := v0
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_finish($self) -> ret {
+      let v0 := mload($self)
+      let v1 := v0
+      let v2 := mload(add($self, 96))
+      let v3 := $checked_sub_u256(v2, v1)
+      let v4 := mload(0x40)
+      if iszero(v4) {
+        v4 := 0x80
+      }
+      mstore(0x40, add(v4, 64))
+      mstore(v4, v1)
+      mstore(add(v4, 32), v3)
+      ret := v4
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_pos($self) -> ret {
+      let v0 := mload(add($self, 64))
+      ret := v0
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_reserve_head($self, $bytes) -> ret {
+      let v0 := mload($self)
+      let v1 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0, 0)
+      let v2 := v1
+      if v2 {
+        let v3 := mload(64)
+        if iszero(v3) {
+          v3 := 0x80
+        }
+        mstore(64, add(v3, $bytes))
+        mstore($self, v3)
+        mstore(add($self, 32), v3)
+        mstore(add($self, 64), v3)
+        mstore(add($self, 96), add(v3, $bytes))
+      }
+      let v4 := mload(add($self, 32))
+      ret := v4
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_base($self, $new_base) {
+      mstore(add($self, 32), $new_base)
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_set_pos($self, $new_pos) {
+      mstore(add($self, 64), $new_pos)
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($self, $v) {
+      let v0 := mload(add($self, 64))
+      let v1 := v0
+      mstore(v1, $v)
+      mstore(add($self, 64), add(v1, 32))
+      leave
+    }
+    function $solencoder_h1b9228b90dad6928_new() -> ret {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(0x40, add(v0, 128))
+      mstore(v0, 0)
+      mstore(add(v0, 32), 0)
+      mstore(add(v0, 64), 0)
+      mstore(add(v0, 96), 0)
+      ret := v0
+      leave
+    }
+    function $test_ref_is_not_a_copy() {
+      let v0 := mload(0x40)
+      if iszero(v0) {
+        v0 := 0x80
+      }
+      mstore(0x40, add(v0, 64))
+      mstore(v0, 10)
+      mstore(add(v0, 32), 20)
+      let v1 := v0
+      let v2 := $live_view(v1)
+      let v3 := mload(v2)
+      let v4 := v3
+      let v5 := mload(add(v2, 32))
+      let v6 := v5
+      let v7 := mload(v4)
+      let v8 := mload(v1)
+      let v9 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v7, v8)
+      $assert(v9)
+      let v10 := mload(v6)
+      let v11 := mload(add(v1, 32))
+      let v12 := $u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v10, v11)
+      $assert(v12)
+      leave
+    }
+    function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode__Sol_hfd482bb803ad8c5f_SolEncoder_h1b9228b90dad6928__1a070c3866d16383($self, $e) {
+      $solencoder_h1b9228b90dad6928_abiencoder_hffd58d20d4321024_write_word($e, $self)
+      leave
+    }
+    function $u256_h3271ca15373d4483_encode_hab7243eccf2714fb_encode_to_ptr__Sol_hfd482bb803ad8c5f__5bf6337811c3ce95($self, $ptr) {
+      $sol_hfd482bb803ad8c5f_abi_h2da9a2d0b1ddaeb7_store_word($ptr, $self)
+      leave
+    }
+    function $u256_h3271ca15373d4483_eq_he50383edd273619f_eq($self, $other) -> ret {
+      let v0 := eq($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_intword_h9a147c8c32b1323c_to_word($self) -> ret {
+      ret := $self
+      leave
+    }
+    function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_gt($self, $other) -> ret {
+      let v0 := gt($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_ord_h264f6d6d75097a_lt($self, $other) -> ret {
+      let v0 := lt($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_wrappingadd_h14afa79b3047617f_wrapping_add($self, $other) -> ret {
+      let v0 := add($self, $other)
+      ret := v0
+      leave
+    }
+    function $u256_h3271ca15373d4483_wrappingsub_h6880d1ff91f0a556_wrapping_sub($self, $other) -> ret {
+      let v0 := sub($self, $other)
+      ret := v0
+      leave
+    }
+  }
+}

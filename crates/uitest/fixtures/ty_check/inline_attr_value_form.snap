@@ -1,0 +1,12 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/inline_attr_value_form.fe
+---
+error[14-0002]: invalid `#[inline]` attribute on function `bad`
+  ┌─ inline_attr_value_form.fe:1:1
+  │
+1 │ #[inline = always]
+  │ ^^^^^^^^^^^^^^^^^^ expected `#[inline]`, `#[inline(always)]`, or `#[inline(never)]`
+  │
+  = supported inline hints are `#[inline]`, `#[inline(always)]`, and `#[inline(never)]`

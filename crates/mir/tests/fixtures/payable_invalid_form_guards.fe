@@ -1,0 +1,20 @@
+use std::abi::sol
+
+contract InvalidPayableForms {
+    init() {}
+
+    recv Msg {
+        Fund {} {}
+
+        #[payable]
+        Ping {} {}
+    }
+}
+
+msg Msg {
+    #[selector = sol("fund()")]
+    Fund,
+
+    #[selector = sol("ping()")]
+    Ping,
+}

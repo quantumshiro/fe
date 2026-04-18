@@ -1,0 +1,129 @@
+---
+source: crates/hir/tests/ty_check.rs
+expression: res
+input_file: test_files/ty_check/const_eval_const_fn_match.fe
+---
+note: 
+  ┌─ const_eval_const_fn_match.fe:1:38
+  │  
+1 │   const fn choose(_ x: usize) -> usize {
+  │ ╭──────────────────────────────────────^
+2 │ │     match x {
+3 │ │         0 => 10
+4 │ │         1 | 2 => 20
+5 │ │         y => y + 1
+6 │ │     }
+7 │ │ }
+  │ ╰─^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:2:5
+  │  
+2 │ ╭     match x {
+3 │ │         0 => 10
+4 │ │         1 | 2 => 20
+5 │ │         y => y + 1
+6 │ │     }
+  │ ╰─────^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:2:11
+  │
+2 │     match x {
+  │           ^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:3:9
+  │
+3 │         0 => 10
+  │         ^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:3:14
+  │
+3 │         0 => 10
+  │              ^^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:4:9
+  │
+4 │         1 | 2 => 20
+  │         ^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:4:9
+  │
+4 │         1 | 2 => 20
+  │         ^^^^^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:4:13
+  │
+4 │         1 | 2 => 20
+  │             ^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:4:18
+  │
+4 │         1 | 2 => 20
+  │                  ^^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:5:9
+  │
+5 │         y => y + 1
+  │         ^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:5:14
+  │
+5 │         y => y + 1
+  │              ^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:5:14
+  │
+5 │         y => y + 1
+  │              ^^^^^ usize
+
+note: 
+  ┌─ const_eval_const_fn_match.fe:5:18
+  │
+5 │         y => y + 1
+  │                  ^ usize
+
+note: 
+   ┌─ const_eval_const_fn_match.fe:11:8
+   │  
+11 │   fn f() {
+   │ ╭────────^
+12 │ │     let a: Foo<choose(0)>
+13 │ │     let b: Foo<choose(2)>
+14 │ │     let c: Foo<choose(5)>
+15 │ │     let d: Foo<{ choose(1) }>
+16 │ │ }
+   │ ╰─^ ()
+
+note: 
+   ┌─ const_eval_const_fn_match.fe:12:9
+   │
+12 │     let a: Foo<choose(0)>
+   │         ^ Foo<10>
+
+note: 
+   ┌─ const_eval_const_fn_match.fe:13:9
+   │
+13 │     let b: Foo<choose(2)>
+   │         ^ Foo<20>
+
+note: 
+   ┌─ const_eval_const_fn_match.fe:14:9
+   │
+14 │     let c: Foo<choose(5)>
+   │         ^ Foo<6>
+
+note: 
+   ┌─ const_eval_const_fn_match.fe:15:9
+   │
+15 │     let d: Foo<{ choose(1) }>
+   │         ^ Foo<20>

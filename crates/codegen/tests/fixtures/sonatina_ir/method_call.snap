@@ -1,0 +1,42 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/method_call.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %make_value() -> i64 {
+    block0:
+        return 42.i64;
+}
+
+func private %call_method() -> i64 {
+    block0:
+        v1.i64 = call %foo_h6dbce71a6ea992b8_return_value;
+        return v1;
+}
+
+func private %foo_h6dbce71a6ea992b8_return_value() -> i64 {
+    block0:
+        v1.i64 = call %foo_h6dbce71a6ea992b8_gen_value;
+        return v1;
+}
+
+func private %foo_h6dbce71a6ea992b8_gen_value() -> i64 {
+    block0:
+        v1.i64 = call %make_value;
+        return v1;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v0.i64 = call %make_value;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

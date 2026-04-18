@@ -1,24 +1,66 @@
-use std::convert::{Infallible, identity};
+use std::{
+    cell::RefCell,
+    convert::{Infallible, identity},
+    rc::Rc,
+};
 use unwrap_infallible::UnwrapInfallible;
 
 use super::{
-    Checkpoint, ErrProof, Parser, Recovery, define_scope,
+    Checkpoint, ErrProof, Parser, Recovery, TextSize, define_scope,
     expr_atom::{self, is_expr_atom_head},
     param::{CallArgListScope, GenericArgListScope},
+    pat::parse_pat,
+    path::is_qualified_type,
     token_stream::TokenStream,
 };
-use crate::{ExpectedKind, SyntaxKind};
+use crate::{ExpectedKind, ParseError, SyntaxKind, TextRange};
+
+const LINE_START_LT_ALLOWED_SCOPES: [SyntaxKind; 8] = [
+    SyntaxKind::ParenExpr,
+    SyntaxKind::TupleExpr,
+    SyntaxKind::ArrayExpr,
+    SyntaxKind::IndexExpr,
+    SyntaxKind::CallArgList,
+    SyntaxKind::CallArg,
+    SyntaxKind::RecordFieldList,
+    SyntaxKind::RecordField,
+];
 
 /// Parses expression.
 pub fn parse_expr<S: TokenStream>(parser: &mut Parser<S>) -> Result<(), Recovery<ErrProof>> {
-    parse_expr_with_min_bp(parser, 0, true)
+    parse_expr_with_min_bp(parser, 0, true, false, None)
+}
+
+/// Parses a restricted expression form suitable for const-generic arguments and
+/// defaults inside `<...>` contexts.
+///
+/// This intentionally avoids parsing infix operators so that `>` can be
+/// interpreted as a delimiter rather than a comparison operator.
+pub fn parse_const_generic_expr<S: TokenStream>(
+    parser: &mut Parser<S>,
+) -> Result<(), Recovery<ErrProof>> {
+    // Allow postfix chaining (call/index/field), but avoid infix operators like
+    // `>` / `>>` which would conflict with closing `>` tokens of generic lists.
+    parse_expr_with_min_bp(parser, 142, true, false, None)
 }
 
 /// Parses expression except for `struct` initialization expression.
 pub fn parse_expr_no_struct<S: TokenStream>(
     parser: &mut Parser<S>,
 ) -> Result<(), Recovery<ErrProof>> {
-    parse_expr_with_min_bp(parser, 0, false)
+    parse_expr_with_min_bp(parser, 0, false, false, None)
+}
+
+/// Parses a condition expression for `if`/`while`.
+///
+/// This allows condition-only `let` expressions so chains like
+/// `let p = x && let q = y && pred` can be represented as normal logical
+/// binary expressions.
+pub(crate) fn parse_condition_expr<S: TokenStream>(
+    parser: &mut Parser<S>,
+) -> Result<(), Recovery<ErrProof>> {
+    let state = Rc::new(RefCell::new(ConditionParseState::default()));
+    parse_expr_with_min_bp(parser, 0, false, true, Some(state))
 }
 
 // Expressions are parsed in Pratt's top-down operator precedence style.
@@ -31,8 +73,15 @@ fn parse_expr_with_min_bp<S: TokenStream>(
     parser: &mut Parser<S>,
     min_bp: u8,
     allow_struct_init: bool,
+    allow_let_expr: bool,
+    condition_state: Option<Rc<RefCell<ConditionParseState>>>,
 ) -> Result<(), Recovery<ErrProof>> {
-    let checkpoint = parse_expr_atom(parser, allow_struct_init)?;
+    let checkpoint = parse_expr_atom(
+        parser,
+        allow_struct_init,
+        allow_let_expr,
+        condition_state.clone(),
+    )?;
 
     loop {
         let is_trivia = parser.set_newline_as_trivia(true);
@@ -41,6 +90,37 @@ fn parse_expr_with_min_bp<S: TokenStream>(
             break;
         };
         parser.set_newline_as_trivia(is_trivia);
+
+        if min_bp == 0
+            && kind == SyntaxKind::Minus
+            && has_line_break_before(parser)
+            && !is_aug_assign(parser)
+        {
+            let range = line_start_op_range(parser);
+            parser.add_error(ParseError::Msg(
+                "line-start `-` after an expression is ambiguous; move `-` to the previous line for subtraction or parenthesize explicitly"
+                    .to_string(),
+                range,
+            ));
+            break;
+        }
+        if min_bp == 0 && kind == SyntaxKind::Lt && has_line_break_before(parser) {
+            if is_line_start_qualified_type(parser) {
+                break;
+            }
+            let is_bare_lt = !is_lt_eq(parser) && !is_lshift(parser);
+            let is_bare_lshift = is_lshift(parser) && !is_aug_assign(parser);
+            if (is_bare_lt || is_bare_lshift) && !is_allowed_line_start_lt_context(parser) {
+                let range = line_start_op_range(parser);
+                let msg = if is_bare_lshift {
+                    "line-start `<<` is ambiguous; use parentheses to disambiguate"
+                } else {
+                    "line-start `<` is ambiguous; use parentheses to disambiguate"
+                };
+                parser.add_error(ParseError::Msg(msg.to_string(), range));
+                break;
+            }
+        }
 
         // Parse postfix operators.
         match postfix_binding_power(parser) {
@@ -68,13 +148,17 @@ fn parse_expr_with_min_bp<S: TokenStream>(
                             continue;
                         }
                     }
+                    SyntaxKind::AsKw => {
+                        parser.parse_cp(CastExprScope::default(), Some(checkpoint))?;
+                        continue;
+                    }
                     _ => unreachable!(),
                 }
             }
             None => {}
         }
 
-        if let Some((lbp, _)) = infix_binding_power(parser) {
+        if let Some((lbp, rbp)) = infix_binding_power(parser) {
             if lbp < min_bp {
                 break;
             }
@@ -82,11 +166,20 @@ fn parse_expr_with_min_bp<S: TokenStream>(
             if kind == SyntaxKind::Dot {
                 parser.parse_cp(FieldExprScope::default(), Some(checkpoint))
             } else if is_assign(parser) {
-                parser.parse_cp(AssignExprScope::default(), Some(checkpoint))
+                parser.parse_cp(
+                    AssignExprScope::new(allow_let_expr, condition_state.clone()),
+                    Some(checkpoint),
+                )
             } else if is_aug_assign(parser) {
-                parser.parse_cp(AugAssignExprScope::default(), Some(checkpoint))
+                parser.parse_cp(
+                    AugAssignExprScope::new(allow_let_expr, condition_state.clone()),
+                    Some(checkpoint),
+                )
             } else {
-                parser.parse_cp(BinExprScope::default(), Some(checkpoint))
+                parser.parse_cp(
+                    BinExprScope::new(rbp, allow_let_expr, condition_state.clone()),
+                    Some(checkpoint),
+                )
             }?;
             continue;
         }
@@ -99,11 +192,23 @@ fn parse_expr_with_min_bp<S: TokenStream>(
 fn parse_expr_atom<S: TokenStream>(
     parser: &mut Parser<S>,
     allow_struct_init: bool,
+    allow_let_expr: bool,
+    condition_state: Option<Rc<RefCell<ConditionParseState>>>,
 ) -> Result<Checkpoint, Recovery<ErrProof>> {
     match parser.current_kind() {
-        Some(kind) if prefix_binding_power(kind).is_some() => {
-            parser.parse_cp(UnExprScope::new(allow_struct_init), None)
+        Some(kind) if prefix_binding_power(kind).is_some() => parser.parse_cp(
+            UnExprScope::new(allow_struct_init, allow_let_expr, condition_state),
+            None,
+        ),
+        Some(SyntaxKind::LetKw) if allow_let_expr => {
+            if let Some(state) = condition_state {
+                state.borrow_mut().saw_let = true;
+            }
+            parser.parse_cp(LetExprScope::default(), None)
         }
+        Some(SyntaxKind::LetKw) => parser
+            .error_and_recover("`let` conditions are only allowed in `if` and `while`")
+            .map(|_| parser.checkpoint()),
         Some(kind) if is_expr_atom_head(kind) => {
             expr_atom::parse_expr_atom(parser, allow_struct_init)
         }
@@ -113,11 +218,33 @@ fn parse_expr_atom<S: TokenStream>(
     }
 }
 
+// `&&` has (lbp, rbp) = (60, 61). Parse `let .. = <rhs>` with a higher minimum
+// precedence so the rhs does not consume chain operators.
+const LET_CONDITION_RHS_MIN_BP: u8 = 62;
+
+#[derive(Debug, Default)]
+struct ConditionParseState {
+    saw_let: bool,
+}
+
+define_scope! { LetExprScope, LetExpr }
+impl super::Parse for LetExprScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parser.bump_expected(SyntaxKind::LetKw);
+        parser.set_newline_as_trivia(false);
+        parse_pat(parser)?;
+        parser.bump_expected(SyntaxKind::Eq);
+        parse_expr_with_min_bp(parser, LET_CONDITION_RHS_MIN_BP, false, false, None)
+    }
+}
+
 /// Specifies how tightly a prefix unary operator binds to its operand.
 fn prefix_binding_power(kind: SyntaxKind) -> Option<u8> {
     use SyntaxKind::*;
     match kind {
-        Not | Plus | Minus | Tilde => Some(145),
+        Not | Plus | Minus | Tilde | MutKw | RefKw => Some(145),
         _ => None,
     }
 }
@@ -135,6 +262,7 @@ fn postfix_binding_power<S: TokenStream>(parser: &mut Parser<S>) -> Option<u8> {
     parser.set_newline_as_trivia(false);
     let power = match parser.current_kind() {
         Some(LBracket | LParen) => Some(147),
+        Some(AsKw) => Some(146),
         _ => None,
     };
 
@@ -153,7 +281,6 @@ fn infix_binding_power<S: TokenStream>(parser: &mut Parser<S>) -> Option<(u8, u8
         return Some((151, 150));
     }
 
-    parser.set_newline_as_trivia(false);
     if is_aug_assign(parser) {
         parser.set_newline_as_trivia(is_trivia);
         return Some((11, 10));
@@ -165,10 +292,23 @@ fn infix_binding_power<S: TokenStream>(parser: &mut Parser<S>) -> Option<(u8, u8
     };
 
     let bp = match kind {
+        Dot2 => (40, 41), // Range operator, lower precedence than most
         Pipe2 => (50, 51),
         Amp2 => (60, 61),
         NotEq | Eq2 => (70, 71),
         Lt => {
+            if has_line_break_before(parser) && is_line_start_qualified_type(parser) {
+                parser.set_newline_as_trivia(is_trivia);
+                return None;
+            }
+            if has_line_break_before(parser) {
+                let is_bare_lt = !is_lt_eq(parser) && !is_lshift(parser);
+                let is_bare_lshift = is_lshift(parser) && !is_aug_assign(parser);
+                if (is_bare_lt || is_bare_lshift) && !is_allowed_line_start_lt_context(parser) {
+                    parser.set_newline_as_trivia(is_trivia);
+                    return None;
+                }
+            }
             if is_lshift(parser) {
                 (110, 111)
             } else {
@@ -188,7 +328,14 @@ fn infix_binding_power<S: TokenStream>(parser: &mut Parser<S>) -> Option<(u8, u8
         Hat => (90, 91),
         Amp => (100, 101),
         LShift | RShift => (110, 111),
-        Plus | Minus => (120, 121),
+        Plus => (120, 121),
+        Minus => {
+            if has_line_break_before(parser) {
+                parser.set_newline_as_trivia(is_trivia);
+                return None;
+            }
+            (120, 121)
+        }
         Star | Slash | Percent => (130, 131),
         Star2 => (141, 140),
         Eq => {
@@ -207,7 +354,7 @@ fn infix_binding_power<S: TokenStream>(parser: &mut Parser<S>) -> Option<(u8, u8
     Some(bp)
 }
 
-define_scope! { UnExprScope { allow_struct_init: bool }, UnExpr }
+define_scope! { UnExprScope { allow_struct_init: bool, allow_let_expr: bool, condition_state: Option<Rc<RefCell<ConditionParseState>>> }, UnExpr }
 impl super::Parse for UnExprScope {
     type Error = Recovery<ErrProof>;
 
@@ -216,43 +363,117 @@ impl super::Parse for UnExprScope {
         let kind = parser.current_kind().unwrap();
         let bp = prefix_binding_power(kind).unwrap();
         parser.bump();
-        parse_expr_with_min_bp(parser, bp, self.allow_struct_init)
+        parse_expr_with_min_bp(
+            parser,
+            bp,
+            self.allow_struct_init,
+            self.allow_let_expr,
+            self.condition_state.clone(),
+        )
     }
 }
 
-define_scope! { BinExprScope, BinExpr }
+define_scope! { CastExprScope, CastExpr }
+impl super::Parse for CastExprScope {
+    type Error = Recovery<ErrProof>;
+
+    fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
+        parser.set_newline_as_trivia(false);
+        parser.bump_expected(SyntaxKind::AsKw);
+        super::type_::parse_type(parser, None)?;
+        Ok(())
+    }
+}
+
+define_scope! { BinExprScope { rbp: u8, allow_let_expr: bool, condition_state: Option<Rc<RefCell<ConditionParseState>>> }, BinExpr }
 impl super::Parse for BinExprScope {
     type Error = Recovery<ErrProof>;
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
-        parser.set_newline_as_trivia(false);
-        let (_, rbp) = infix_binding_power(parser).unwrap();
+        let nt = parser.set_newline_as_trivia(true);
+        let is_or = parser.current_kind() == Some(SyntaxKind::Pipe2);
+        let msg = "`||` cannot be mixed with `let` conditions in this position";
+        let saw_let_before = self
+            .condition_state
+            .as_ref()
+            .is_some_and(|state| state.borrow().saw_let);
+        let rhs_starts_with_let = self.allow_let_expr
+            && is_or
+            && parser.dry_run(|parser| {
+                parser.bump();
+                parser.current_kind() == Some(SyntaxKind::LetKw)
+            });
+        let mut reported = false;
+        if self.allow_let_expr && is_or && (saw_let_before || rhs_starts_with_let) {
+            parser.error_msg_on_current_token(msg);
+            reported = true;
+        }
         bump_bin_op(parser);
-        parse_expr_with_min_bp(parser, rbp, false)
+        parser.set_newline_as_trivia(false);
+        let r = parse_expr_with_min_bp(
+            parser,
+            self.rbp,
+            false,
+            self.allow_let_expr,
+            self.condition_state.clone(),
+        );
+        parser.set_newline_as_trivia(nt);
+        r?;
+
+        if self.allow_let_expr
+            && is_or
+            && !reported
+            && self
+                .condition_state
+                .as_ref()
+                .is_some_and(|state| state.borrow().saw_let)
+        {
+            parser.error(msg);
+        }
+
+        Ok(())
     }
 }
 
-define_scope! { AugAssignExprScope, AugAssignExpr }
+define_scope! { AugAssignExprScope { allow_let_expr: bool, condition_state: Option<Rc<RefCell<ConditionParseState>>> }, AugAssignExpr }
 impl super::Parse for AugAssignExprScope {
     type Error = Recovery<ErrProof>;
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
-        parser.set_newline_as_trivia(false);
+        let nt = parser.set_newline_as_trivia(true);
         let (_, rbp) = infix_binding_power(parser).unwrap();
         bump_aug_assign_op(parser);
-        parse_expr_with_min_bp(parser, rbp, false)
+        parser.set_newline_as_trivia(false);
+        let r = parse_expr_with_min_bp(
+            parser,
+            rbp,
+            false,
+            self.allow_let_expr,
+            self.condition_state.clone(),
+        );
+        parser.set_newline_as_trivia(nt);
+        r
     }
 }
 
-define_scope! { AssignExprScope, AssignExpr }
+define_scope! { AssignExprScope { allow_let_expr: bool, condition_state: Option<Rc<RefCell<ConditionParseState>>> }, AssignExpr }
 impl super::Parse for AssignExprScope {
     type Error = Recovery<ErrProof>;
 
     fn parse<S: TokenStream>(&mut self, parser: &mut Parser<S>) -> Result<(), Self::Error> {
-        parser.set_newline_as_trivia(false);
+        let nt = parser.set_newline_as_trivia(true);
         let (_, rbp) = infix_binding_power(parser).unwrap();
         parser.bump_expected(SyntaxKind::Eq);
-        parse_expr_with_min_bp(parser, rbp, true)
+        parser.set_newline_as_trivia(false);
+        let r = parse_expr_with_min_bp(
+            parser,
+            rbp,
+            true,
+            self.allow_let_expr,
+            self.condition_state.clone(),
+        );
+        parser.set_newline_as_trivia(nt);
+        r
     }
 }
 
@@ -418,10 +639,41 @@ fn is_aug_assign<S: TokenStream>(parser: &mut Parser<S>) -> bool {
 }
 
 fn is_assign<S: TokenStream>(parser: &mut Parser<S>) -> bool {
-    let nt = parser.set_newline_as_trivia(false);
+    let nt = parser.set_newline_as_trivia(true);
     let is_asn = parser.current_kind() == Some(SyntaxKind::Eq);
     parser.set_newline_as_trivia(nt);
     is_asn
+}
+
+fn has_line_break_before<S: TokenStream>(parser: &mut Parser<S>) -> bool {
+    let nt = parser.set_newline_as_trivia(false);
+    let has_line_break = parser.current_kind() == Some(SyntaxKind::Newline);
+    parser.set_newline_as_trivia(nt);
+    has_line_break
+}
+
+fn is_line_start_qualified_type<S: TokenStream>(parser: &mut Parser<S>) -> bool {
+    let nt = parser.set_newline_as_trivia(true);
+    let is_qualified = parser.current_kind() == Some(SyntaxKind::Lt) && is_qualified_type(parser);
+    parser.set_newline_as_trivia(nt);
+    is_qualified
+}
+
+fn is_allowed_line_start_lt_context<S: TokenStream>(parser: &Parser<S>) -> bool {
+    parser.in_scope_set(&LINE_START_LT_ALLOWED_SCOPES)
+}
+
+fn line_start_op_range<S: TokenStream>(parser: &mut Parser<S>) -> TextRange {
+    parser.dry_run(|parser| {
+        let nt = parser.set_newline_as_trivia(true);
+        parser.bump_trivias();
+        let start = parser.current_pos;
+        let end = parser
+            .current_token()
+            .map_or(start, |current_token| start + current_token.text_size());
+        parser.set_newline_as_trivia(nt);
+        TextRange::new(start, end)
+    })
 }
 
 fn bump_bin_op<S: TokenStream>(parser: &mut Parser<S>) {
@@ -474,14 +726,17 @@ fn bump_aug_assign_op<S: TokenStream>(parser: &mut Parser<S>) -> bool {
 
 fn is_method_call<S: TokenStream>(parser: &mut Parser<S>) -> bool {
     let is_trivia = parser.set_newline_as_trivia(true);
-    let res = parser.dry_run(|parser| {
-        if !parser.bump_if(SyntaxKind::Dot) {
-            return false;
-        }
+    if !matches!(
+        parser.peek_n_non_trivia(2).as_slice(),
+        [SyntaxKind::Dot, SyntaxKind::Ident]
+    ) {
+        parser.set_newline_as_trivia(is_trivia);
+        return false;
+    }
 
-        if !parser.bump_if(SyntaxKind::Ident) {
-            return false;
-        }
+    let res = parser.dry_run(|parser| {
+        parser.bump_expected(SyntaxKind::Dot);
+        parser.bump_expected(SyntaxKind::Ident);
 
         // After the identifier, require `<` or `(` to be on the same line
         parser.set_newline_as_trivia(false);

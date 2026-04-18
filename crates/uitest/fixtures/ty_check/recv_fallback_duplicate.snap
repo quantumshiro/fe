@@ -1,0 +1,15 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/recv_fallback_duplicate.fe
+---
+error[8-0079]: duplicate fallback arm
+  ┌─ recv_fallback_duplicate.fe:7:9
+  │
+3 │         _ {}
+  │         - first fallback arm declared here
+  ·
+7 │         _ {}
+  │         ^ duplicate fallback arm
+  │
+  = a contract can define at most one fallback arm

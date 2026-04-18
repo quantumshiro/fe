@@ -43,9 +43,10 @@ define_lazy_span_node!(
     ast::FuncParam,
     @token {
        (mut_kw, mut_token),
+       (ref_kw, ref_token),
+       (own_kw, own_token),
     }
     @node {
-       (label, label, LazySpanAtom),
        (name, name, LazySpanAtom),
        (ty, ty, LazyTySpan),
     }
@@ -159,6 +160,7 @@ define_lazy_span_node!(
     }
     @node {
         (bounds, bounds, LazyTypeBoundListSpan),
+        (default_ty, default_ty, LazyTySpan),
     }
 );
 

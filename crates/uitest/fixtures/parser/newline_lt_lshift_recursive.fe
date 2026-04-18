@@ -1,0 +1,5 @@
+fn f(x: i32, y: i32) {
+    let a = x
+    let b = true || x
+        << y
+}

@@ -1,10 +1,10 @@
 [package]
 name = "fe-resolver"
-version = "0.26.0"
+version = "26.0.0"
 authors = ["The Fe Developers <snakecharmers@ethereum.org>"]
 edition.workspace = true
 license = "Apache-2.0"
-repository = "https://github.com/ethereum/fe"
+repository = "https://github.com/argotorg/fe"
 description = "Resolver lib for Fe."
 
 [lib]
@@ -16,6 +16,8 @@ url.workspace = true
 glob.workspace = true
 petgraph.workspace = true
 tracing.workspace = true
+smol_str.workspace = true
+common.workspace = true
 
 indexmap = "2.9"
 sha2 = "0.10"
@@ -27,4 +29,16 @@ toml = "0.8"
 tempfile = "3.13"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-git2 = "0.19"
+gix = { version = "0.81.0", default-features = false, features = [
+    "sha1",
+    "worktree-mutation",
+    "blocking-http-transport-reqwest-rust-tls",
+] }
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }

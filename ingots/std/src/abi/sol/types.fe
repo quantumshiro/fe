@@ -1,0 +1,137 @@
+use core::AsBytes
+use core::abi::DynString
+use core::num::IntDowncast
+use ingot::evm::Address
+use ingot::evm::TopicValue
+
+/// Maps a Fe type to its Solidity ABI type name.
+///
+/// The compiler uses this trait to build event signatures at compile time.
+/// For example, `u256::SOL_TYPE` is `"uint256"` and `Address::SOL_TYPE` is
+/// `"address"`. The `#[event]` desugaring generates a `TOPIC0` constant
+/// from these values:
+///
+/// ```
+/// const TOPIC0: u256 = keccak((Transfer::SOL_TYPE, "(", Address::SOL_TYPE, ",", u256::SOL_TYPE, ")"))
+/// ```
+///
+/// Implement this trait for custom types to use them as event fields.
+pub trait SolCompat {
+    type S: AsBytes
+    const SOL_TYPE: Self::S
+}
+
+// Primitive unsigned integer implementations
+impl SolCompat for u8 {
+    type S = String<5>
+    const SOL_TYPE: Self::S = "uint8"
+}
+impl SolCompat for u16 {
+    type S = String<6>
+    const SOL_TYPE: Self::S = "uint16"
+}
+impl SolCompat for u32 {
+    type S = String<6>
+    const SOL_TYPE: Self::S = "uint32"
+}
+impl SolCompat for u64 {
+    type S = String<6>
+    const SOL_TYPE: Self::S = "uint64"
+}
+impl SolCompat for u128 {
+    type S = String<7>
+    const SOL_TYPE: Self::S = "uint128"
+}
+impl SolCompat for u256 {
+    type S = String<7>
+    const SOL_TYPE: Self::S = "uint256"
+}
+
+// Primitive signed integer implementations
+impl SolCompat for i8 {
+    type S = String<4>
+    const SOL_TYPE: Self::S = "int8"
+}
+impl SolCompat for i16 {
+    type S = String<5>
+    const SOL_TYPE: Self::S = "int16"
+}
+impl SolCompat for i32 {
+    type S = String<5>
+    const SOL_TYPE: Self::S = "int32"
+}
+impl SolCompat for i64 {
+    type S = String<5>
+    const SOL_TYPE: Self::S = "int64"
+}
+impl SolCompat for i128 {
+    type S = String<6>
+    const SOL_TYPE: Self::S = "int128"
+}
+impl SolCompat for i256 {
+    type S = String<6>
+    const SOL_TYPE: Self::S = "int256"
+}
+
+impl SolCompat for Address {
+    type S = String<7>
+    const SOL_TYPE: Self::S = "address"
+}
+
+impl SolCompat for bool {
+    type S = String<4>
+    const SOL_TYPE: Self::S = "bool"
+}
+
+impl<const N: usize> SolCompat for String<N> {
+    type S = String<6>
+    const SOL_TYPE: Self::S = "string"
+}
+
+impl SolCompat for DynString {
+    type S = String<6>
+    const SOL_TYPE: Self::S = "string"
+}
+
+impl TopicValue for u8 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for u16 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for u32 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for u64 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for u128 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for u256 {
+    fn as_topic(self) -> u256 { self }
+}
+impl TopicValue for i8 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for i16 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for i32 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for i64 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for i128 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for i256 {
+    fn as_topic(self) -> u256 { self.downcast_unchecked() }
+}
+impl TopicValue for Address {
+    fn as_topic(self) -> u256 { self.inner }
+}
+impl TopicValue for bool {
+    fn as_topic(self) -> u256 { if self { 1 } else { 0 } }
+}

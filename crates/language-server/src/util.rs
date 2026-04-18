@@ -10,21 +10,49 @@ use rustc_hash::FxHashMap;
 use tracing::error;
 
 pub fn calculate_line_offsets(text: &str) -> Vec<usize> {
-    text.lines()
-        .scan(0, |state, line| {
-            let offset = *state;
-            *state += line.len() + 1;
-            Some(offset)
-        })
-        .collect()
+    let mut offsets = vec![0];
+    for (i, b) in text.bytes().enumerate() {
+        if b == b'\n' {
+            offsets.push(i + 1);
+        }
+    }
+    offsets
 }
 
 pub fn to_offset_from_position(position: Position, text: &str) -> parser::TextSize {
     let line_offsets: Vec<usize> = calculate_line_offsets(text);
-    let line_offset = line_offsets[position.line as usize];
-    let character_offset = position.character as usize;
+    let line_index = position.line as usize;
+    let line_start = line_offsets
+        .get(line_index)
+        .copied()
+        .unwrap_or_else(|| line_offsets.last().copied().unwrap_or(0));
+    let line_end = line_offsets
+        .get(line_index.saturating_add(1))
+        .map(|offset| offset.saturating_sub(1))
+        .unwrap_or(text.len());
+    let line_text = &text[line_start..line_end];
+    let character_offset = utf16_column_to_byte_offset(line_text, position.character as usize);
 
-    parser::TextSize::from((line_offset + character_offset) as u32)
+    parser::TextSize::from((line_start + character_offset).min(text.len()) as u32)
+}
+
+fn utf16_column_to_byte_offset(text: &str, utf16_column: usize) -> usize {
+    let mut utf16_units = 0;
+
+    for (byte_offset, ch) in text.char_indices() {
+        if utf16_units >= utf16_column {
+            return byte_offset;
+        }
+
+        let next_utf16_units = utf16_units + ch.len_utf16();
+        if next_utf16_units > utf16_column {
+            return byte_offset;
+        }
+
+        utf16_units = next_utf16_units;
+    }
+
+    text.len()
 }
 
 pub fn to_lsp_range_from_span(
@@ -118,8 +146,27 @@ pub fn diag_to_lsp(
     diag: CompleteDiagnostic,
 ) -> FxHashMap<async_lsp::lsp_types::Url, Vec<async_lsp::lsp_types::Diagnostic>> {
     let mut result = FxHashMap::default();
-    let Ok(primary_location) = to_lsp_location_from_span(db, diag.primary_span()) else {
-        return result;
+    let primary_span = match diag.primary_span() {
+        Some(span) => span,
+        None => {
+            tracing::warn!(
+                "dropping diagnostic {:?} ({}): no primary span",
+                diag.error_code,
+                diag.message,
+            );
+            return result;
+        }
+    };
+    let primary_location = match to_lsp_location_from_span(db, primary_span) {
+        Ok(loc) => loc,
+        Err(e) => {
+            tracing::warn!(
+                "dropping diagnostic {:?} ({}): failed to resolve primary span: {e}",
+                diag.error_code,
+                diag.message,
+            );
+            return result;
+        }
     };
 
     diag.sub_diagnostics.into_iter().for_each(|sub| {
@@ -177,7 +224,7 @@ fn to_lsp_location_from_span(
     db: &dyn InputDb,
     span: Span,
 ) -> Result<async_lsp::lsp_types::Location, Box<dyn std::error::Error>> {
-    let url = span.file.url(db).expect("Failed to get file URL");
+    let url = span.file.url(db).ok_or("file has no URL")?;
     let range = to_lsp_range_from_span(span, db)?;
     Ok(async_lsp::lsp_types::Location { uri: url, range })
 }
@@ -211,5 +258,37 @@ impl DummyFilePathConversion for async_lsp::lsp_types::Url {
     fn from_file_path<P: AsRef<Path>>(_path: P) -> Result<Url, ()> {
         // for now we don't support file paths on wasm
         Err(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_offset_from_position;
+    use async_lsp::lsp_types::Position;
+
+    #[test]
+    fn to_offset_from_position_respects_utf16_columns() {
+        let text = "let x = ∫ + 1\n";
+        let offset = to_offset_from_position(Position::new(0, 9), text);
+
+        assert_eq!(usize::from(offset), "let x = ".len() + "∫".len());
+        assert_eq!(&text[..usize::from(offset)], "let x = ∫");
+    }
+
+    #[test]
+    fn to_offset_from_position_clamps_inside_multibyte_char_to_char_start() {
+        let text = "let x = ∫ + 1\n";
+        let offset = to_offset_from_position(Position::new(0, 8), text);
+
+        assert_eq!(usize::from(offset), "let x = ".len());
+        assert_eq!(&text[..usize::from(offset)], "let x = ");
+    }
+
+    #[test]
+    fn to_offset_from_position_handles_max_line_without_overflow() {
+        let text = "let x = 1\n";
+        let offset = to_offset_from_position(Position::new(u32::MAX, 0), text);
+
+        assert_eq!(usize::from(offset), text.len());
     }
 }

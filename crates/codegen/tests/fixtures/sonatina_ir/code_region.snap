@@ -1,0 +1,132 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/code_region.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %init__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        v1.i256 = sym_size &child_init__Evm_hef0af3106e109414__3af54274b2985741;
+        v2.i256 = sym_addr &child_init__Evm_hef0af3106e109414__3af54274b2985741;
+        v3.i256 = call %allocate__Evm_hef0af3106e109414__3af54274b2985741 v1;
+        evm_code_copy v3 v2 v1;
+        v6.i256 = call %evm_hef0af3106e109414_create_h3f3c4b410ec53b45_create2_raw_stor_arg0_root_stor 0.i256 v3 v1 4660.i256;
+        v7.i256 = sym_size &runtime__Evm_hef0af3106e109414__3af54274b2985741;
+        v8.i256 = sym_addr &runtime__Evm_hef0af3106e109414__3af54274b2985741;
+        v9.i256 = call %allocate__Evm_hef0af3106e109414__3af54274b2985741 v7;
+        evm_code_copy v9 v8 v7;
+        evm_return v9 v7;
+}
+
+func private %runtime__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        v1.i256 = call %read_selector__Evm_hef0af3106e109414__3af54274b2985741;
+        jump block5;
+
+    block1:
+        call %transfer__Evm_hef0af3106e109414__3af54274b2985741;
+        jump block2;
+
+    block2:
+        evm_return 0.i256 0.i256;
+
+    block3:
+        call %balance__Evm_hef0af3106e109414__3af54274b2985741;
+        jump block2;
+
+    block4:
+        jump block2;
+
+    block5:
+        br_table v1 block4 (305419896.i256 block1) (591751049.i256 block3);
+}
+
+func private %child_init__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        v1.i256 = sym_size &child_runtime__Evm_hef0af3106e109414__3af54274b2985741;
+        v2.i256 = sym_addr &child_runtime__Evm_hef0af3106e109414__3af54274b2985741;
+        evm_code_copy 0.i256 v2 v1;
+        evm_return 0.i256 v1;
+}
+
+func private %child_runtime__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        evm_calldata_copy 0.i256 0.i256 4.i256;
+        evm_return 0.i256 4.i256;
+}
+
+func private %allocate__Evm_hef0af3106e109414__3af54274b2985741(v0.i256) -> i256 {
+    block0:
+        v3.i256 = mload 64.i256 i256;
+        v5.i1 = call %u256_h3271ca15373d4483_eq_he50383edd273619f_eq v3 0.i256;
+        br v5 block1 block2;
+
+    block1:
+        jump block2;
+
+    block2:
+        v7.i256 = phi (v3 block0) (96.i256 block1);
+        (v9.i256, v10.i1) = uaddo v7 v0;
+        br v10 block3 block4;
+
+    block3:
+        mstore 0.i256 35408467139433450592217433187231851964531694900788300625387963629091585785856.i256 i256;
+        mstore 4.i256 17.i256 i256;
+        evm_revert 0.i256 36.i256;
+
+    block4:
+        mstore 64.i256 v9 i256;
+        return v7;
+}
+
+func private %balance__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        evm_return 0.i256 0.i256;
+}
+
+func private %transfer__Evm_hef0af3106e109414__3af54274b2985741() {
+    block0:
+        evm_return 0.i256 0.i256;
+}
+
+func private %read_selector__Evm_hef0af3106e109414__3af54274b2985741() -> i256 {
+    block0:
+        v2.i256 = evm_calldata_load 0.i256;
+        v4.i256 = shr 224.i256 v2;
+        return v4;
+}
+
+func private %evm_hef0af3106e109414_create_h3f3c4b410ec53b45_create2_raw_stor_arg0_root_stor(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
+    block0:
+        v5.i256 = evm_create2 v0 v1 v2 v3;
+        return v5;
+}
+
+func private %u256_h3271ca15373d4483_eq_he50383edd273619f_eq(v0.i256, v1.i256) -> i1 {
+    block0:
+        v2.i1 = eq v0 v1;
+        return v2;
+}
+
+
+object @Child {
+    section init {
+        entry %child_init__Evm_hef0af3106e109414__3af54274b2985741;
+        embed .runtime as &child_runtime__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+    section runtime {
+        entry %child_runtime__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+}
+
+object @Foo {
+    section init {
+        entry %init__Evm_hef0af3106e109414__3af54274b2985741;
+        embed @Child.init as &child_init__Evm_hef0af3106e109414__3af54274b2985741;
+        embed .runtime as &runtime__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+    section runtime {
+        entry %runtime__Evm_hef0af3106e109414__3af54274b2985741;
+    }
+}

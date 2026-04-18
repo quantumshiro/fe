@@ -31,3 +31,26 @@ if match x {
 } else {
     1
 }
+
+if round < POSEIDON_T6_HALF_FULL_ROUNDS
+    || round >= POSEIDON_T6_HALF_FULL_ROUNDS + POSEIDON_T6_PARTIAL_ROUNDS {}
+
+if let Some(Point { x, y }) = p {
+    x + y
+} else {
+    0
+}
+
+if let Some(x) = p {
+    x
+} else if let Some(y) = q {
+    y
+} else {
+    0
+}
+
+if let Option::Some(Point { x, y }) = p {
+    x + y
+} else {
+    0
+}

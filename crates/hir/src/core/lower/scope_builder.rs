@@ -185,7 +185,7 @@ impl<'db> ScopeGraphBuilder<'db> {
                 self.add_field_scope(
                     item_node,
                     FieldParent::Contract(inner),
-                    inner.fields(self.db),
+                    inner.hir_fields(self.db),
                 );
                 self.graph
                     .add_edge(item_node, item_node, EdgeKind::self_ty());

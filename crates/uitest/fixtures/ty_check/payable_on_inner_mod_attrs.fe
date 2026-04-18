@@ -1,0 +1,9 @@
+#![payable]
+
+fn top_level() {}
+
+mod nested {
+    #![payable]
+
+    fn inner() {}
+}

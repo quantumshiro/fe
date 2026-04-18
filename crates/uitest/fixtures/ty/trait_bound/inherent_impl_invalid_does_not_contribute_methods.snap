@@ -1,0 +1,16 @@
+---
+source: crates/uitest/tests/ty.rs
+expression: diags
+input_file: fixtures/ty/trait_bound/inherent_impl_invalid_does_not_contribute_methods.fe
+---
+error[6-0003]: trait bound is not satisfied
+  ┌─ inherent_impl_invalid_does_not_contribute_methods.fe:9:9
+  │
+9 │ impl<T> Container<T> {
+  │         ^^^^^^^^^^^^ `T` doesn't implement `Marker`
+
+error[6-0003]: trait bound is not satisfied
+   ┌─ inherent_impl_invalid_does_not_contribute_methods.fe:10:12
+   │
+10 │     fn tag(self) -> bool {
+   │            ^^^^ `T` doesn't implement `Marker`

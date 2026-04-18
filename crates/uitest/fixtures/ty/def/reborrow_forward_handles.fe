@@ -1,0 +1,15 @@
+fn take_ref(_ x: ref u8) -> u8 {
+    x
+}
+
+fn take_mut(_ x: mut u8) -> u8 {
+    x
+}
+
+fn forward_ref(_ y: ref u8) -> u8 {
+    take_ref(y)
+}
+
+fn forward_mut(_ y: mut u8) -> u8 {
+    take_mut(y)
+}

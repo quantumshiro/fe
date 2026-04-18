@@ -1,0 +1,55 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/tuple_single_element_peeling.fe
+---
+target = "evm-ethereum-osaka"
+
+func private %tuple_single_passthrough(v0.i256) -> i256 {
+    block0:
+        return v0;
+}
+
+func private %tuple_single_nested_passthrough(v0.i256) -> i256 {
+    block0:
+        return v0;
+}
+
+func private %tuple_single_struct_newtype_nested(v0.i256) -> i256 {
+    block0:
+        return v0;
+}
+
+func private %match_single_element_tuple(v0.i1) -> i8 {
+    block0:
+        jump block4;
+
+    block1:
+        jump block2;
+
+    block2:
+        v4.i8 = phi (1.i8 block1) (0.i8 block3);
+        return v4;
+
+    block3:
+        jump block2;
+
+    block4:
+        br_table v0 block5 (1.i1 block1) (0.i1 block3);
+
+    block5:
+        evm_invalid;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v1.i256 = call %tuple_single_passthrough 0.i256;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

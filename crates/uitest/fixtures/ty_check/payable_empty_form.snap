@@ -1,0 +1,10 @@
+---
+source: crates/uitest/tests/ty_check.rs
+expression: diags
+input_file: fixtures/ty_check/payable_empty_form.fe
+---
+error[13-0002]: invalid `#[payable]` attribute form
+  ┌─ payable_empty_form.fe:2:5
+  │
+2 │     #[payable()]
+  │     ^^^^^^^^^^^^ expected `#[payable]` with no arguments

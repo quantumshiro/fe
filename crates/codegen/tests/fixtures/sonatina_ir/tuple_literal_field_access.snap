@@ -1,0 +1,72 @@
+---
+source: crates/codegen/tests/sonatina_ir.rs
+expression: output
+input_file: crates/codegen/tests/fixtures/tuple_literal_field_access.fe
+---
+target = "evm-ethereum-osaka"
+
+type @__fe_obj_tuple_0 = {i256, i256};
+type @__fe_obj_tuple_1 = {i256, @__fe_obj_tuple_0};
+
+func private %tuple_literal_field_access() -> i256 {
+    block0:
+        v2.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v4.objref<i256> = obj.proj v2 0.i256;
+        obj.store v4 1.i256;
+        v5.objref<i256> = obj.proj v2 1.i256;
+        obj.store v5 2.i256;
+        v6.objref<i256> = obj.proj v2 1.i256;
+        v7.i256 = obj.load v6;
+        return v7;
+}
+
+func private %tuple_literal_nested_access() -> i256 {
+    block0:
+        v3.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v5.objref<i256> = obj.proj v3 0.i256;
+        obj.store v5 2.i256;
+        v6.objref<i256> = obj.proj v3 1.i256;
+        obj.store v6 3.i256;
+        v7.objref<@__fe_obj_tuple_1> = obj.alloc @__fe_obj_tuple_1;
+        v8.objref<i256> = obj.proj v7 0.i256;
+        obj.store v8 1.i256;
+        v9.objref<i256> = obj.proj v3 0.i256;
+        v10.i256 = obj.load v9;
+        v11.objref<@__fe_obj_tuple_0> = obj.proj v7 1.i256;
+        v12.objref<i256> = obj.proj v11 0.i256;
+        obj.store v12 v10;
+        v13.objref<i256> = obj.proj v3 1.i256;
+        v14.i256 = obj.load v13;
+        v15.objref<@__fe_obj_tuple_0> = obj.proj v7 1.i256;
+        v16.objref<i256> = obj.proj v15 1.i256;
+        obj.store v16 v14;
+        v17.objref<@__fe_obj_tuple_0> = obj.proj v7 1.i256;
+        v18.objref<i256> = obj.proj v17 0.i256;
+        v19.i256 = obj.load v18;
+        return v19;
+}
+
+func private %tuple_literal_struct_chain() -> i256 {
+    block0:
+        v2.objref<@__fe_obj_tuple_0> = obj.alloc @__fe_obj_tuple_0;
+        v4.objref<i256> = obj.proj v2 0.i256;
+        obj.store v4 1.i256;
+        v5.objref<i256> = obj.proj v2 1.i256;
+        obj.store v5 2.i256;
+        v6.objref<i256> = obj.proj v2 1.i256;
+        v7.i256 = obj.load v6;
+        return v7;
+}
+
+func private %__fe_sonatina_entry() {
+    block0:
+        v0.i256 = call %tuple_literal_field_access;
+        evm_stop;
+}
+
+
+object @Contract {
+    section runtime {
+        entry %__fe_sonatina_entry;
+    }
+}

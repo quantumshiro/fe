@@ -1,0 +1,18 @@
+#[inline]
+fn hinted() -> u64 {
+    1
+}
+
+#[inline(always)]
+fn forced() -> u64 {
+    hinted()
+}
+
+#[inline(never)]
+fn blocked() -> u64 {
+    forced()
+}
+
+pub fn caller() -> u64 {
+    blocked()
+}

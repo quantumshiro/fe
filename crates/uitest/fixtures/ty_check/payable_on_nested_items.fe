@@ -1,0 +1,21 @@
+struct Foo {
+    #[payable]
+    x: u256,
+}
+
+enum Bar {
+    #[payable]
+    A
+}
+
+impl Foo {
+    #[payable]
+    fn baz(self) -> u256 {
+        self.x
+    }
+}
+
+trait MyTrait {
+    #[payable]
+    fn do_thing(self)
+}

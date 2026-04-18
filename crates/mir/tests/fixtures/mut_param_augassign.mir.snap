@@ -1,0 +1,20 @@
+---
+source: crates/mir/tests/lowering_snapshots.rs
+expression: mir_output
+---
+fn bump(v0: mut u8) -> ():
+  bb0:
+    v1: u8 = load mem[v0].*
+    v2: u8 = checked_add<u8>(v1, 1)
+    store mem[v0].* = v2
+    v3: u8 = load mem[v0].*
+    v4: u8 = checked_sub<u8>(v3, 1)
+    store mem[v0].* = v4
+    ret
+
+fn mut_param_augassign() -> u8:
+  bb0:
+    v0: u8 = 7
+    eval bump(&mem[place_root(v0)])
+    v1: u8 = load mem[place_root(v0)]
+    ret v1

@@ -1,18 +1,37 @@
 use thin_vec::ThinVec;
 
 use super::{
-    canonical::Canonical,
+    assoc_const::AssocConstUse,
+    binder::Binder,
+    const_expr::ConstExpr,
+    const_ty::{
+        CallableInputLayoutHoleOrigin, ConstTyData, const_ty_from_assoc_const_use,
+        normalize_const_tys_for_comparison,
+    },
+    ctfe::instantiate_typed_body,
     diagnostics::{ImplDiag, TyDiagCollection},
-    fold::{AssocTySubst, TyFoldable},
+    effects::{
+        EffectKeyKind, normalize_effect_identity_trait, normalize_effect_identity_ty,
+        place_effect_provider_param_index_map,
+    },
+    fold::{AssocTySubst, TyFoldable, TyFolder},
+    layout_holes::{
+        alpha_rename_hidden_layout_placeholders, callable_input_layout_bindings_by_origin,
+    },
     normalize::normalize_ty,
     trait_def::TraitInstId,
     trait_resolution::{
-        GoalSatisfiability, constraint::collect_func_def_constraints, is_goal_satisfiable,
+        GoalSatisfiability, PredicateListId, TraitSolveCx,
+        constraint::collect_func_def_constraints, is_goal_satisfiable,
     },
-    ty_def::TyId,
+    ty_check::{ConstRef, check_anon_const_body},
+    ty_def::{InvalidCause, TyData, TyId},
 };
 use crate::analysis::HirAnalysisDb;
-use crate::hir_def::CallableDef;
+use crate::hir_def::{CallableDef, Expr, Partial, PathId, PathKind, scope_graph::ScopeId};
+use rustc_hash::FxHashMap;
+
+type ParamSubstMap<'db> = FxHashMap<(ScopeId<'db>, usize), TyId<'db>>;
 
 /// Compares the implementation method with the trait method to ensure they
 /// match.
@@ -61,18 +80,13 @@ pub(super) fn compare_impl_method<'db>(
     // method with the trait method.
     let mut err = !compare_arg_label(db, impl_m, trait_m, sink);
 
-    let map_to_impl: Vec<_> = trait_inst
-        .args(db)
-        .iter()
-        .chain(impl_m.explicit_params(db).iter())
-        .copied()
-        .collect();
-    err |= !compare_ty(db, impl_m, trait_m, &map_to_impl, trait_inst, sink);
+    let param_subst = trait_to_impl_param_subst(db, impl_m, trait_m, trait_inst);
+    err |= !compare_ty(db, impl_m, trait_m, &param_subst, trait_inst, sink);
     if err {
         return;
     }
 
-    compare_constraints(db, impl_m, trait_m, &map_to_impl, sink);
+    compare_constraints(db, impl_m, trait_m, &param_subst, sink);
 }
 
 /// Checks if the number of generic parameters of the implemented method is the
@@ -191,7 +205,7 @@ fn compare_ty<'db>(
     db: &'db dyn HirAnalysisDb,
     impl_m: CallableDef<'db>,
     trait_m: CallableDef<'db>,
-    map_to_impl: &[TyId<'db>],
+    param_subst: &ParamSubstMap<'db>,
     trait_inst: TraitInstId<'db>,
     sink: &mut Vec<TyDiagCollection<'db>>,
 ) -> bool {
@@ -200,7 +214,16 @@ fn compare_ty<'db>(
     let trait_m_arg_tys = trait_m.arg_tys(db);
 
     let mut substituter = AssocTySubst::new(trait_inst);
-    let assumptions = collect_func_def_constraints(db, impl_m, true).instantiate_identity();
+    let impl_assumptions = collect_func_def_constraints(db, impl_m, true).instantiate_identity();
+    let trait_assumptions = instantiate_with_partial_map(
+        db,
+        collect_func_def_constraints(db, trait_m, true),
+        param_subst,
+    );
+    let compare_assumptions = impl_assumptions
+        .merge(db, trait_assumptions)
+        .extend_all_bounds(db);
+    let trait_scope = impl_m.scope();
 
     for (idx, (trait_m_ty, impl_m_ty)) in trait_m_arg_tys
         .iter()
@@ -208,7 +231,7 @@ fn compare_ty<'db>(
         .enumerate()
     {
         // 1) Instantiate trait method's type params into the impl's generics
-        let trait_m_ty = trait_m_ty.instantiate(db, map_to_impl);
+        let trait_m_ty = instantiate_with_partial_map(db, *trait_m_ty, param_subst);
         if trait_m_ty.has_invalid(db) {
             continue;
         }
@@ -219,8 +242,29 @@ fn compare_ty<'db>(
 
         // 3) Normalize both types to resolve any further nested associated types.
         let trait_m_ty_normalized =
-            normalize_ty(db, trait_m_ty_substituted, impl_m.scope(), assumptions);
-        let impl_m_ty_normalized = normalize_ty(db, impl_m_ty, impl_m.scope(), assumptions);
+            normalize_ty(db, trait_m_ty_substituted, trait_scope, compare_assumptions);
+        let impl_m_ty_normalized = normalize_ty(db, impl_m_ty, trait_scope, compare_assumptions);
+        let trait_m_ty_normalized = normalize_compare_assoc_consts(
+            db,
+            trait_m_ty_normalized,
+            trait_scope,
+            compare_assumptions,
+            trait_inst,
+            true,
+        );
+        let impl_m_ty_normalized = normalize_compare_assoc_consts(
+            db,
+            impl_m_ty_normalized,
+            trait_scope,
+            compare_assumptions,
+            trait_inst,
+            false,
+        );
+        let trait_m_ty_normalized = alpha_rename_hidden_layout_placeholders(
+            db,
+            trait_m_ty_normalized,
+            impl_m_ty_normalized,
+        );
 
         // 4) Compare for equality
         if !impl_m_ty.has_invalid(db) && trait_m_ty_normalized != impl_m_ty_normalized {
@@ -239,13 +283,39 @@ fn compare_ty<'db>(
     }
 
     let impl_m_ret_ty = impl_m.ret_ty(db).instantiate_identity();
-    let trait_m_ret_ty = trait_m.ret_ty(db).instantiate(db, map_to_impl);
+    let trait_m_ret_ty = instantiate_with_partial_map(db, trait_m.ret_ty(db), param_subst);
 
     // Substitute and normalize the return type as well.
     let trait_m_ret_ty_substituted = trait_m_ret_ty.fold_with(db, &mut substituter);
-    let trait_m_ret_ty_normalized =
-        normalize_ty(db, trait_m_ret_ty_substituted, impl_m.scope(), assumptions);
-    let impl_m_ret_ty_normalized = normalize_ty(db, impl_m_ret_ty, impl_m.scope(), assumptions);
+    let trait_m_ret_ty_normalized = normalize_ty(
+        db,
+        trait_m_ret_ty_substituted,
+        trait_scope,
+        compare_assumptions,
+    );
+    let impl_m_ret_ty_normalized =
+        normalize_ty(db, impl_m_ret_ty, trait_scope, compare_assumptions);
+    let trait_m_ret_ty_normalized = normalize_compare_assoc_consts(
+        db,
+        trait_m_ret_ty_normalized,
+        trait_scope,
+        compare_assumptions,
+        trait_inst,
+        true,
+    );
+    let impl_m_ret_ty_normalized = normalize_compare_assoc_consts(
+        db,
+        impl_m_ret_ty_normalized,
+        trait_scope,
+        compare_assumptions,
+        trait_inst,
+        false,
+    );
+    let trait_m_ret_ty_normalized = alpha_rename_hidden_layout_placeholders(
+        db,
+        trait_m_ret_ty_normalized,
+        impl_m_ret_ty_normalized,
+    );
 
     if !impl_m_ret_ty.has_invalid(db)
         && !trait_m_ret_ty.has_invalid(db)
@@ -267,6 +337,486 @@ fn compare_ty<'db>(
     !err
 }
 
+fn param_owner_and_idx<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ty: TyId<'db>,
+) -> Option<(ScopeId<'db>, usize)> {
+    match ty.data(db) {
+        TyData::TyParam(param) => Some((param.owner, param.idx)),
+        TyData::ConstTy(const_ty) => match const_ty.data(db) {
+            ConstTyData::TyParam(param, _) => Some((param.owner, param.idx)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn insert_param_mapping<'db>(
+    db: &'db dyn HirAnalysisDb,
+    out: &mut ParamSubstMap<'db>,
+    from: TyId<'db>,
+    to: TyId<'db>,
+) {
+    let Some(key) = param_owner_and_idx(db, from) else {
+        return;
+    };
+    out.insert(key, to);
+}
+
+fn trait_to_impl_param_subst<'db>(
+    db: &'db dyn HirAnalysisDb,
+    impl_m: CallableDef<'db>,
+    trait_m: CallableDef<'db>,
+    trait_inst: TraitInstId<'db>,
+) -> ParamSubstMap<'db> {
+    let mut out: ParamSubstMap<'db> = FxHashMap::default();
+
+    // Map inherited trait params (trait Self + trait generics) using the trait method's
+    // lowered param prefix. These are the TyIds that actually occur inside the method's
+    // signature and constraints.
+    let trait_inst_args = trait_inst.args(db);
+    let trait_m_params = trait_m.params(db);
+    let trait_def_params = trait_inst.def(db).params(db);
+    assert!(trait_m_params.len() >= trait_inst_args.len());
+    assert!(trait_def_params.len() >= trait_inst_args.len());
+    for (idx, &arg) in trait_inst_args.iter().enumerate() {
+        if let Some(&trait_param) = trait_m_params.get(idx) {
+            insert_param_mapping(db, &mut out, trait_param, arg);
+        }
+        if let Some(&trait_param) = trait_def_params.get(idx) {
+            insert_param_mapping(db, &mut out, trait_param, arg);
+        }
+    }
+
+    // Map explicit method generics by identity.
+    for (&trait_param, &impl_param) in trait_m
+        .explicit_params(db)
+        .iter()
+        .zip(impl_m.explicit_params(db).iter())
+    {
+        insert_param_mapping(db, &mut out, trait_param, impl_param);
+    }
+
+    let implicit_params_by_origin = |method| {
+        callable_input_layout_bindings_by_origin(db, method)
+            .into_iter()
+            .map(|(origin, bindings)| {
+                (
+                    origin,
+                    bindings
+                        .into_iter()
+                        .map(|(_, implicit_param)| implicit_param)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<FxHashMap<_, _>>()
+    };
+    let trait_layout = implicit_params_by_origin(trait_m);
+    let impl_layout = implicit_params_by_origin(impl_m);
+
+    // Map receiver/value-param layout implicit const params by stable origin.
+    for (&origin, trait_params) in &trait_layout {
+        match origin {
+            CallableInputLayoutHoleOrigin::Receiver
+            | CallableInputLayoutHoleOrigin::ValueParam(_) => {
+                let Some(impl_params) = impl_layout.get(&origin) else {
+                    continue;
+                };
+                if trait_params.len() != impl_params.len() {
+                    continue;
+                }
+                for (&trait_p, &impl_p) in trait_params.iter().zip(impl_params.iter()) {
+                    insert_param_mapping(db, &mut out, trait_p, impl_p);
+                }
+            }
+            CallableInputLayoutHoleOrigin::Effect(_) => {}
+        }
+    }
+
+    map_effect_provider_params_by_identity(
+        db,
+        &mut out,
+        impl_m,
+        trait_m,
+        trait_inst,
+        &trait_layout,
+        &impl_layout,
+    );
+
+    out
+}
+
+#[derive(Clone, Copy)]
+struct EffectIdentity<'db> {
+    key_kind: EffectKeyKind,
+    key_ty: Option<TyId<'db>>,
+    key_trait: Option<TraitInstId<'db>>,
+    key_path: PathId<'db>,
+    is_mut: bool,
+}
+
+#[derive(Clone, Copy)]
+struct EffectProviderEntry<'db> {
+    effect_idx: usize,
+    provider_param: TyId<'db>,
+    identity: EffectIdentity<'db>,
+}
+
+fn map_effect_provider_params_by_identity<'db>(
+    db: &'db dyn HirAnalysisDb,
+    out: &mut ParamSubstMap<'db>,
+    impl_m: CallableDef<'db>,
+    trait_m: CallableDef<'db>,
+    trait_inst: TraitInstId<'db>,
+    trait_layout: &FxHashMap<CallableInputLayoutHoleOrigin, Vec<TyId<'db>>>,
+    impl_layout: &FxHashMap<CallableInputLayoutHoleOrigin, Vec<TyId<'db>>>,
+) {
+    let assumptions = collect_func_def_constraints(db, impl_m, true).instantiate_identity();
+    let trait_entries = collect_effect_provider_entries(
+        db,
+        trait_m,
+        Some(out),
+        trait_inst,
+        impl_m.scope(),
+        assumptions,
+    );
+    let impl_entries =
+        collect_effect_provider_entries(db, impl_m, None, trait_inst, impl_m.scope(), assumptions);
+    let mut used_impl_entries = vec![false; impl_entries.len()];
+
+    for trait_entry in trait_entries {
+        let Some((impl_idx, impl_entry)) =
+            impl_entries.iter().enumerate().find(|(idx, impl_entry)| {
+                !used_impl_entries[*idx]
+                    && effect_identity_matches(db, trait_entry.identity, impl_entry.identity)
+            })
+        else {
+            continue;
+        };
+        used_impl_entries[impl_idx] = true;
+
+        insert_param_mapping(
+            db,
+            out,
+            trait_entry.provider_param,
+            impl_entry.provider_param,
+        );
+
+        let trait_origin = CallableInputLayoutHoleOrigin::Effect(trait_entry.effect_idx);
+        let impl_origin = CallableInputLayoutHoleOrigin::Effect(impl_entry.effect_idx);
+        if let (Some(trait_params), Some(impl_params)) = (
+            trait_layout.get(&trait_origin),
+            impl_layout.get(&impl_origin),
+        ) {
+            if trait_params.len() != impl_params.len() {
+                continue;
+            }
+            for (&trait_p, &impl_p) in trait_params.iter().zip(impl_params.iter()) {
+                insert_param_mapping(db, out, trait_p, impl_p);
+            }
+        }
+    }
+}
+
+fn collect_effect_provider_entries<'db>(
+    db: &'db dyn HirAnalysisDb,
+    method: CallableDef<'db>,
+    param_subst: Option<&ParamSubstMap<'db>>,
+    trait_inst: TraitInstId<'db>,
+    scope: ScopeId<'db>,
+    assumptions: PredicateListId<'db>,
+) -> Vec<EffectProviderEntry<'db>> {
+    let CallableDef::Func(func) = method else {
+        return Vec::new();
+    };
+
+    let provider_param_map = place_effect_provider_param_index_map(db, func);
+    let params = method.params(db);
+
+    func.effect_bindings(db)
+        .iter()
+        .filter_map(|binding| {
+            let effect_idx = binding.binding_idx as usize;
+            let provider_param_idx = provider_param_map
+                .get(binding.binding_idx as usize)
+                .copied()
+                .flatten()?;
+            let provider_param = *params.get(provider_param_idx)?;
+            let key_ty = binding.key_ty.map(|key_ty| {
+                let key_ty = param_subst.map_or(key_ty, |subst| {
+                    instantiate_with_partial_map(db, Binder::bind(key_ty), subst)
+                });
+                normalize_effect_identity_ty(db, key_ty, scope, assumptions, Some(trait_inst))
+            });
+            let key_trait = binding.key_trait.map(|key_trait| {
+                let key_trait = param_subst.map_or(key_trait, |subst| {
+                    instantiate_with_partial_map(db, Binder::bind(key_trait), subst)
+                });
+                normalize_effect_identity_trait(db, key_trait, scope, assumptions, Some(trait_inst))
+            });
+            Some(EffectProviderEntry {
+                effect_idx,
+                provider_param,
+                identity: EffectIdentity {
+                    key_kind: binding.key_kind,
+                    key_ty,
+                    key_trait,
+                    key_path: binding.binding_path,
+                    is_mut: binding.is_mut,
+                },
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn trait_effect_key_matches_with<'db>(
+    db: &'db dyn HirAnalysisDb,
+    expected: TraitInstId<'db>,
+    actual: TraitInstId<'db>,
+    mut cmp: impl FnMut(TyId<'db>, TyId<'db>) -> bool,
+) -> bool {
+    if expected.def(db) != actual.def(db) || expected.args(db).len() != actual.args(db).len() {
+        return false;
+    }
+
+    let expected_assoc = expected.assoc_type_bindings(db);
+    let actual_assoc = actual.assoc_type_bindings(db);
+    if expected_assoc.len() != actual_assoc.len() {
+        return false;
+    }
+
+    for (&expected_arg, &actual_arg) in expected
+        .args(db)
+        .iter()
+        .skip(1)
+        .zip(actual.args(db).iter().skip(1))
+    {
+        let expected_arg = alpha_rename_hidden_layout_placeholders(db, expected_arg, actual_arg);
+        if !cmp(expected_arg, actual_arg) {
+            return false;
+        }
+    }
+
+    for (name, &expected_ty) in expected_assoc {
+        let Some(&actual_ty) = actual_assoc.get(name) else {
+            return false;
+        };
+        let expected_ty = alpha_rename_hidden_layout_placeholders(db, expected_ty, actual_ty);
+        if !cmp(expected_ty, actual_ty) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn effect_identity_matches<'db>(
+    db: &'db dyn HirAnalysisDb,
+    trait_identity: EffectIdentity<'db>,
+    impl_identity: EffectIdentity<'db>,
+) -> bool {
+    if trait_identity.key_kind != impl_identity.key_kind
+        || trait_identity.is_mut != impl_identity.is_mut
+    {
+        return false;
+    }
+
+    match trait_identity.key_kind {
+        EffectKeyKind::Type => match (trait_identity.key_ty, impl_identity.key_ty) {
+            (Some(trait_key_ty), Some(impl_key_ty)) => {
+                alpha_rename_hidden_layout_placeholders(db, trait_key_ty, impl_key_ty)
+                    == impl_key_ty
+            }
+            _ => false,
+        },
+        EffectKeyKind::Trait => match (trait_identity.key_trait, impl_identity.key_trait) {
+            (Some(trait_key_trait), Some(impl_key_trait)) => {
+                trait_effect_key_matches_with(db, trait_key_trait, impl_key_trait, |lhs, rhs| {
+                    lhs == rhs
+                })
+            }
+            _ => false,
+        },
+        EffectKeyKind::Other => trait_identity.key_path == impl_identity.key_path,
+    }
+}
+
+fn instantiate_with_partial_map<'db, T>(
+    db: &'db dyn HirAnalysisDb,
+    binder: Binder<T>,
+    param_subst: &ParamSubstMap<'db>,
+) -> T
+where
+    T: TyFoldable<'db>,
+{
+    binder.instantiate_with(db, |param_ty| {
+        let Some(key) = param_owner_and_idx(db, param_ty) else {
+            return param_ty;
+        };
+        param_subst.get(&key).copied().unwrap_or(param_ty)
+    })
+}
+
+fn normalize_compare_assoc_consts<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ty: TyId<'db>,
+    scope: crate::hir_def::scope_graph::ScopeId<'db>,
+    assumptions: super::trait_resolution::PredicateListId<'db>,
+    trait_inst: TraitInstId<'db>,
+    rebase_same_trait_uses: bool,
+) -> TyId<'db> {
+    fn is_identity_trait_inst<'db>(db: &'db dyn HirAnalysisDb, inst: TraitInstId<'db>) -> bool {
+        let trait_def = inst.def(db);
+        inst.assoc_type_bindings(db).is_empty() && inst.args(db) == trait_def.params(db)
+    }
+
+    let ty = normalize_const_tys_for_comparison(db, ty);
+
+    struct CompareAssocConstNormalizer<'db> {
+        scope: crate::hir_def::scope_graph::ScopeId<'db>,
+        assumptions: super::trait_resolution::PredicateListId<'db>,
+        trait_inst: TraitInstId<'db>,
+        rebase_same_trait_uses: bool,
+    }
+
+    impl<'db> CompareAssocConstNormalizer<'db> {
+        fn canonicalize_assoc_use(
+            &self,
+            db: &'db dyn HirAnalysisDb,
+            assoc: AssocConstUse<'db>,
+        ) -> AssocConstUse<'db> {
+            let assoc = assoc.with_env(self.scope, self.assumptions);
+            if self.rebase_same_trait_uses
+                && assoc.inst().def(db) == self.trait_inst.def(db)
+                && is_identity_trait_inst(db, assoc.inst())
+            {
+                assoc.with_inst(self.trait_inst)
+            } else {
+                assoc
+            }
+        }
+
+        fn normalize_assoc_const_ty(
+            &mut self,
+            db: &'db dyn HirAnalysisDb,
+            assoc: AssocConstUse<'db>,
+            expected_ty: TyId<'db>,
+        ) -> Option<TyId<'db>> {
+            let assoc = self.canonicalize_assoc_use(db, assoc);
+            let const_ty = const_ty_from_assoc_const_use(db, assoc)?;
+            let evaluated = const_ty.evaluate(db, Some(expected_ty));
+            if matches!(
+                evaluated.ty(db).invalid_cause(db),
+                Some(InvalidCause::ConstEvalUnsupported { .. })
+            ) {
+                return None;
+            }
+
+            Some(self.fold_ty(db, TyId::new(db, TyData::ConstTy(evaluated))))
+        }
+
+        fn normalize_unevaluated_assoc_const(
+            &mut self,
+            db: &'db dyn HirAnalysisDb,
+            body: crate::hir_def::Body<'db>,
+            expected_ty: TyId<'db>,
+            generic_args: &[TyId<'db>],
+        ) -> Option<TyId<'db>> {
+            let (diags, typed_body) = check_anon_const_body(db, body, expected_ty);
+            if !diags.is_empty() {
+                return None;
+            }
+
+            let typed_body = if generic_args.is_empty() {
+                typed_body.clone()
+            } else {
+                instantiate_typed_body(db, typed_body.clone(), generic_args)
+            };
+            let ConstRef::TraitConst(assoc) = typed_body.expr_const_ref(body.expr(db))? else {
+                return None;
+            };
+
+            self.normalize_assoc_const_ty(db, assoc, expected_ty)
+        }
+    }
+
+    impl<'db> TyFolder<'db> for CompareAssocConstNormalizer<'db> {
+        fn fold_ty(&mut self, db: &'db dyn HirAnalysisDb, ty: TyId<'db>) -> TyId<'db> {
+            let ty = ty.super_fold_with(db, self);
+            let TyData::ConstTy(const_ty) = ty.data(db) else {
+                return ty;
+            };
+
+            match const_ty.data(db) {
+                ConstTyData::Abstract(expr, expected_ty) => {
+                    let ConstExpr::TraitConst(assoc) = expr.data(db) else {
+                        return ty;
+                    };
+                    let assoc = self.canonicalize_assoc_use(db, *assoc);
+                    if let Some(ty) = self.normalize_assoc_const_ty(db, assoc, *expected_ty) {
+                        return ty;
+                    }
+                    let expr =
+                        super::const_expr::ConstExprId::new(db, ConstExpr::TraitConst(assoc));
+                    TyId::new(
+                        db,
+                        TyData::ConstTy(super::const_ty::ConstTyId::new(
+                            db,
+                            ConstTyData::Abstract(expr, *expected_ty),
+                        )),
+                    )
+                }
+                ConstTyData::UnEvaluated {
+                    body,
+                    ty: expected_ty,
+                    const_def,
+                    generic_args,
+                    ..
+                } => {
+                    if const_def.is_some() {
+                        return ty;
+                    }
+                    let Some(expected_ty) = *expected_ty else {
+                        return ty;
+                    };
+                    let expr = body.expr(db);
+                    let Partial::Present(Expr::Path(path)) = expr.data(db, *body) else {
+                        return ty;
+                    };
+                    let Some(path) = path.to_opt() else {
+                        return ty;
+                    };
+                    let Some(parent) = path.parent(db) else {
+                        return ty;
+                    };
+                    let PathKind::Ident {
+                        generic_args: path_generic_args,
+                        ..
+                    } = path.kind(db)
+                    else {
+                        return ty;
+                    };
+                    if !parent.is_self_ty(db) || !path_generic_args.is_empty(db) {
+                        return ty;
+                    }
+
+                    self.normalize_unevaluated_assoc_const(db, *body, expected_ty, generic_args)
+                        .unwrap_or(ty)
+                }
+                _ => ty,
+            }
+        }
+    }
+
+    let mut folder = CompareAssocConstNormalizer {
+        scope,
+        assumptions,
+        trait_inst,
+        rebase_same_trait_uses,
+    };
+    ty.fold_with(db, &mut folder)
+}
+
 /// Checks if the method constraints are stricter than the trait constraints.
 /// This check is performed by checking if the `impl_method` constraints are
 /// satisfied under the assumptions that is obtained from the `expected_method`
@@ -276,17 +826,22 @@ fn compare_constraints<'db>(
     db: &'db dyn HirAnalysisDb,
     impl_m: CallableDef<'db>,
     trait_m: CallableDef<'db>,
-    map_to_impl: &[TyId<'db>],
+    param_subst: &ParamSubstMap<'db>,
     sink: &mut Vec<TyDiagCollection<'db>>,
 ) -> bool {
     let impl_m_constraints = collect_func_def_constraints(db, impl_m, false).instantiate_identity();
-    let trait_m_constraints =
-        collect_func_def_constraints(db, trait_m, false).instantiate(db, map_to_impl);
+    let trait_m_constraints = instantiate_with_partial_map(
+        db,
+        collect_func_def_constraints(db, trait_m, false),
+        param_subst,
+    );
     let mut unsatisfied_goals = ThinVec::new();
     for &goal in impl_m_constraints.list(db) {
-        let canonical_goal = Canonical::new(db, goal);
-        let ingot = trait_m.ingot(db);
-        match is_goal_satisfiable(db, ingot, canonical_goal, trait_m_constraints) {
+        match is_goal_satisfiable(
+            db,
+            TraitSolveCx::new(db, trait_m.scope()).with_assumptions(trait_m_constraints),
+            goal,
+        ) {
             GoalSatisfiability::Satisfied(_) | GoalSatisfiability::ContainsInvalid => {}
             GoalSatisfiability::NeedsConfirmation(_) => unreachable!(),
             GoalSatisfiability::UnSat(_) => {

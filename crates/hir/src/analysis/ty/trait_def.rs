@@ -4,24 +4,27 @@ use crate::{
     analysis::ty::{
         method_cmp::compare_impl_method,
         trait_lower::collect_trait_impls,
-        trait_resolution::{GoalSatisfiability, PredicateListId},
+        trait_resolution::{GoalSatisfiability, PredicateListId, Selection},
     },
-    hir_def::{Func, HirIngot, IdentId, ImplTrait, Trait},
+    hir_def::{Contract, Func, HirIngot, IdentId, ImplTrait, Trait},
 };
 use common::{
     indexmap::{IndexMap, IndexSet},
-    ingot::Ingot,
+    ingot::{Ingot, IngotKind},
 };
 use rustc_hash::FxHashMap;
 use salsa::Update;
 
 use super::{
     binder::Binder,
-    canonical::{Canonical, Canonicalized},
+    canonical::Canonical,
     diagnostics::{ImplDiag, TyDiagCollection},
     fold::TyFoldable as _,
     trait_lower::collect_implementor_methods,
-    trait_resolution::{constraint::collect_constraints, is_goal_satisfiable},
+    trait_resolution::{
+        TraitSolveCx, constraint::collect_constraints, is_goal_satisfiable,
+        normalize_trait_inst_preserving_validity,
+    },
     ty_def::TyId,
     unify::UnificationTable,
 };
@@ -33,32 +36,137 @@ pub(crate) fn ingot_trait_env<'db>(db: &'db dyn HirAnalysisDb, ingot: Ingot<'db>
     TraitEnv::collect(db, ingot)
 }
 
-/// Returns all implementors for the given trait inst.
+/// Returns all implementors for the given trait definition.
+///
+/// Note: this intentionally does **not** pre-filter implementors by unifying with a
+/// specific goal instance. Projection-heavy goals (e.g. involving associated type
+/// projections) often only become unifiable after normalization, and unification
+/// rejects unresolved associated types. The solver normalizes before unifying
+/// candidates, so any filtering here must be an over-approximation.
 #[salsa::tracked(return_ref)]
-pub(crate) fn impls_for_trait<'db>(
+pub(crate) fn impls_for_trait_def<'db>(
     db: &'db dyn HirAnalysisDb,
     ingot: Ingot<'db>,
+    trait_def: Trait<'db>,
+) -> Vec<Binder<ImplementorId<'db>>> {
+    let env = ingot_trait_env(db, ingot);
+    let mut out = env.impls.get(&trait_def).cloned().unwrap_or_default();
+
+    if is_std_evm_contract_trait_def(db, trait_def) {
+        out.extend(contract_virtual_impls(db, ingot).iter().copied());
+    }
+
+    out
+}
+
+/// Returns all implementors for the given trait inst, searching across a
+/// deterministic set of ingots.
+///
+/// This is used to avoid "pick an ingot" footguns where impl lookup depends on
+/// the caller's current module ingot and can miss impls that live in either:
+/// - the trait's ingot, or
+/// - the implementor type's ingot.
+#[salsa::tracked(return_ref)]
+pub(crate) fn impls_for_trait_in_ingots<'db>(
+    db: &'db dyn HirAnalysisDb,
+    primary: Ingot<'db>,
+    secondary: Option<Ingot<'db>>,
     trait_: Canonical<TraitInstId<'db>>,
 ) -> Vec<Binder<ImplementorId<'db>>> {
     let mut table = UnificationTable::new(db);
-    let trait_ = trait_.extract_identity(&mut table);
+    let trait_def = trait_.extract_identity(&mut table).def(db);
+    let mut dedup: IndexSet<Binder<ImplementorId<'db>>> = IndexSet::default();
+    dedup.extend(impls_for_trait_def(db, primary, trait_def).iter().copied());
+    if let Some(secondary) = secondary {
+        dedup.extend(
+            impls_for_trait_def(db, secondary, trait_def)
+                .iter()
+                .copied(),
+        );
+    }
+    dedup.into_iter().collect()
+}
 
-    let env = ingot_trait_env(db, ingot);
-    let Some(impls) = env.impls.get(&trait_.def(db)) else {
-        return vec![];
+fn is_std_evm_contract_trait_def<'db>(db: &'db dyn HirAnalysisDb, trait_def: Trait<'db>) -> bool {
+    let Some(name) = trait_def.name(db).to_opt() else {
+        return false;
+    };
+    if name.data(db) != "Contract" {
+        return false;
+    }
+    if trait_def.top_mod(db).ingot(db).kind(db) != IngotKind::Std {
+        return false;
+    }
+    true
+}
+
+#[salsa::tracked(return_ref)]
+fn contract_virtual_impls<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ingot: Ingot<'db>,
+) -> Vec<Binder<ImplementorId<'db>>> {
+    let Some(contract_trait) = std_evm_contract_trait_def(db, ingot) else {
+        return Vec::new();
     };
 
-    impls
-        .iter()
-        .filter(|impl_| {
-            let snapshot = table.snapshot();
-            let inst = table.instantiate_with_fresh_vars(**impl_);
-            let is_ok = table.unify(inst.trait_(db), trait_).is_ok();
-            table.rollback_to(snapshot);
-            is_ok
-        })
-        .cloned()
-        .collect()
+    let init_args_ident = IdentId::new(db, "InitArgs".to_string());
+
+    let mut out = Vec::new();
+    for top_mod in ingot.all_modules(db) {
+        for &contract in top_mod.all_contracts(db).iter() {
+            let self_ty = TyId::contract(db, contract);
+            let trait_inst = TraitInstId::new(db, contract_trait, vec![self_ty], IndexMap::new());
+
+            let init_args_ty = contract.init_args_ty(db);
+            let mut types = IndexMap::new();
+            types.insert(init_args_ident, init_args_ty);
+
+            let implementor = ImplementorId::new(
+                db,
+                trait_inst,
+                Vec::new(),
+                types,
+                ImplementorOrigin::VirtualContract(contract),
+            );
+            out.push(Binder::bind(implementor));
+        }
+    }
+
+    out
+}
+
+#[salsa::tracked]
+fn std_evm_contract_trait_def<'db>(
+    db: &'db dyn HirAnalysisDb,
+    ingot: Ingot<'db>,
+) -> Option<Trait<'db>> {
+    use crate::analysis::name_resolution::resolve_path;
+    use common::ingot::IngotKind;
+
+    let scope = ingot.root_mod(db).scope();
+    let assumptions = PredicateListId::empty_list(db);
+
+    let std_root = if ingot.kind(db) == IngotKind::Std {
+        IdentId::make_ingot(db)
+    } else {
+        IdentId::new(db, "std".to_string())
+    };
+
+    let path = crate::hir_def::PathId::from_ident(db, std_root)
+        .push_ident(db, IdentId::new(db, "evm".to_string()))
+        .push_ident(db, IdentId::new(db, "Contract".to_string()));
+
+    match resolve_path(db, path, scope, assumptions, false).ok()? {
+        crate::analysis::name_resolution::PathRes::Trait(inst) => Some(inst.def(db)),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Update)]
+pub(crate) enum ImplementorOrigin<'db> {
+    Hir(ImplTrait<'db>),
+    VirtualContract(Contract<'db>),
+    Assumption,
 }
 
 fn ingot_trait_env_cycle_initial<'db>(
@@ -83,59 +191,35 @@ fn ingot_trait_env_cycle_recover<'db>(
     salsa::CycleRecoveryAction::Iterate
 }
 
-/// Resolves the concrete HIR function that implements `method` for the given trait inst.
-pub fn resolve_trait_method<'db>(
-    db: &'db dyn HirAnalysisDb,
-    inst: TraitInstId<'db>,
-    method: IdentId<'db>,
-) -> Option<Func<'db>> {
-    let canonical = Canonical::new(db, inst);
-
-    // Search Self's ingot, and the trait's ingot.
-    for ingot in [inst.self_ty(db).ingot(db), Some(inst.def(db).ingot(db))] {
-        let Some(ingot) = ingot else { continue };
-
-        for implementor in impls_for_trait(db, ingot, canonical) {
-            let implementor = implementor.instantiate_identity();
-            if let Some(&func) = implementor.methods(db).get(&method) {
-                return Some(func);
-            }
-        }
-    }
-    None
-}
-
 /// Resolves the concrete HIR function that implements `method` for the given
 /// trait instance, returning both the function and the impl's instantiated
 /// generic arguments.
 pub fn resolve_trait_method_instance<'db>(
     db: &'db dyn HirAnalysisDb,
+    solve_cx: TraitSolveCx<'db>,
     inst: TraitInstId<'db>,
     method: IdentId<'db>,
 ) -> Option<(Func<'db>, Vec<TyId<'db>>)> {
-    let canonical = Canonical::new(db, inst);
+    let assumptions = solve_cx.assumptions();
+    let norm_scope = solve_cx.normalization_scope_for_trait_inst(db, inst);
+    let inst = normalize_trait_inst_preserving_validity(db, inst, norm_scope, assumptions);
 
-    // Search Self's ingot, and the trait's ingot.
-    for ingot in [inst.self_ty(db).ingot(db), Some(inst.def(db).ingot(db))] {
-        let Some(ingot) = ingot else { continue };
+    let implementor = match solve_cx.select_impl(db, inst) {
+        Selection::Unique(implementor) => implementor,
+        Selection::Ambiguous(_ambiguous) => return None,
+        Selection::NotFound => return None,
+    };
+    let &func = implementor.methods(db).get(&method)?;
 
-        for implementor in impls_for_trait(db, ingot, canonical) {
-            let mut table = UnificationTable::new(db);
-            let implementor = table.instantiate_with_fresh_vars(*implementor);
-            if table.unify(implementor.trait_(db), inst).is_err() {
-                continue;
-            }
-            if let Some(func) = implementor.methods(db).get(&method) {
-                let impl_args = implementor
-                    .params(db)
-                    .iter()
-                    .map(|&ty| ty.fold_with(db, &mut table))
-                    .collect::<Vec<_>>();
-                return Some((*func, impl_args));
-            }
-        }
-    }
-    None
+    let mut table = UnificationTable::new(db);
+    let implementor = table.instantiate_with_fresh_vars(Binder::bind(implementor));
+    table.unify(implementor.trait_inst(db), inst).ok()?;
+    let impl_args = implementor
+        .params(db)
+        .iter()
+        .map(|&ty| ty.fold_with(db, &mut table))
+        .collect();
+    Some((func, impl_args))
 }
 
 /// Returns all implementors for the given `ty` that satisfy the given assumptions.
@@ -149,6 +233,7 @@ pub(crate) fn impls_for_ty_with_constraints<'db>(
     let ty = ty.extract_identity(&mut table);
 
     let env = ingot_trait_env(db, ingot);
+    let solve_cx = TraitSolveCx::new(db, ingot.root_mod(db).scope()).with_assumptions(assumptions);
     if ty.has_invalid(db) {
         return vec![];
     }
@@ -164,10 +249,15 @@ pub(crate) fn impls_for_ty_with_constraints<'db>(
         table.rollback_to(snapshot);
     }
 
-    cands
+    let mut raw_impls: Vec<Binder<ImplementorId<'db>>> =
+        cands.into_iter().flatten().copied().collect();
+
+    if ty.as_contract(db).is_some() {
+        raw_impls.extend(contract_virtual_impls(db, ingot).iter().copied());
+    }
+
+    raw_impls
         .into_iter()
-        .flatten()
-        .copied()
         .filter(|impl_| {
             let snapshot = table.snapshot();
 
@@ -185,8 +275,7 @@ pub(crate) fn impls_for_ty_with_constraints<'db>(
                 }
 
                 for &constraint in impl_constraints.list(db) {
-                    let constraint = Canonicalized::new(db, constraint);
-                    match is_goal_satisfiable(db, ingot, constraint.value, assumptions) {
+                    match is_goal_satisfiable(db, solve_cx, constraint) {
                         GoalSatisfiability::UnSat(_) => {
                             table.rollback_to(snapshot);
                             return false;
@@ -229,10 +318,15 @@ pub(crate) fn impls_for_ty<'db>(
         table.rollback_to(snapshot);
     }
 
-    cands
+    let mut raw_impls: Vec<Binder<ImplementorId<'db>>> =
+        cands.into_iter().flatten().copied().collect();
+
+    if ty.as_contract(db).is_some() {
+        raw_impls.extend(contract_virtual_impls(db, ingot).iter().copied());
+    }
+
+    raw_impls
         .into_iter()
-        .flatten()
-        .copied()
         .filter(|impl_| {
             let snapshot = table.snapshot();
 
@@ -251,44 +345,53 @@ pub(crate) fn impls_for_ty<'db>(
 /// Looks up the HIR body for an associated const defined in the selected trait impl, if unique.
 pub fn assoc_const_body_for_trait_inst<'db>(
     db: &'db dyn HirAnalysisDb,
+    solve_cx: TraitSolveCx<'db>,
     inst: TraitInstId<'db>,
     const_name: IdentId<'db>,
 ) -> Option<crate::hir_def::Body<'db>> {
-    let mut matches = Vec::new();
-    let canonical_self_ty = Canonical::new(db, inst.self_ty(db));
+    assoc_const_body_and_impl_args_for_trait_inst(db, solve_cx, inst, const_name)
+        .map(|(body, _)| body)
+}
 
-    for ingot in [inst.self_ty(db).ingot(db), Some(inst.def(db).ingot(db))] {
-        let Some(ingot) = ingot else { continue };
-        for implementor in impls_for_ty(db, ingot, canonical_self_ty).iter() {
-            let implementor = implementor.skip_binder();
-            if implementor.trait_def(db) != inst.def(db) {
-                continue;
-            }
+/// Looks up the HIR body for an associated const defined in the selected trait impl, if unique,
+/// returning both the body and the impl's instantiated generic arguments.
+///
+/// The returned generic args correspond to the impl's own generic parameters (not the trait's),
+/// and are suitable for CTFE/type checking of the impl const body.
+pub(super) fn assoc_const_body_and_impl_args_for_trait_inst<'db>(
+    db: &'db dyn HirAnalysisDb,
+    solve_cx: TraitSolveCx<'db>,
+    inst: TraitInstId<'db>,
+    const_name: IdentId<'db>,
+) -> Option<(crate::hir_def::Body<'db>, Vec<TyId<'db>>)> {
+    let assumptions = solve_cx.assumptions();
+    let norm_scope = solve_cx.normalization_scope_for_trait_inst(db, inst);
+    let inst = normalize_trait_inst_preserving_validity(db, inst, norm_scope, assumptions);
 
-            if implementor.trait_(db).args(db) != inst.args(db) {
-                continue;
-            }
+    let implementor = match solve_cx.select_impl(db, inst) {
+        Selection::Unique(implementor) => implementor,
+        Selection::Ambiguous(_ambiguous) => return None,
+        Selection::NotFound => return None,
+    };
+    let hir_impl = match implementor.origin(db) {
+        ImplementorOrigin::Hir(impl_trait) => impl_trait,
+        ImplementorOrigin::VirtualContract(_) | ImplementorOrigin::Assumption => return None,
+    };
+    let def = hir_impl
+        .hir_consts(db)
+        .iter()
+        .find(|c| c.name.to_opt() == Some(const_name))?;
+    let body = def.value.to_opt()?;
 
-            let hir_impl = implementor.hir_impl_trait(db);
-            let Some(def) = hir_impl
-                .hir_consts(db)
-                .iter()
-                .find(|c| c.name.to_opt() == Some(const_name))
-            else {
-                continue;
-            };
-
-            let Some(body) = def.value.to_opt() else {
-                continue;
-            };
-
-            matches.push(body);
-            if matches.len() > 1 {
-                return None;
-            }
-        }
-    }
-    matches.pop()
+    let mut table = UnificationTable::new(db);
+    let implementor = table.instantiate_with_fresh_vars(Binder::bind(implementor));
+    table.unify(implementor.trait_inst(db), inst).ok()?;
+    let impl_args = implementor
+        .params(db)
+        .iter()
+        .map(|&ty| ty.fold_with(db, &mut table))
+        .collect();
+    Some((body, impl_args))
 }
 
 /// Represents the trait environment of an ingot, which maintain all trait
@@ -358,11 +461,37 @@ pub(crate) struct ImplementorId<'db> {
     #[return_ref]
     pub(crate) types: IndexMap<IdentId<'db>, TyId<'db>>,
 
-    /// The original hir.
-    pub(crate) hir_impl_trait: ImplTrait<'db>,
+    pub(crate) origin: ImplementorOrigin<'db>,
 }
 
 impl<'db> ImplementorId<'db> {
+    pub(crate) fn assumption(db: &'db dyn HirAnalysisDb, inst: TraitInstId<'db>) -> Self {
+        ImplementorId::new(
+            db,
+            inst,
+            Vec::new(),
+            IndexMap::new(),
+            ImplementorOrigin::Assumption,
+        )
+    }
+
+    pub(crate) fn hir_impl_trait(self, db: &'db dyn HirAnalysisDb) -> ImplTrait<'db> {
+        match self.origin(db) {
+            ImplementorOrigin::Hir(impl_trait) => impl_trait,
+            ImplementorOrigin::VirtualContract(contract) => panic!(
+                "requested HIR impl-trait for virtual implementor (contract={})",
+                contract
+                    .name(db)
+                    .to_opt()
+                    .map(|n| n.data(db).to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string())
+            ),
+            ImplementorOrigin::Assumption => {
+                panic!("requested HIR impl-trait for assumption-based implementor")
+            }
+        }
+    }
+
     /// Associated type defined in this impl, if any.
     pub(crate) fn assoc_ty(
         self,
@@ -382,10 +511,37 @@ impl<'db> ImplementorId<'db> {
         self.trait_(db).self_ty(db)
     }
 
+    /// Trait instance realized by this impl, including its associated type definitions.
+    pub(crate) fn trait_inst(self, db: &'db dyn HirAnalysisDb) -> TraitInstId<'db> {
+        let trait_inst = self.trait_(db);
+        if self.types(db).is_empty() {
+            return trait_inst;
+        }
+
+        let mut assoc_type_bindings = trait_inst.assoc_type_bindings(db).clone();
+        for (name, ty) in self.types(db) {
+            assoc_type_bindings.insert(*name, *ty);
+        }
+
+        TraitInstId::new(
+            db,
+            trait_inst.def(db),
+            trait_inst.args(db).to_vec(),
+            assoc_type_bindings,
+        )
+    }
+
     /// Returns the constraints that the implementor requires when the
     /// implementation is selected.
     pub(crate) fn constraints(self, db: &'db dyn HirAnalysisDb) -> PredicateListId<'db> {
-        collect_constraints(db, self.hir_impl_trait(db).into()).instantiate(db, self.params(db))
+        match self.origin(db) {
+            ImplementorOrigin::Hir(impl_trait) => {
+                collect_constraints(db, impl_trait.into()).instantiate(db, self.params(db))
+            }
+            ImplementorOrigin::VirtualContract(_) | ImplementorOrigin::Assumption => {
+                PredicateListId::empty_list(db)
+            }
+        }
     }
 
     /// Method map for this impl, keyed by name.
@@ -401,6 +557,9 @@ impl<'db> ImplementorId<'db> {
         self,
         db: &'db dyn HirAnalysisDb,
     ) -> Vec<TyDiagCollection<'db>> {
+        if !matches!(self.origin(db), ImplementorOrigin::Hir(_)) {
+            return Vec::new();
+        }
         let mut diags = vec![];
         let impl_methods = self.methods(db);
         let hir_trait = self.trait_def(db);
@@ -471,16 +630,16 @@ pub(crate) fn does_impl_trait_conflict<'db>(
         return true;
     }
 
-    let ingot = a.trait_def(db).ingot(db);
-
     // Check if all constraints from both implementations would be satisfiable
     // when the types are unified.
     let merged_constraints = a_constraints.merge(db, b_constraints);
+    let solve_cx = TraitSolveCx::new(db, a.trait_def(db).scope())
+        .with_assumptions(PredicateListId::empty_list(db));
 
     for &constraint in merged_constraints.list(db) {
-        let constraint = Canonicalized::new(db, constraint.fold_with(db, &mut table));
+        let constraint = constraint.fold_with(db, &mut table);
 
-        match is_goal_satisfiable(db, ingot, constraint.value, PredicateListId::empty_list(db)) {
+        match is_goal_satisfiable(db, solve_cx, constraint) {
             GoalSatisfiability::UnSat(_) | GoalSatisfiability::ContainsInvalid => {
                 return false;
             }
@@ -511,6 +670,10 @@ pub struct TraitInstId<'db> {
 impl<'db> TraitInstId<'db> {
     pub fn def(self, db: &'db dyn HirAnalysisDb) -> Trait<'db> {
         self.key(db)
+    }
+
+    pub fn new_simple(db: &'db dyn HirAnalysisDb, def: Trait<'db>, args: Vec<TyId<'db>>) -> Self {
+        Self::new(db, def, args, IndexMap::new())
     }
 
     pub fn with_fresh_vars(

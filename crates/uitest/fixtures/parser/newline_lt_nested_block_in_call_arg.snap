@@ -1,0 +1,17 @@
+---
+source: crates/uitest/tests/parser.rs
+assertion_line: 26
+expression: diags
+input_file: fixtures/parser/newline_lt_nested_block_in_call_arg.fe
+---
+error[1-0001]: line-start `<` is ambiguous; use parentheses to disambiguate
+  ┌─ newline_lt_nested_block_in_call_arg.fe:8:13
+  │
+8 │             < y
+  │             ^ line-start `<` is ambiguous; use parentheses to disambiguate
+
+error[1-0001]: unexpected syntax while parsing block
+  ┌─ newline_lt_nested_block_in_call_arg.fe:8:15
+  │
+8 │             < y
+  │               ^ unexpected

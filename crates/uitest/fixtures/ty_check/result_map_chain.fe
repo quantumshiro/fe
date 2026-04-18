@@ -1,0 +1,25 @@
+use core::functional::Fn
+use core::result::Result::{self, Ok}
+
+struct Wrap {
+    pub val: u256,
+}
+
+struct ToWrap {}
+impl Fn<u256, Wrap> for ToWrap {
+    fn call(self, _ x: own u256) -> Wrap {
+        Wrap { val: x }
+    }
+}
+
+struct FromWrap {}
+impl Fn<Wrap, u256> for FromWrap {
+    fn call(self, _ w: own Wrap) -> u256 {
+        w.val
+    }
+}
+
+fn pipeline() -> u256 {
+    let r: Result<bool, u256> = Ok(42)
+    r.map(ToWrap{}).map(FromWrap{}).unwrap()
+}
